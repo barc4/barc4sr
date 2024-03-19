@@ -1143,38 +1143,6 @@ def read_spectra_spectrum(file_list: List[str]) -> Dict[str, Any]:
     
     return process_spectrum(flux, energy)
 
-#***********************************************************************************
-# potpourri
-#***********************************************************************************
-
-def generate_logarithmic_energy_values(emin: float, emax: float, resonant_energy: float, stepsize: float) -> np.ndarray:
-    """
-    Generate logarithmically spaced energy values within a given energy range.
-
-    Args:
-        emin (float): Lower energy range.
-        emax (float): Upper energy range.
-        resonant_energy (float): Resonant energy.
-        stepsize (float): Step size.
-
-    Returns:
-        np.ndarray: Array of energy values with logarithmic spacing.
-    """
-
-    # Calculate the number of steps for positive and negative energy values
-    n_steps_pos = np.ceil(np.log(emax / resonant_energy) / stepsize)
-    n_steps_neg = max(0, np.floor(np.log(emin / resonant_energy) / stepsize))
-
-    # Calculate the total number of steps
-    n_steps = int(n_steps_pos - n_steps_neg)
-    print(f"number of steps: {n_steps}")
-
-    # Generate the array of steps with logarithmic spacing
-    steps = np.linspace(n_steps_neg, n_steps_pos, n_steps + 1)
-
-    # Compute and return the array of energy values
-    return resonant_energy * np.exp(steps * stepsize)
-
 
 if __name__ == '__main__':
     print("This is the PowerCalculations auxiliary lib!")

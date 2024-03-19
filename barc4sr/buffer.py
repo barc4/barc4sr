@@ -131,17 +131,12 @@ def xoppy_calc_undulator_spectrum(ELECTRONENERGY=6.04,
   
     print("Undulator flux calculation using SRW. Please wait...")
     e, f = calc_undulator_spectrum_1d_srw(
-                    bl,
-                    photon_energy_min=PHOTONENERGYMIN,
-                    photon_energy_max=PHOTONENERGYMAX,
-                    photon_energy_points=PHOTONENERGYPOINTS,
-                    energy_sampling = 0,
-                    calculation = False,
-                    zero_emittance = False,
-                    magnetic_measurement=None,
-                    tabulated_undulator_mthd=0,
-                    electron_trajectory=False,
-                    parallel=False)
+                        bl,
+                        photon_energy_min=PHOTONENERGYMIN,
+                        photon_energy_max=PHOTONENERGYMAX,
+                        photon_energy_points=PHOTONENERGYPOINTS,
+                        zero_emittance=zero_emittance,
+                        )
     print("Done")
         
     return e, f
@@ -217,7 +212,6 @@ def calc_undulator_spectrum_1d_srw(bl,
     if calculation == 2:
         pass
     
-    return energy_array, intensity_array
 
 def set_electron_beam(bl: dict, zero_emittance: bool) -> srwlib.SRWLPartBeam:
     """
@@ -364,8 +358,40 @@ def interface_srwlibCalcElecFieldSR(bl, eBeam, magFldCnt, eTraj, energy_array,
 
     if parallel:
         pass
+        # num_cores = mp.cpu_count()
+        # dE = (energy_array[-1] - energy_array[0]) / num_cores
+        # energy_chunks = []
+        # for i in range(num_cores):
+        #     bffr = copy.copy(energy_array)
+        #     bffr = np.delete(bffr, bffr <= dE * (i))
+        #     if i + 1 != num_cores:
+        #         bffr = np.delete(bffr, bffr > dE * (i + 1))
+        #     energy_chunks.append(bffr)
+
+        # results = Parallel(n_jobs=num_cores)(delayed(core_srwlibCalcElecFieldSR)()
+        #                                      for list_pairs in energy_chunks)
+        # energy_array = []
+        # time_array = []
+        # energy_chunks = []
+        # k = 0
+        # for stuff in results:
+        #     energy_array.append(stuff[3][0])
+        #     time_array.append(stuff[4])
+        #     energy_chunks.append(len(stuff[3]))
+        #     if k == 0:
+        #         intensity = stuff[0]
+        #     else:
+        #         intensity = np.concatenate((intensity, stuff[0]), axis=0)
+        #     k+=1
+        # print(">>> ellapse time:")
+        # for ptime in range(len(time_array)):
+        #     print(f" Core {ptime+1}: {time_array[ptime]:.2f} s for {energy_chunks[ptime]} pts (E0 = {energy_array[ptime]:.1f} eV).")
+            
+        # hAxis = np.linspace(-bl['gapH'] / 2, bl['gapH'] / 2, h_slit_points)
+        # vAxis = np.linspace(-bl['gapV'] / 2, bl['gapV'] / 2, v_slit_points)
 
     else:
+        # intensity, hAxis, vAxis, energy_array, t
         results = core_srwlibCalcElecFieldSR(bl, 
                                              eBeam,
                                              magFldCnt, 
@@ -402,7 +428,31 @@ def core_srwlibCalcElecFieldSR(bl, eBeam, magFldCnt, eTraj, arPrecPar, energy_ar
 
     if parallel:
         pass
+        # for ie in range(energy_array.size):
+        #     try:
+        #         mesh = srwlib.SRWLRadMesh(energy_array[ie], energy_array[ie], 1,
+        #                                 hAxis[0], hAxis[-1], h_slit_points,
+        #                                 vAxis[0], vAxis[-1], v_slit_points, 
+        #                                 bl['distance'])
 
+        #         wfr = srwlib.SRWLWfr()
+        #         wfr.allocate(1, mesh.nx, mesh.ny)
+        #         wfr.mesh = mesh
+        #         wfr.partBeam = eBeam
+
+        #         srwlib.srwl.CalcElecFieldSR(wfr, eTraj, magFldCnt, arPrecPar)
+        #         mesh0 = wfr.mesh
+        #         arI0 = array.array('f', [0]*mesh0.nx*mesh0.ny) 
+        #         srwlib.srwl.CalcIntFromElecField(arI0, wfr, _inPol, _inIntType, _inDepType, energy_array[ie], 0, 0)
+        #         if _inDepType == 3:
+        #             data = np.ndarray(buffer=arI0, shape=(mesh0.ny, mesh0.nx), dtype=arI0.typecode)
+        #             for ix in range(hAxis.size):
+        #                 for iy in range(vAxis.size):
+        #                     intensity[ie, ix, iy,] = data[iy, ix]
+        #         else:
+        #             intensity = np.asarray
+        #     except:
+        #         print("Error running SRW")
     else:
         try:
             mesh = srwlib.SRWLRadMesh(energy_array[0], energy_array[-1], len(energy_array),

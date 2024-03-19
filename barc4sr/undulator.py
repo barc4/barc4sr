@@ -66,14 +66,6 @@ def read_magnetic_measurement(file_path: str) -> np.ndarray:
     return np.asarray(data)
 
 
-def read_magnetic_measurement_srw():
-    pass
-
-
-def write_magnetic_measurement():
-    pass
-
-
 def generate_magnetic_measurement():
     pass
 
@@ -314,9 +306,43 @@ def get_emission_energy(und_per: float, K: float, ring_e: float, n: int = 1, the
     return energy_wavelength(emission_wavelength, "m")
 
 
-def find_emission_harmonic():
-    pass
+def find_emission_harmonic(energy: float, und_per: float, ring_e: float, Kmin: float = 0.1, theta: float = 0) -> int:
+    """
+    Find the emission harmonic number for a given energy in a storage ring.
 
+    Parameters:
+        energy (float): Energy of the emitted radiation in electron volts.
+        und_per (float): Undulator period in meters.
+        ring_e (float): Energy of electrons in GeV.
+        Kmin (float, optional): Minimum value of the undulator parameter (default is 0.1).
+        theta (float, optional): Observation angle in radians (default is 0).
+
+    Returns:
+        int: Emission harmonic number.
+
+    Raises:
+        ValueError: If no valid harmonic is found.
+    """
+    count = 0
+    harm = 0
+    gamma = get_gamma(ring_e)
+    wavelength = energy_wavelength(energy, 'eV')
+
+    while harm == 0:
+        n = 2 * count + 1
+        K = np.sqrt((2 * (2 * n * wavelength * gamma ** 2) / und_per - 1 - (gamma * theta) ** 2))
+        if K >= Kmin:
+            harm = int(n)
+        count += 1
+        # Break loop if no valid harmonic is found
+        if count > 21:
+            raise ValueError("No valid harmonic found.")
+
+    return harm
+        
+
+def calculates_on_axis_flux():
+    pass
 
 #***********************************************************************************
 # power calculation
