@@ -107,6 +107,42 @@ def generate_magnetic_field_3D(mag_field_array: np.ndarray, file_path: Optional[
     return magFldCnt
 
 
+def read_electron_trajectory(file_path: str) -> Dict[str, List[Union[float, None]]]:
+    """
+    Reads SRW electron trajectory data from a .dat file.
+
+    Args:
+        file_path (str): The path to the .dat file containing electron trajectory data.
+
+    Returns:
+        dict: A dictionary where keys are the column names extracted from the header
+            (ct, X, BetaX, Y, BetaY, Z, BetaZ, Bx, By, Bz),
+            and values are lists containing the corresponding column data from the file.
+    """
+    data = []
+    header = None
+    with open(file_path, 'r') as file:
+        # Read the header line and extract column names
+        header_line = next(file).strip()
+        header = [col.split()[0] for col in header_line.split(',')]
+        # Remove the first column name 'ct'
+        header[0] = header[0].replace("#","")
+        print(header)
+        # Read each line and split by tab
+        for line in file:
+            values = line.strip().split('\t')
+            # Convert strings to appropriate data types
+            values = [float(value) if value != '' else None for value in values]
+            data.append(values)
+            
+    # Create a dictionary with header columns as keys
+    eTrajDict = {}
+    for i, key in enumerate(header):
+        eTrajDict[key] = np.asarray([row[i] for row in data])
+
+    return eTrajDict
+
+
 #***********************************************************************************
 # magnetic field properties
 #***********************************************************************************
