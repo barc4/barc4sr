@@ -14,6 +14,7 @@ import array
 import copy
 import json
 import multiprocessing as mp
+import pickle
 import time
 from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -51,181 +52,227 @@ scanCounter = 0
 # read/write functions for input values
 #***********************************************************************************
     
-def read_syned_file(jsonfile: str) -> Dict[str, Any]:
+def read_syned_file(json_file: str) -> Dict[str, Any]:
     """
     Reads a SYNED JSON configuration file and returns its contents as a dictionary.
 
     Parameters:
-        jsonfile (str): The path to the SYNED JSON configuration file.
+        json_file (str): The path to the SYNED JSON configuration file.
 
     Returns:
         dict: A dictionary containing the contents of the JSON file.
     """
-    with open(jsonfile) as f:
+    with open(json_file) as f:
         data = json.load(f)
     return data
+
+
+def generate_beamline(json_file: str, magnetic_measurement: Union[str, None], observation_point: float, 
+                      hor_slit: float, ver_slit: float, hor_slit_cen: float, ver_slit_cen: float, 
+                      Kh: float, Kh_phase: float, Kh_symmetry: int, Kv: float, Kv_phase: float, 
+                      Kv_symmetry: int) -> dict:
+    """
+    Generate beamline parameters based on SYNED JSON configuration file and input parameters.
+
+    Args:
+        json_file (str): The path to the SYNED JSON configuration file.
+        magnetic_measurement (Union[str, None]): The path to the file containing magnetic measurement data.
+            Overrides SYNED undulator data.
+        observation_point (float): The distance to the observation point [m].
+        hor_slit (float): Horizontal slit size [m].
+        ver_slit (float): Vertical slit size [m].
+        hor_slit_cen (float): Horizontal slit center position [m].
+        ver_slit_cen (float): Vertical slit center position [m].
+        Kh (float): Horizontal undulator parameter K. If -1, it's taken from the SYNED file.
+        Kh_phase (float): Initial phase of the horizontal magnetic field [rad].
+        Kh_symmetry (int): Symmetry of the horizontal magnetic field vs longitudinal position.
+            1 for symmetric (B ~ cos(2*Pi*n*z/per + ph)),
+            -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)).
+        Kv (float): Vertical undulator parameter K. If -1, it's taken from the SYNED file.
+        Kv_phase (float): Initial phase of the vertical magnetic field [rad].
+        Kv_symmetry (int): Symmetry of the vertical magnetic field vs longitudinal position.
+            1 for symmetric (B ~ cos(2*Pi*n*z/per + ph)),
+            -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)).
+
+    Returns:
+        dict: A dictionary containing beamline parameters.
+    """
+
+    data = read_syned_file(json_file)
+
+    if magnetic_measurement is None:
+        if Kh == -1:
+            Kh =  data["magnetic_structure"]["K_horizontal"]
+        if Kv == -1:
+            Kv =  data["magnetic_structure"]["K_vertical"]
+            
+    beamline = {}
+    # accelerator
+    beamline['ElectronEnergy'] = data["electron_beam"]["energy_in_GeV"]
+    beamline['ElectronCurrent'] = data["electron_beam"]["current"]
+    beamline['ElectronEnergySpread'] = data["electron_beam"]["energy_spread"]
+    # electron beam
+    beamline['ElectronBeamSizeH'] = np.sqrt(data["electron_beam"]["moment_xx"])
+    beamline['ElectronBeamSizeV'] = np.sqrt(data["electron_beam"]["moment_yy"])
+    beamline['ElectronBeamDivergenceH'] = np.sqrt(data["electron_beam"]["moment_xpxp"])
+    beamline['ElectronBeamDivergenceV'] = np.sqrt(data["electron_beam"]["moment_ypyp"])
+    # undulator
+    beamline['magnetic_measurement'] = magnetic_measurement
+    beamline['NPeriods'] = data["magnetic_structure"]["number_of_periods"]
+    beamline['PeriodID'] = data["magnetic_structure"]["period_length"]
+    beamline['Kh'] = Kh
+    beamline['KhPhase'] = Kh_phase
+    beamline['MagFieldSymmetryH'] = Kh_symmetry
+    beamline['Kv'] = Kv
+    beamline['KvPhase'] = Kv_phase
+    beamline['MagFieldSymmetryV'] = Kv_symmetry
+    # radiation observation
+    beamline['distance'] = observation_point
+    beamline['slitH'] = hor_slit
+    beamline['slitV'] = ver_slit
+    beamline['slitHcenter'] = hor_slit_cen
+    beamline['slitVcenter'] = ver_slit_cen
+  
+    return beamline
 
 #***********************************************************************************
 # xoppy_undulators.py modernised modules
 #***********************************************************************************
 
-def xoppy_calc_undulator_spectrum(ELECTRONENERGY=6.04,
-                                  ELECTRONENERGYSPREAD=0.001,
-                                  ELECTRONCURRENT=0.2,
-                                  ELECTRONBEAMSIZEH=0.000395,
-                                  ELECTRONBEAMSIZEV=9.9e-06,
-                                  ELECTRONBEAMDIVERGENCEH=1.05e-05,
-                                  ELECTRONBEAMDIVERGENCEV=3.9e-06,
-                                  PERIODID=0.018,
-                                  NPERIODS=222,
-                                  KV=1.68,
-                                  KVPHASE=0.0,
-                                  VSIMMETRY=1,
-                                  KH=0.0,
-                                  KHPHASE=0.0,
-                                  HSIMMETRY=1,
-                                  DISTANCE=30.0,
-                                  GAPH=0.001,
-                                  GAPV=0.001,
-                                  GAPH_CENTER=0.0,
-                                  GAPV_CENTER=0.0,
-                                  PHOTONENERGYMIN=3000.0,
-                                  PHOTONENERGYMAX=55000.0,
-                                  PHOTONENERGYPOINTS=500,
-                                  USEEMITTANCES=1,
-                                  MULTIELECTRONS=0):
+def xoppy_calc_undulator_spectrum(file_name, json_file, photon_energy_min, photon_energy_max, 
+                                  photon_energy_points, energy_sampling, observation_point, 
+                                  hor_slit, ver_slit,  hor_slit_cen=0, ver_slit_cen=0, 
+                                  Kh=-1, Kh_phase=0, Kh_symmetry=1, Kv=-1, Kv_phase=0, 
+                                  Kv_symmetry=1, magnetic_measurement=None, tabulated_undulator_mthd=0,
+                                  electron_trajectory=False, electron_trajectory_file_name=None,
+                                  filament_beam=False, energy_spread=True, calculation=0, parallel=False):
     
-    print("> Inside xoppy_calc_undulator_spectrum. \n")
+    bl = generate_beamline(json_file, magnetic_measurement, observation_point, hor_slit, 
+                           ver_slit, hor_slit_cen, ver_slit_cen, Kh, Kh_phase, Kh_symmetry, 
+                           Kv, Kv_phase, Kv_symmetry)
 
-    bl = OrderedDict()
-    bl['ElectronBeamDivergenceH'] = ELECTRONBEAMDIVERGENCEH
-    bl['ElectronBeamDivergenceV'] = ELECTRONBEAMDIVERGENCEV
-    bl['ElectronBeamSizeH'] = ELECTRONBEAMSIZEH
-    bl['ElectronBeamSizeV'] = ELECTRONBEAMSIZEV
-    bl['ElectronCurrent'] = ELECTRONCURRENT
-    bl['ElectronEnergy'] = ELECTRONENERGY
-    bl['ElectronEnergySpread'] = ELECTRONENERGYSPREAD
-    bl['Kv'] = KV
-    bl['Kh'] = KH
-    bl['KvPhase'] = KVPHASE
-    bl['KvPhase'] = KHPHASE
-    bl['NPeriods'] = NPERIODS
-    bl['PeriodID'] = PERIODID
-    bl['MagFieldSymmetryH'] = HSIMMETRY
-    bl['MagFieldSymmetryV'] = VSIMMETRY
-    bl['distance'] = DISTANCE
-    bl['gapH'] = GAPH
-    bl['gapV'] = GAPV
-    bl['gapHcenter'] = GAPH_CENTER
-    bl['gapVcenter'] = GAPV_CENTER
+    if electron_trajectory_file_name is None:
+        if magnetic_measurement is None:
+            electron_trajectory_file_name = file_name+"_eTraj.dat"
+        else:
+            electron_trajectory_file_name = magnetic_measurement.split(".dat")[0] + "_eTraj.dat"
 
-    if USEEMITTANCES:
-        zero_emittance = False
-    else:
-        zero_emittance = True
-
-    if MULTIELECTRONS:
-        zero_emittance = False
-    else:
-        zero_emittance = True
-  
     print("Undulator flux calculation using SRW. Please wait...")
-    e, f = calc_undulator_spectrum_1d_srw(
+    energy, flux = undulator_spectrum_1d_srw(
                     bl,
-                    photon_energy_min=PHOTONENERGYMIN,
-                    photon_energy_max=PHOTONENERGYMAX,
-                    photon_energy_points=PHOTONENERGYPOINTS,
-                    energy_sampling = 0,
-                    calculation = False,
-                    zero_emittance = False,
-                    magnetic_measurement=None,
-                    tabulated_undulator_mthd=0,
-                    electron_trajectory=False,
-                    parallel=False)
+                    photon_energy_min=photon_energy_min,
+                    photon_energy_max=photon_energy_max,
+                    photon_energy_points=photon_energy_points,
+                    energy_sampling = energy_sampling,
+                    calculation = calculation,
+                    filament_beam = filament_beam,
+                    energy_spread = energy_spread,
+                    magnetic_measurement=magnetic_measurement,
+                    tabulated_undulator_mthd=tabulated_undulator_mthd,
+                    electron_trajectory=electron_trajectory,
+                    electron_trajectory_file_name=electron_trajectory_file_name,
+                    parallel=parallel)
     print("Done")
         
-    return e, f
+    file = open('%s_spectrum.pickle'%file_name, 'wb')
+    pickle.dump([energy, flux], file)
+    file.close()
+    return energy, flux
 
-def calc_undulator_spectrum_1d_srw(bl,
-                                   photon_energy_min=3000.0,
-                                   photon_energy_max=55000.0,
-                                   photon_energy_points=500,
-                                   energy_sampling = 0,
-                                   calculation = False,
-                                   zero_emittance = False,
-                                   magnetic_measurement=None,
-                                   tabulated_undulator_mthd=0,
-                                   electron_trajectory=False,
-                                   parallel=False):
+def undulator_spectrum_1d_srw(bl,
+                              photon_energy_min,
+                              photon_energy_max,
+                              photon_energy_points,
+                              energy_sampling,
+                              calculation,
+                              filament_beam,
+                              energy_spread,
+                              magnetic_measurement,
+                              tabulated_undulator_mthd,
+                              electron_trajectory,
+                              electron_trajectory_file_name,
+                              parallel):
     
     t0 = time.time()
-    print("inside calc_undulator_spectrum_1d_srw")
-
     # ----------------------------------------------------------------------------------
     # definition of the electron beam
     # ----------------------------------------------------------------------------------
+    print('> Generating the electron beam ... ', end='')
     eBeam = set_electron_beam(bl,
-                              zero_emittance)
+                              filament_beam,
+                              energy_spread)
+    print('completed')
     # ----------------------------------------------------------------------------------
     # definition of magnetic structure
     # ----------------------------------------------------------------------------------
+    print('> Generating the magnetic structure ... ', end='')
     magFldCnt = set_magnetic_structure(bl,
                                        magnetic_measurement, 
                                        tabulated_undulator_mthd)
+    print('completed')
     # ----------------------------------------------------------------------------------
     # calculate electron trajectory
     # ----------------------------------------------------------------------------------
+    print('> Electron trajectory calculation ... ', end='')
+
     if electron_trajectory:
         eTraj = calcualte_electron_trajectory(eBeam, magFldCnt)
+        eTraj.save_ascii(electron_trajectory_file_name)
+        print(f">>>{electron_trajectory_file_name}<<< ", end='')
     else:
         eTraj = 0
-    # ----------------------------------------------------------------------------------
-    # spectrum calculations
-    # ----------------------------------------------------------------------------------
-    if energy_sampling == 0: #lins_paced
-        energy_array = np.linspace(photon_energy_min, photon_energy_max, photon_energy_points)
-    else:
-        resonant_energy = get_emission_energy(bl['PeriodID'], 
-                                              np.sqrt(bl['Kv']**2 + bl['Kh']**2),
-                                              bl['ElectronEnergy'])
-        stepsize = np.log(photon_energy_max/resonant_energy)
-        energy_array = generate_logarithmic_energy_values(photon_energy_min,
-                                                          photon_energy_max,
-                                                          resonant_energy,
-                                                          stepsize)
-    # ---------------------------------------------------------
-    # On-Axis Spectrum from Filament Electron Beam (total pol.)
-    if calculation == 0:
-        intensity_array = interface_srwlibCalcElecFieldSR(bl, 
-                                                          eBeam, 
-                                                          magFldCnt,
-                                                          eTraj,
-                                                          photon_energy_min,
-                                                          photon_energy_max,
-                                                          photon_energy_points,
-                                                          energy_array,
-                                                          h_slit_points=1,
-                                                          v_slit_points=1,
-                                                          parallel=parallel)
-    # -----------------------------------------
-    # Flux through Finite Aperture (total pol.)
+    print('completed')
 
-    # simplified partially-coherent simulation
-    if calculation == 1:
-        pass
-    # real partially-coherent simulation
-    if calculation == 2:
-        pass
+    # # ----------------------------------------------------------------------------------
+    # # spectrum calculations
+    # # ----------------------------------------------------------------------------------
+    # if energy_sampling == 0: #lins_paced
+    #     energy_array = np.linspace(photon_energy_min, photon_energy_max, photon_energy_points)
+    # else:
+    #     resonant_energy = get_emission_energy(bl['PeriodID'], 
+    #                                           np.sqrt(bl['Kv']**2 + bl['Kh']**2),
+    #                                           bl['ElectronEnergy'])
+    #     stepsize = np.log(photon_energy_max/resonant_energy)
+    #     energy_array = generate_logarithmic_energy_values(photon_energy_min,
+    #                                                       photon_energy_max,
+    #                                                       resonant_energy,
+    #                                                       stepsize)
+    # # ---------------------------------------------------------
+    # # On-Axis Spectrum from Filament Electron Beam (total pol.)
+    # if calculation == 0:
+    #     intensity_array = interface_srwlibCalcElecFieldSR(bl, 
+    #                                                       eBeam, 
+    #                                                       magFldCnt,
+    #                                                       eTraj,
+    #                                                       photon_energy_min,
+    #                                                       photon_energy_max,
+    #                                                       photon_energy_points,
+    #                                                       energy_array,
+    #                                                       h_slit_points=1,
+    #                                                       v_slit_points=1,
+    #                                                       parallel=parallel)
+    # # -----------------------------------------
+    # # Flux through Finite Aperture (total pol.)
+
+    # # simplified partially-coherent simulation
+    # if calculation == 1:
+    #     pass
+    # # real partially-coherent simulation
+    # if calculation == 2:
+    #     pass
     
-    return energy_array, intensity_array
+    # return energy_array, intensity_array
 
-def set_electron_beam(bl: dict, zero_emittance: bool) -> srwlib.SRWLPartBeam:
+    return 0, 0
+
+def set_electron_beam(bl: dict, filament_beam: bool, energy_spread: bool) -> srwlib.SRWLPartBeam:
     """
     Set up the electron beam parameters.
 
     Parameters:
         bl (dict): Dictionary containing beamline parameters.
-        zero_emittance (bool): Flag indicating whether to set the beam emittance to zero.
+        filament_beam (bool): Flag indicating whether to set the beam emittance to zero.
+        energy_spread (bool): Flag indicating whether to set the beam energy spread to zero.
 
     Returns:
         srwlib.SRWLPartBeam: Electron beam object initialized with specified parameters.
@@ -241,18 +288,24 @@ def set_electron_beam(bl: dict, zero_emittance: bool) -> srwlib.SRWLPartBeam:
     eBeam.partStatMom1.yp = 0
     eBeam.partStatMom1.gamma = get_gamma(bl['ElectronEnergy'])
 
-    if zero_emittance:
+    if filament_beam:
         sigX = 1e-25
         sigXp = 1e-25
         sigY = 1e-25
         sigYp = 1e-25
-        sigEperE = 1e-25
+        if energy_spread:
+            sigEperE = bl['ElectronEnergySpread']
+        else:
+            sigEperE = 1e-25    
     else:
         sigX = bl['ElectronBeamSizeH']  # horizontal RMS size of e-beam [m]
         sigXp = bl['ElectronBeamDivergenceH']  # horizontal RMS angular divergence [rad]
         sigY = bl['ElectronBeamSizeV']  # vertical RMS size of e-beam [m]
         sigYp = bl['ElectronBeamDivergenceV']  # vertical RMS angular divergence [rad]
-        sigEperE = bl['ElectronEnergySpread']
+        if energy_spread:
+            sigEperE = bl['ElectronEnergySpread']
+        else:
+            sigEperE = 1e-25    
 
     # 2nd order stat. moments:
     eBeam.arStatMom2[0] = sigX * sigX  # <(x-<x>)^2>
@@ -285,8 +338,8 @@ def set_magnetic_structure(bl: dict, magnetic_measurement: Union[str, None],
         und = srwlib.SRWLMagFldU()
         und.set_sin(_per=bl["PeriodID"],
                     _len=bl['PeriodID']*bl['NPeriods'], 
-                    _bx=get_B_from_K(bl['Kv'],bl["PeriodID"]), 
-                    _by=get_B_from_K(bl['Kh'],bl["PeriodID"]), 
+                    _bx=get_B_from_K(bl['Kh'],bl["PeriodID"]), 
+                    _by=get_B_from_K(bl['Kv'],bl["PeriodID"]), 
                     _phx=bl['KhPhase'], 
                     _phy=bl['KvPhase'], 
                     _sx=bl['MagFieldSymmetryH'], 
@@ -318,7 +371,7 @@ def set_magnetic_structure(bl: dict, magnetic_measurement: Union[str, None],
 
 
 def calcualte_electron_trajectory(eBeam:srwlib.SRWLPartBeam, magFldCnt: srwlib.SRWLMagFldC,
-                                  number_points: int = 50000, ctst: float = -1, ctfi: float = 1             
+                                  number_points: int = 50000, ctst: float = 0, ctfi: float = 0             
                                   ) -> srwlib.SRWLPrtTrj:
     """
     Calculate the trajectory of an electron through a magnetic field.
@@ -327,8 +380,8 @@ def calcualte_electron_trajectory(eBeam:srwlib.SRWLPartBeam, magFldCnt: srwlib.S
         eBeam (srwlib.SRWLPartBeam): Particle beam properties.
         magFldCnt (srwlib.SRWLMagFldC): Magnetic field container representing the magnetic field.
         number_points (int, optional): Number of points for trajectory calculation. Defaults to 50000.
-        ctst (float, optional): Initial time (ct) for trajectory calculation. Defaults to -1.
-        ctfi (float, optional): Final time (ct) for trajectory calculation. Defaults to 1.
+        ctst (float, optional): Initial time (ct) for trajectory calculation. Defaults to 0.
+        ctfi (float, optional): Final time (ct) for trajectory calculation. Defaults to 0.
 
     Returns:
         srwlib.SRWLPrtTrj: Object containing the calculated trajectory.
@@ -340,11 +393,9 @@ def calcualte_electron_trajectory(eBeam:srwlib.SRWLPartBeam, magFldCnt: srwlib.S
     partTraj.ctEnd = ctfi
 
     arPrecPar = [1] 
-    print('Electron trajectory calculation ... ', end='')
-    srwlib.CalcPartTraj(partTraj, magFldCnt, arPrecPar)
-    print('completed')
+    srwlib.srwl.CalcPartTraj(partTraj, magFldCnt, arPrecPar)
 
-    return srwlib.SRWLPrtTrj
+    return partTraj
 
 
 def interface_srwlibCalcElecFieldSR(bl, eBeam, magFldCnt, eTraj, energy_array,
@@ -395,8 +446,8 @@ def core_srwlibCalcElecFieldSR(bl, eBeam, magFldCnt, eTraj, arPrecPar, energy_ar
         vAxis = np.asarray([0])
         _inDepType = 0
     else:
-        hAxis = np.linspace(-bl['gapH'] / 2, bl['gapH'] / 2, h_slit_points)
-        vAxis = np.linspace(-bl['gapV'] / 2, bl['gapV'] / 2, v_slit_points)
+        hAxis = np.linspace(-bl['slitH'] / 2, bl['slitH'] / 2, h_slit_points)
+        vAxis = np.linspace(-bl['slitV'] / 2, bl['slitV'] / 2, v_slit_points)
         _inDepType = 3
         intensity = np.zeros((energy_array.size, hAxis.size, vAxis.size))
 

@@ -125,7 +125,6 @@ def read_electron_trajectory(file_path: str) -> Dict[str, List[Union[float, None
         # Read the header line and extract column names
         header_line = next(file).strip()
         header = [col.split()[0] for col in header_line.split(',')]
-        # Remove the first column name 'ct'
         header[0] = header[0].replace("#","")
         print(header)
         # Read each line and split by tab
