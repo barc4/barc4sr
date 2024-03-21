@@ -122,19 +122,14 @@ def read_electron_trajectory(file_path: str) -> Dict[str, List[Union[float, None
     data = []
     header = None
     with open(file_path, 'r') as file:
-        # Read the header line and extract column names
         header_line = next(file).strip()
         header = [col.split()[0] for col in header_line.split(',')]
         header[0] = header[0].replace("#","")
-        print(header)
-        # Read each line and split by tab
         for line in file:
             values = line.strip().split('\t')
-            # Convert strings to appropriate data types
             values = [float(value) if value != '' else None for value in values]
             data.append(values)
             
-    # Create a dictionary with header columns as keys
     eTrajDict = {}
     for i, key in enumerate(header):
         eTrajDict[key] = np.asarray([row[i] for row in data])

@@ -8,7 +8,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '15/MARCH/2024'
-__changed__ = '15/MARCH/2024'
+__changed__ = '21/MARCH/2024'
 
 import array
 import copy
@@ -216,54 +216,54 @@ def undulator_spectrum_1d_srw(bl,
     print('> Electron trajectory calculation ... ', end='')
 
     if electron_trajectory:
-        eTraj = calcualte_electron_trajectory(eBeam, magFldCnt)
+        eTraj = calculate_electron_trajectory(eBeam, magFldCnt)
         eTraj.save_ascii(electron_trajectory_file_name)
         print(f">>>{electron_trajectory_file_name}<<< ", end='')
     else:
         eTraj = 0
     print('completed')
 
-    # # ----------------------------------------------------------------------------------
-    # # spectrum calculations
-    # # ----------------------------------------------------------------------------------
-    # if energy_sampling == 0: #lins_paced
-    #     energy_array = np.linspace(photon_energy_min, photon_energy_max, photon_energy_points)
-    # else:
-    #     resonant_energy = get_emission_energy(bl['PeriodID'], 
-    #                                           np.sqrt(bl['Kv']**2 + bl['Kh']**2),
-    #                                           bl['ElectronEnergy'])
-    #     stepsize = np.log(photon_energy_max/resonant_energy)
-    #     energy_array = generate_logarithmic_energy_values(photon_energy_min,
-    #                                                       photon_energy_max,
-    #                                                       resonant_energy,
-    #                                                       stepsize)
-    # # ---------------------------------------------------------
-    # # On-Axis Spectrum from Filament Electron Beam (total pol.)
-    # if calculation == 0:
-    #     intensity_array = interface_srwlibCalcElecFieldSR(bl, 
-    #                                                       eBeam, 
-    #                                                       magFldCnt,
-    #                                                       eTraj,
-    #                                                       photon_energy_min,
-    #                                                       photon_energy_max,
-    #                                                       photon_energy_points,
-    #                                                       energy_array,
-    #                                                       h_slit_points=1,
-    #                                                       v_slit_points=1,
-    #                                                       parallel=parallel)
-    # # -----------------------------------------
-    # # Flux through Finite Aperture (total pol.)
+    # ----------------------------------------------------------------------------------
+    # spectrum calculations
+    # ----------------------------------------------------------------------------------
+    if energy_sampling == 0: #lins_paced
+        energy_array = np.linspace(photon_energy_min, photon_energy_max, photon_energy_points)
+    else:
+        resonant_energy = get_emission_energy(bl['PeriodID'], 
+                                              np.sqrt(bl['Kv']**2 + bl['Kh']**2),
+                                              bl['ElectronEnergy'])
+        stepsize = np.log(photon_energy_max/resonant_energy)
+        energy_array = generate_logarithmic_energy_values(photon_energy_min,
+                                                          photon_energy_max,
+                                                          resonant_energy,
+                                                          stepsize)
 
-    # # simplified partially-coherent simulation
-    # if calculation == 1:
-    #     pass
+    # ---------------------------------------------------------
+    # On-Axis Spectrum from Filament Electron Beam (total pol.)
+    if calculation == 0:
+        intensity_array = interface_srwlibCalcElecFieldSR(bl, 
+                                                          eBeam, 
+                                                          magFldCnt,
+                                                          eTraj,
+                                                          energy_array,
+                                                          h_slit_points=1,
+                                                          v_slit_points=1,
+                                                          radiation_characteristic=0, 
+                                                          radiation_dependence=0,
+                                                          parallel=parallel)
+    
+    # -----------------------------------------
+    # Flux through Finite Aperture (total pol.)
+
+    # simplified partially-coherent simulation
+    if calculation == 1:
+        pass
     # # real partially-coherent simulation
     # if calculation == 2:
     #     pass
     
-    # return energy_array, intensity_array
+    return energy_array, intensity_array
 
-    return 0, 0
 
 def set_electron_beam(bl: dict, filament_beam: bool, energy_spread: bool) -> srwlib.SRWLPartBeam:
     """
@@ -360,17 +360,18 @@ def set_magnetic_structure(bl: dict, magnetic_measurement: Union[str, None],
             :param _max_per: max. period length to consider
             """
             _rel_ac_thr=0.05
-            _max_nh=5
+            _max_nh=50
             _max_per=0.1
             arHarm = []
             for i in range(_max_nh): arHarm.append(srwlib.SRWLMagFldH())
             magFldCntHarm = srwlib.SRWLMagFldC(srwlib.SRWLMagFldU(arHarm))
-            srwlib.UtiUndFromMagFldTab(magFldCntHarm, magFldCnt, [_rel_ac_thr, _max_nh, _max_per])
+            srwlib.srwl.UtiUndFromMagFldTab(magFldCntHarm, magFldCnt, [_rel_ac_thr, _max_nh, _max_per])
             return magFldCntHarm
+        
     return magFldCnt
 
 
-def calcualte_electron_trajectory(eBeam:srwlib.SRWLPartBeam, magFldCnt: srwlib.SRWLMagFldC,
+def calculate_electron_trajectory(eBeam:srwlib.SRWLPartBeam, magFldCnt: srwlib.SRWLMagFldC,
                                   number_points: int = 50000, ctst: float = 0, ctfi: float = 0             
                                   ) -> srwlib.SRWLPrtTrj:
     """
@@ -465,7 +466,10 @@ def core_srwlibCalcElecFieldSR(bl, eBeam, magFldCnt, eTraj, arPrecPar, energy_ar
             wfr.allocate(mesh.ne, mesh.nx, mesh.ny)
             wfr.mesh = mesh
             wfr.partBeam = eBeam
-            srwlib.srwl.CalcElecFieldSR(wfr, eTraj, magFldCnt, arPrecPar)
+
+            # srwl_bl.calc_sr_se sets eTraj=0 despite having measured magnetic field
+            srwlib.srwl.CalcElecFieldSR(wfr, 0, magFldCnt, arPrecPar)
+
             arI1 = array.array('f', [0]*wfr.mesh.ne)
             srwlib.srwl.CalcIntFromElecField(arI1, wfr, _inPol, _inIntType, _inDepType, wfr.mesh.eStart, 0, 0)
             if _inDepType == 0:    # 0 -vs e (photon energy or time);
@@ -475,3 +479,82 @@ def core_srwlibCalcElecFieldSR(bl, eBeam, magFldCnt, eTraj, arPrecPar, energy_ar
 
     return intensity, hAxis, vAxis, time.time()-tzero
 
+
+def interface_srwlibCalcStokesUR(bl, eBeam, magFldCnt, eTraj, energy_array,
+                                    h_slit_points, v_slit_points, radiation_characteristic, 
+                                    radiation_dependence, parallel):
+    
+    arPrecPar = [0]*7
+    arPrecPar[0] = 1     # SR calculation method: 0- "manual", 1- "auto-undulator", 2- "auto-wiggler"
+    arPrecPar[1] = 0.01  # relative precision
+    arPrecPar[2] = 0     # longitudinal position to start integration (effective if < zEndInteg)
+    arPrecPar[3] = 0     # longitudinal position to finish integration (effective if > zStartInteg)
+    arPrecPar[4] = 50000 # Number of points for trajectory calculation
+    arPrecPar[5] = 1     # Use "terminating terms"  or not (1 or 0 respectively)
+    arPrecPar[6] = 0     # sampling factor for adjusting nx, ny (effective if > 0)
+
+    t0 = time.time()
+
+    if parallel:
+        pass
+
+    else:
+        results = core_srwlibCalcElecFieldSR(bl, 
+                                             eBeam,
+                                             magFldCnt, 
+                                             eTraj, 
+                                             arPrecPar, 
+                                             energy_array,
+                                             h_slit_points, 
+                                             v_slit_points, 
+                                             radiation_characteristic, 
+                                             radiation_dependence,
+                                             parallel)
+        intensity = results[0]
+
+    return intensity
+
+def core_srwlibCalcStokesUR(bl, eBeam, magFldCnt, eTraj, arPrecPar, energy_array,
+                                    h_slit_points, v_slit_points, rad_characteristic, 
+                                    rad_dependence, parallel):
+
+    tzero = time.time()
+    _inPol = 6
+    _inIntType = rad_characteristic
+    _inDepType = rad_dependence
+    if h_slit_points == 1 or v_slit_points == 1:
+        hAxis = np.asarray([0])
+        vAxis = np.asarray([0])
+        _inDepType = 0
+    else:
+        hAxis = np.linspace(-bl['slitH'] / 2, bl['slitH'] / 2, h_slit_points)
+        vAxis = np.linspace(-bl['slitV'] / 2, bl['slitV'] / 2, v_slit_points)
+        _inDepType = 3
+        intensity = np.zeros((energy_array.size, hAxis.size, vAxis.size))
+
+    if parallel:
+        pass
+
+    else:
+        try:
+            mesh = srwlib.SRWLRadMesh(energy_array[0], energy_array[-1], len(energy_array),
+                                    hAxis[0], hAxis[-1], h_slit_points,
+                                    vAxis[0], vAxis[-1], v_slit_points, 
+                                    bl['distance'])
+            
+            wfr = srwlib.SRWLWfr()
+            wfr.allocate(mesh.ne, mesh.nx, mesh.ny)
+            wfr.mesh = mesh
+            wfr.partBeam = eBeam
+
+            # srwl_bl.calc_sr_se sets eTraj=0 despite having measured magnetic field
+            srwlib.srwl.CalcElecFieldSR(wfr, 0, magFldCnt, arPrecPar)
+
+            arI1 = array.array('f', [0]*wfr.mesh.ne)
+            srwlib.srwl.CalcIntFromElecField(arI1, wfr, _inPol, _inIntType, _inDepType, wfr.mesh.eStart, 0, 0)
+            if _inDepType == 0:    # 0 -vs e (photon energy or time);
+                intensity = np.asarray(arI1, dtype="float64")
+        except:
+            print("Error running SRW")
+
+    return intensity, hAxis, vAxis, time.time()-tzero
