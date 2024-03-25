@@ -14,6 +14,7 @@ __changed__ = '22/MAR/2024'
 
 
 import json
+from time import time
 from typing import Any, Dict
 
 import numpy as np
@@ -76,6 +77,30 @@ def get_gamma(E: float) -> float:
     """
     return E * 1e9 / (MASS * LIGHT ** 2) * CHARGE
 
+#***********************************************************************************
+# time stamp
+#***********************************************************************************
+
+def print_elapsed_time(start0: float) -> None:
+    """
+    Prints the elapsed time since the start of computation.
+
+    Args:
+        start0 (float): The start time of computation (in seconds since the epoch).
+    """
+
+    deltaT = time() - start0
+    if deltaT < 1:
+        print(f'>> Total elapsed time: {deltaT * 1000:.2f} ms')
+    else:
+        hours, rem = divmod(deltaT, 3600)
+        minutes, seconds = divmod(rem, 60)
+        if hours >= 1:
+            print(f'>> Total elapsed time: {int(hours)} h {int(minutes)} min {seconds:.2f} s')
+        elif minutes >= 1:
+            print(f'>> Total elapsed time: {int(minutes)} min {seconds:.2f} s')
+        else:
+            print(f'>> Total elapsed time: {seconds:.2f} s')
 
 #***********************************************************************************
 # potpourri
@@ -101,7 +126,7 @@ def generate_logarithmic_energy_values(emin: float, emax: float, resonant_energy
 
     # Calculate the total number of steps
     n_steps = int(n_steps_pos - n_steps_neg)
-    print(f"number of steps: {n_steps}")
+    print(f"generate_logarithmic_energy_values - number of steps: {n_steps}")
 
     # Generate the array of steps with logarithmic spacing
     steps = np.linspace(n_steps_neg, n_steps_pos, n_steps + 1)
@@ -310,14 +335,12 @@ def write_syned_file(json_file: str, light_source_name: str, ElectronBeamClass: 
         ElectronBeamClass (type): The class representing electron beam parameters.
         MagneticStructureClass (type): The class representing magnetic structure parameters.
     """
-    electron_beam = ElectronBeamClass()
-    magnetic_structure = MagneticStructureClass()
 
     data = {
         "CLASS_NAME": "LightSource",
         "name": light_source_name,
-        "electron_beam": vars(electron_beam),
-        "magnetic_structure": vars(magnetic_structure)
+        "electron_beam": vars(ElectronBeamClass),
+        "magnetic_structure": vars(MagneticStructureClass)
     }
 
     with open(json_file, 'w') as file:
