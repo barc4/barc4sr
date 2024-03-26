@@ -9,7 +9,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '15/MARCH/2024'
-__changed__ = '25/MARCH/2024'
+__changed__ = '26/MARCH/2024'
 
 import array
 import copy
@@ -18,6 +18,7 @@ import pickle
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import h5py as h5
 import numpy as np
 from joblib import Parallel, delayed
 from scipy.constants import physical_constants
@@ -57,10 +58,6 @@ def undulator_spectrum(file_name: str,
                        photon_energy_min: float,
                        photon_energy_max: float,
                        photon_energy_points: int, 
-                       energy_sampling: int, 
-                       observation_point: float, 
-                       hor_slit: float,
-                       ver_slit: float,
                        **kwargs) -> Tuple[np.ndarray, np.ndarray]:
     """
     Calculate 1D undulator spectrum using SRW.
@@ -71,12 +68,12 @@ def undulator_spectrum(file_name: str,
         photon_energy_min (float): Minimum photon energy [eV].
         photon_energy_max (float): Maximum photon energy [eV].
         photon_energy_points (int): Number of photon energy points.
-        energy_sampling (int): Energy sampling method (0: linear, 1: logarithmic).
-        observation_point (float): Distance to the observation point [m].
-        hor_slit (float): Horizontal slit size [m].
-        ver_slit (float): Vertical slit size [m].
 
     Optional Args (kwargs):
+        energy_sampling (int): Energy sampling method (0: linear, 1: logarithmic). Default is 0.
+        observation_point (float): Distance to the observation point. Default is 10 [m].
+        hor_slit (float): Horizontal slit size [m]. Default is 1e-3 [m].
+        ver_slit (float): Vertical slit size [m]. Default is 1e-3 [m].
         hor_slit_cen (float): Horizontal slit center position [m]. Default is 0.
         ver_slit_cen (float): Vertical slit center position [m]. Default is 0.
         Kh (float): Horizontal undulator parameter K. If -1, taken from the SYNED file. Default is -1.
@@ -97,7 +94,6 @@ def undulator_spectrum(file_name: str,
         electron_trajectory (bool): Whether to calculate and save electron trajectory. Default is False.
         filament_beam (bool): Whether to use a filament electron beam. Default is False.
         energy_spread (bool): Whether to include energy spread. Default is True.
-        calculation (int): Spectrum calculation method (0: on-axis, 1: through finite aperture). Default is 1.
         number_macro_electrons (int): Number of macro electrons. Default is 1000.
         parallel (bool): Whether to use parallel computation. Default is False.
 
@@ -109,6 +105,10 @@ def undulator_spectrum(file_name: str,
 
     print("Undulator spectrum calculation using SRW. Please wait...")
 
+    energy_sampling = kwargs.get('energy_sampling', 0)
+    observation_point = kwargs.get('observation_point', 10.)
+    hor_slit = kwargs.get('hor_slit', 1e-3)
+    ver_slit = kwargs.get('ver_slit', 1e-3)
     hor_slit_cen = kwargs.get('hor_slit_cen', 0)
     ver_slit_cen = kwargs.get('ver_slit_cen', 0)
     Kh = kwargs.get('Kh', -1)
@@ -122,42 +122,25 @@ def undulator_spectrum(file_name: str,
     electron_trajectory = kwargs.get('electron_trajectory', False)
     filament_beam = kwargs.get('filament_beam', False)
     energy_spread = kwargs.get('energy_spread', True)
-    calculation = kwargs.get('calculation', 1)
     number_macro_electrons = kwargs.get('number_macro_electrons', 1000)
     parallel = kwargs.get('parallel', False)
 
-    bl = generate_beamline(json_file, magnetic_measurement, observation_point, hor_slit, 
+    if hor_slit < 1e-6 and ver_slit < 1e-6:
+        calculation = 0
+        hor_slit = 0
+        ver_slit = 0
+    else:
+        calculation = 1
+
+    bl = syned_dictionary(json_file, magnetic_measurement, observation_point, hor_slit, 
                         ver_slit, hor_slit_cen, ver_slit_cen, Kh, Kh_phase, Kh_symmetry, 
                         Kv, Kv_phase, Kv_symmetry)
-    # ----------------------------------------------------------------------------------
-    # definition of the electron beam
-    # ----------------------------------------------------------------------------------
-    print('> Generating the electron beam ... ', end='')
-    eBeam = set_electron_beam(bl,
-                              filament_beam,
-                              energy_spread)
-    print('completed')
-    # ----------------------------------------------------------------------------------
-    # definition of magnetic structure
-    # ----------------------------------------------------------------------------------
-    print('> Generating the magnetic structure ... ', end='')
-    magFldCnt = set_magnetic_structure(bl,
-                                       magnetic_measurement, 
-                                       tabulated_undulator_mthd)
-    print('completed')
-    # ----------------------------------------------------------------------------------
-    # calculate electron trajectory
-    # ----------------------------------------------------------------------------------
-    print('> Electron trajectory calculation ... ', end='')
-    if electron_trajectory:
-        print('>> srwlCalcPartTraj ... ', end='')
-        electron_trajectory_file_name = file_name+"_eTraj.dat"
-        eTraj = srwlCalcPartTraj(eBeam, magFldCnt)
-        eTraj.save_ascii(electron_trajectory_file_name)
-        print(f">>>{electron_trajectory_file_name}<<< ", end='')
-    else:
-        eTraj = 0
-    print('completed')
+    
+    eBeam, magFldCnt, eTraj = set_light_source(file_name, bl, filament_beam, 
+                                               energy_spread, magnetic_measurement,
+                                               tabulated_undulator_mthd, 
+                                               electron_trajectory)
+    
     # ----------------------------------------------------------------------------------
     # spectrum calculations
     # ----------------------------------------------------------------------------------
@@ -224,15 +207,265 @@ def undulator_spectrum(file_name: str,
     return energy, flux
 
 
-def undulator_power_density():
-    pass
+def undulator_power_density(file_name: str, 
+                            json_file: str, 
+                            hor_slit: float, 
+                            hor_slit_n: int,
+                            ver_slit: float,
+                            ver_slit_n: int,
+                            **kwargs) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Calculate undulator power density spatial distribution using SRW.
 
-def undulator_radiation():
-    pass
+    Args:
+        file_name (str): The name of the output file.
+        json_file (str): The path to the SYNED JSON configuration file.
+        hor_slit (float): Horizontal slit size [m].
+        hor_slit_n (int): Number of horizontal slit points.
+        ver_slit (float): Vertical slit size [m].
+        ver_slit_n (int): Number of vertical slit points.
+
+    Optional Args (kwargs):
+        observation_point (float): Distance to the observation point. Default is 10 [m].
+        hor_slit_cen (float): Horizontal slit center position [m]. Default is 0.
+        ver_slit_cen (float): Vertical slit center position [m]. Default is 0.
+        Kh (float): Horizontal undulator parameter K. If -1, taken from the SYNED file. Default is -1.
+        Kh_phase (float): Initial phase of the horizontal magnetic field [rad]. Default is 0.
+        Kh_symmetry (int): Symmetry of the horizontal magnetic field vs longitudinal position.
+            1 for symmetric (B ~ cos(2*Pi*n*z/per + ph)),
+           -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)). Default is 1.
+        Kv (float): Vertical undulator parameter K. If -1, taken from the SYNED file. Default is -1.
+        Kv_phase (float): Initial phase of the vertical magnetic field [rad]. Default is 0.
+        Kv_symmetry (int): Symmetry of the vertical magnetic field vs longitudinal position.
+            1 for symmetric (B ~ cos(2*Pi*n*z/per + ph)),
+           -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)). Default is 1.
+        magnetic_measurement (Optional[str]): Path to the file containing magnetic measurement data.
+            Overrides SYNED undulator data. Default is None.
+        tabulated_undulator_mthd (int): Method to tabulate the undulator field
+            0: uses the provided magnetic field, 
+            1: fits the magnetic field using srwl.UtiUndFromMagFldTab). Default is 0.
+        electron_trajectory (bool): Whether to calculate and save electron trajectory. Default is False.
+        filament_beam (bool): Whether to use a filament electron beam. Default is False.
+        energy_spread (bool): Whether to include energy spread. Default is True.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing power density, horizontal axis, and vertical axis.
+    """
+    
+    t0 = time.time()
+
+    print("Undulator power density spatial distribution using SRW. Please wait...")
+
+    observation_point = kwargs.get('observation_point', 10.)
+    hor_slit_cen = kwargs.get('hor_slit_cen', 0)
+    ver_slit_cen = kwargs.get('ver_slit_cen', 0)
+    Kh = kwargs.get('Kh', -1)
+    Kh_phase = kwargs.get('Kh_phase', 0)
+    Kh_symmetry = kwargs.get('Kh_symmetry', 1)
+    Kv = kwargs.get('Kv', -1)
+    Kv_phase = kwargs.get('Kv_phase', 0)
+    Kv_symmetry = kwargs.get('Kv_symmetry', 1)
+    magnetic_measurement = kwargs.get('magnetic_measurement', None)
+    tabulated_undulator_mthd = kwargs.get('tabulated_undulator_mthd', 0)
+    electron_trajectory = kwargs.get('electron_trajectory', False)
+    filament_beam = kwargs.get('filament_beam', False)
+    energy_spread = kwargs.get('energy_spread', True)
+
+    bl = syned_dictionary(json_file, magnetic_measurement, observation_point, hor_slit, 
+                    ver_slit, hor_slit_cen, ver_slit_cen, Kh, Kh_phase, Kh_symmetry, 
+                    Kv, Kv_phase, Kv_symmetry)
+    
+    eBeam, magFldCnt, eTraj = set_light_source(file_name, bl, filament_beam, 
+                                               energy_spread, magnetic_measurement,
+                                               tabulated_undulator_mthd, 
+                                               electron_trajectory)
+    
+    # ----------------------------------------------------------------------------------
+    # power density calculations
+    # ----------------------------------------------------------------------------------
+
+    #***********Precision Parameters
+    arPrecPar = [0]*5     # for power density
+    arPrecPar[0] = 1.5    # precision factor
+    arPrecPar[1] = 1      # power density computation method (1- "near field", 2- "far field")
+    arPrecPar[2] = 0.0    # initial longitudinal position (effective if arPrecPar[2] < arPrecPar[3])
+    arPrecPar[3] = 0.0    # final longitudinal position (effective if arPrecPar[2] < arPrecPar[3])
+    arPrecPar[4] = 20000  # number of points for (intermediate) trajectory calculation
+
+    stk = srwlib.SRWLStokes() 
+    stk.allocate(1, hor_slit_n, ver_slit_n)     
+    stk.mesh.zStart = bl['distance']
+    stk.mesh.xStart = bl['slitHcenter'] - bl['slitH']/2
+    stk.mesh.xFin =   bl['slitHcenter'] + bl['slitH']/2
+    stk.mesh.yStart = bl['slitVcenter'] - bl['slitV']/2
+    stk.mesh.yFin =   bl['slitVcenter'] + bl['slitV']/2
+
+    print('> Performing on-axis spectrum from filament electron beam ... ', end='')
+    srwlib.srwl.CalcPowDenSR(stk, eBeam, 0, magFldCnt, arPrecPar)
+    print('completed')
+
+    print("Undulator power density spatial distribution using SRW: finished")
+
+    power_density = np.reshape(stk.arS[0:stk.mesh.ny*stk.mesh.nx], (stk.mesh.ny, stk.mesh.nx))
+    h_axis = np.linspace(-bl['slitH'] / 2, bl['slitH'] / 2, hor_slit_n)
+    v_axis = np.linspace(-bl['slitV'] / 2, bl['slitV'] / 2, ver_slit_n)
+
+    with h5.File('%s_power_density.h5'%file_name, 'w') as f:
+        group = f.create_group('XOPPY_POWERDENSITY')
+        sub_group = group.create_group('PowerDensity')
+        sub_group.create_dataset('image_data', data=power_density)
+        sub_group.create_dataset('axis_x', data=h_axis*1e3)    # axis in [mm]
+        sub_group.create_dataset('axis_y', data=v_axis*1e3)
+
+    print_elapsed_time(t0)
+
+    return power_density, h_axis, v_axis
+
+
+def undulator_radiation(file_name: str, 
+                        json_file: str, 
+                        photon_energy_min: float,
+                        photon_energy_max: float,
+                        photon_energy_points: int, 
+                        hor_slit: float, 
+                        hor_slit_n: int,
+                        ver_slit: float,
+                        ver_slit_n: int,
+                        **kwargs) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Calculate undulator power density spatial distribution using SRW.
+
+    Args:
+        file_name (str): The name of the output file.
+        json_file (str): The path to the SYNED JSON configuration file.
+        photon_energy_min (float): Minimum photon energy [eV].
+        photon_energy_max (float): Maximum photon energy [eV].
+        photon_energy_points (int): Number of photon energy points.
+        hor_slit (float): Horizontal slit size [m].
+        hor_slit_n (int): Number of horizontal slit points.
+        ver_slit (float): Vertical slit size [m].
+        ver_slit_n (int): Number of vertical slit points.
+
+    Optional Args (kwargs):
+        observation_point (float): Distance to the observation point. Default is 10 [m].
+        hor_slit_cen (float): Horizontal slit center position [m]. Default is 0.
+        ver_slit_cen (float): Vertical slit center position [m]. Default is 0.
+        Kh (float): Horizontal undulator parameter K. If -1, taken from the SYNED file. Default is -1.
+        Kh_phase (float): Initial phase of the horizontal magnetic field [rad]. Default is 0.
+        Kh_symmetry (int): Symmetry of the horizontal magnetic field vs longitudinal position.
+            1 for symmetric (B ~ cos(2*Pi*n*z/per + ph)),
+           -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)). Default is 1.
+        Kv (float): Vertical undulator parameter K. If -1, taken from the SYNED file. Default is -1.
+        Kv_phase (float): Initial phase of the vertical magnetic field [rad]. Default is 0.
+        Kv_symmetry (int): Symmetry of the vertical magnetic field vs longitudinal position.
+            1 for symmetric (B ~ cos(2*Pi*n*z/per + ph)),
+           -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)). Default is 1.
+        magnetic_measurement (Optional[str]): Path to the file containing magnetic measurement data.
+            Overrides SYNED undulator data. Default is None.
+        tabulated_undulator_mthd (int): Method to tabulate the undulator field
+            0: uses the provided magnetic field, 
+            1: fits the magnetic field using srwl.UtiUndFromMagFldTab). Default is 0.
+        electron_trajectory (bool): Whether to calculate and save electron trajectory. Default is False.
+        filament_beam (bool): Whether to use a filament electron beam. Default is False.
+        energy_spread (bool): Whether to include energy spread. Default is True.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing power density, horizontal axis, and vertical axis.
+    """
+
+    t0 = time.time()
+
+    print("Undulator radiation spatial and spectral distribution using SRW. Please wait...")
+
+    observation_point = kwargs.get('observation_point', 10.)
+    hor_slit_cen = kwargs.get('hor_slit_cen', 0)
+    ver_slit_cen = kwargs.get('ver_slit_cen', 0)
+    Kh = kwargs.get('Kh', -1)
+    Kh_phase = kwargs.get('Kh_phase', 0)
+    Kh_symmetry = kwargs.get('Kh_symmetry', 1)
+    Kv = kwargs.get('Kv', -1)
+    Kv_phase = kwargs.get('Kv_phase', 0)
+    Kv_symmetry = kwargs.get('Kv_symmetry', 1)
+    magnetic_measurement = kwargs.get('magnetic_measurement', None)
+    tabulated_undulator_mthd = kwargs.get('tabulated_undulator_mthd', 0)
+    electron_trajectory = kwargs.get('electron_trajectory', False)
+    filament_beam = kwargs.get('filament_beam', False)
+    energy_spread = kwargs.get('energy_spread', True)
+
+    bl = syned_dictionary(json_file, magnetic_measurement, observation_point, hor_slit, 
+                    ver_slit, hor_slit_cen, ver_slit_cen, Kh, Kh_phase, Kh_symmetry, 
+                    Kv, Kv_phase, Kv_symmetry)
+    
+    eBeam, magFldCnt, eTraj = set_light_source(file_name, bl, filament_beam, 
+                                               energy_spread, magnetic_measurement,
+                                               tabulated_undulator_mthd, 
+                                               electron_trajectory)
+    
+    print("Undulator radiation spatial and spectral distribution using SRW: finished")
+
+    print_elapsed_time(t0)
+
+    return #UR, h_axis, v_axis
 
 #***********************************************************************************
 # SRW interfaced functions
 #***********************************************************************************
+
+def set_light_source(file_name: str,
+                     bl: dict,
+                     filament_beam: bool,
+                     energy_spread: bool,
+                     magnetic_measurement: Optional[str],
+                     tabulated_undulator_mthd: int,
+                     electron_trajectory: bool) -> Tuple[srwlib.SRWLPartBeam, srwlib.SRWLMagFldC, srwlib.SRWLPrtTrj]:
+    """
+    Set up the light source parameters including electron beam, magnetic structure, and electron trajectory.
+
+    Args:
+        file_name (str): The name of the output file.
+        bl (dict): Beamline parameters dictionary containing essential information for setup.
+        filament_beam (bool): Flag indicating whether to set the beam emittance to zero.
+        energy_spread (bool): Flag indicating whether to set the beam energy spread to zero.
+        magnetic_measurement (Optional[str]): Path to the file containing magnetic measurement data.
+        tabulated_undulator_mthd (int): Method to tabulate the undulator field.
+        electron_trajectory (bool): Whether to calculate and save electron trajectory.
+
+    Returns:
+        Tuple[srwlib.SRWLPartBeam, srwlib.SRWLMagFldC, srwlib.SRWLPrtTrj]: A tuple containing the electron beam,
+        magnetic structure, and electron trajectory.
+    """    
+    # ----------------------------------------------------------------------------------
+    # definition of the electron beam
+    # ----------------------------------------------------------------------------------
+    print('> Generating the electron beam ... ', end='')
+    eBeam = set_electron_beam(bl,
+                              filament_beam,
+                              energy_spread)
+    print('completed')
+    # ----------------------------------------------------------------------------------
+    # definition of magnetic structure
+    # ----------------------------------------------------------------------------------
+    print('> Generating the magnetic structure ... ', end='')
+    magFldCnt = set_magnetic_structure(bl,
+                                       magnetic_measurement, 
+                                       tabulated_undulator_mthd)
+    print('completed')
+    # ----------------------------------------------------------------------------------
+    # calculate electron trajectory
+    # ----------------------------------------------------------------------------------
+    print('> Electron trajectory calculation ... ', end='')
+    if electron_trajectory:
+        print('>> srwlCalcPartTraj ... ', end='')
+        electron_trajectory_file_name = file_name+"_eTraj.dat"
+        eTraj = srwlCalcPartTraj(eBeam, magFldCnt)
+        eTraj.save_ascii(electron_trajectory_file_name)
+        print(f">>>{electron_trajectory_file_name}<<< ", end='')
+    else:
+        eTraj = 0
+    print('completed')
+
+    return eBeam, magFldCnt, eTraj
+
 
 def set_electron_beam(bl: dict, filament_beam: bool, energy_spread: bool) -> srwlib.SRWLPartBeam:
     """
@@ -321,6 +554,7 @@ def set_magnetic_structure(bl: dict, magnetic_measurement: Union[str, None],
         
     else:    # tabulated magnetic field
         magFldCnt = srwlib.srwl_uti_read_mag_fld_3d(magnetic_measurement, _scom='#')
+        print(" tabulated magnetic field ... ", end="")
         if tabulated_undulator_mthd  != 0:   # similar to srwl_bl.set_und_per_from_tab()
             # TODO: parametrise
             """Setup periodic Magnetic Field from Tabulated one
@@ -642,10 +876,10 @@ def srwlibsrwl_wfr_emit_prop_multi_e(bl, eBeam, magFldCnt, energy_array,
 # Potpourri
 #***********************************************************************************
 
-def generate_beamline(json_file: str, magnetic_measurement: Union[str, None], observation_point: float, 
-                      hor_slit: float, ver_slit: float, hor_slit_cen: float, ver_slit_cen: float, 
-                      Kh: float, Kh_phase: float, Kh_symmetry: int, Kv: float, Kv_phase: float, 
-                      Kv_symmetry: int) -> dict:
+def syned_dictionary(json_file: str, magnetic_measurement: Union[str, None], observation_point: float, 
+                     hor_slit: float, ver_slit: float, hor_slit_cen: float, ver_slit_cen: float, 
+                     Kh: float, Kh_phase: float, Kh_symmetry: int, Kv: float, Kv_phase: float, 
+                     Kv_symmetry: int) -> dict:
     """
     Generate beamline parameters based on SYNED JSON configuration file and input parameters.
 
@@ -662,12 +896,12 @@ def generate_beamline(json_file: str, magnetic_measurement: Union[str, None], ob
         Kh_phase (float): Initial phase of the horizontal magnetic field [rad].
         Kh_symmetry (int): Symmetry of the horizontal magnetic field vs longitudinal position.
             1 for symmetric (B ~ cos(2*Pi*n*z/per + ph)),
-            -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)).
+           -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)).
         Kv (float): Vertical undulator parameter K. If -1, it's taken from the SYNED file.
         Kv_phase (float): Initial phase of the vertical magnetic field [rad].
         Kv_symmetry (int): Symmetry of the vertical magnetic field vs longitudinal position.
             1 for symmetric (B ~ cos(2*Pi*n*z/per + ph)),
-            -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)).
+           -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)).
 
     Returns:
         dict: A dictionary containing beamline parameters.
@@ -725,6 +959,7 @@ def get_undulator_max_harmonic_number(resonant_energy: float, photonEnergyMax: f
     srw_max_harmonic_number = int(photonEnergyMax / resonant_energy * 2.5)
 
     return srw_max_harmonic_number
+
 
 if __name__ == '__main__':
     print("This is the barc4sr.xoppy lib!")

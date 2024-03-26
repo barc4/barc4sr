@@ -171,3 +171,4 @@ cython_debug/
 *.dat
 *.json
 *.gif
+*__srwl_logs__
