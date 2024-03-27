@@ -171,7 +171,7 @@ def get_magnetic_field_properties(mag_field_component: np.ndarray,
     average_peak = np.mean(mag_field_component[peaks])
     peak_dispersion = np.std(mag_field_component[peaks])
 
-    print(f"Number of periods: {len(periods)}")
+    print(f"Number of periods: {len(periods)-1}")
     print(f"Average period: {average_period * 1e3:.3f}+-{period_dispersion * 1e3:.3f} [mm]")
     print(f"Average peak: {average_peak:.3f}+-{peak_dispersion:.3f} [T]")
 
@@ -336,19 +336,19 @@ def get_emission_energy(und_per: float, K: float, ring_e: float, n: int = 1, the
     return energy_wavelength(emission_wavelength, "m")
 
 
-def find_emission_harmonic(energy: float, und_per: float, ring_e: float, Kmin: float = 0.1, theta: float = 0) -> int:
+def find_emission_harmonic_and_K(energy: float, und_per: float, ring_e: float, Kmin: float = 0.1, theta: float = 0) -> Tuple[int, float]:
     """
-    Find the emission harmonic number for a given energy in a storage ring.
+    Find the emission harmonic number and undulator parameter K for a given energy in a storage ring.
 
     Parameters:
-        energy (float): Energy of the emitted radiation in electron volts.
-        und_per (float): Undulator period in meters.
-        ring_e (float): Energy of electrons in GeV.
-        Kmin (float, optional): Minimum value of the undulator parameter (default is 0.1).
-        theta (float, optional): Observation angle in radians (default is 0).
+        - energy (float): Energy of the emitted radiation in electron volts.
+        - und_per (float): Undulator period in meters.
+        - ring_e (float): Energy of electrons in GeV.
+        - Kmin (float, optional): Minimum value of the undulator parameter (default is 0.1).
+        - theta (float, optional): Observation angle in radians (default is 0).
 
     Returns:
-        int: Emission harmonic number.
+        Tuple[int, float]: A tuple containing the emission harmonic number and the undulator parameter K.
 
     Raises:
         ValueError: If no valid harmonic is found.
@@ -368,7 +368,7 @@ def find_emission_harmonic(energy: float, und_per: float, ring_e: float, Kmin: f
         if count > 21:
             raise ValueError("No valid harmonic found.")
 
-    return harm
+    return harm, K
         
 
 def calculates_on_axis_flux():
