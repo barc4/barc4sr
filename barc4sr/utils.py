@@ -261,6 +261,23 @@ class ElectronBeam:
         self.moment_yy  += (self.moment_yyp + self.moment_ypyp)*dist**2
         self.moment_yyp += (self.moment_ypyp)*dist
 
+    def get_attribute(self):
+        """
+        Prints all attribute of object
+        """
+
+        for i in (vars(self)):
+            print("{0:10}: {1}".format(i, vars(self)[i]))
+
+    def print_rms(self):
+        """
+        Prints electron beam rms sizes and divergences 
+        """
+
+        print(f"electron beam:\n\
+              >> x/xp = {np.sqrt(self.moment_xx)*1e6:0.2f} um vs. {np.sqrt(self.moment_xpxp)*1e6:0.2f} urad\n\
+              >> y/yp = {np.sqrt(self.moment_yy)*1e6:0.2f} um vs. {np.sqrt(self.moment_ypyp)*1e6:0.2f} urad")
+
 class MagneticStructure:
     """
     Class for entering the undulator parameters
@@ -297,13 +314,13 @@ class MagneticStructure:
         """
         wavelength = energy_wavelength(energy, 'eV')
         gamma = get_gamma(eBeamEnergy)
+        K = np.sqrt(2)*np.sqrt(((2 * harmonic * wavelength * gamma ** 2)/self.period_length)-1)
 
         if "v" in direction:
-            self.K_vertical = np.sqrt((2 * (2 * harmonic * wavelength * gamma ** 2) / self.period_length  - 1))
+            self.K_vertical = K
         elif "h" in direction:
-            self.K_horizontal = np.sqrt((2 * (2 * harmonic * wavelength * gamma ** 2) / self.period_length  - 1))
+            self.K_horizontal = K
         else:
-            K = np.sqrt((2 * (2 * harmonic * wavelength * gamma ** 2) / self.period_length  - 1))
             self.K_vertical = np.sqrt(K/2)
             self.K_horizontal = np.sqrt(K/2)
 
@@ -322,6 +339,14 @@ class MagneticStructure:
            self.K_horizontal = CHARGE * Bx * self.period_length / (2 * PI * MASS * LIGHT)
         if By is not None:
            self.K_horizontal = CHARGE * By * self.period_length / (2 * PI * MASS * LIGHT)
+
+    def print_resonant_energy(self,  K: float, harmonic: int, eBeamEnergy: float):
+
+        gamma = get_gamma(eBeamEnergy)
+        wavelength = self.period_length/(2 * harmonic * gamma ** 2)*(1+(K**2)/2) 
+        energy = energy_wavelength(wavelength, 'm')
+
+        print(f">> resonant energy {energy:.2f} eV")
 
 
 def write_syned_file(json_file: str, light_source_name: str, ElectronBeamClass: type, 

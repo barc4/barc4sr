@@ -9,7 +9,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '15/MARCH/2024'
-__changed__ = '26/MARCH/2024'
+__changed__ = '28/MARCH/2024'
 
 import array
 import copy
@@ -989,12 +989,12 @@ def srwlibCalcStokesUR(bl: dict,
             print(f" Core {ptime+1}: {time_array[ptime]:.2f} s for {energy_chunks[ptime]} pts (E0 = {energy_array[ptime]:.1f} eV).")
 
     else:
-        results = core_srwlibCalcStokesUR(bl, 
+        results = core_srwlibCalcStokesUR(energy_array,
+                                          bl, 
                                           eBeam,
                                           magFldCnt, 
-                                          arPrecPar,
-                                          energy_array, 
-                                          parallel)
+                                          arPrecPar)
+        
         intensity = np.asarray(results[0], dtype="float64")
 
     return intensity

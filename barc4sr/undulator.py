@@ -360,7 +360,7 @@ def find_emission_harmonic_and_K(energy: float, und_per: float, ring_e: float, K
 
     while harm == 0:
         n = 2 * count + 1
-        K = np.sqrt((2 * (2 * n * wavelength * gamma ** 2) / und_per - 1 - (gamma * theta) ** 2))
+        K = np.sqrt(2 * ((2 * n * wavelength * gamma ** 2) / und_per - 1 - (gamma * theta) ** 2))
         if K >= Kmin:
             harm = int(n)
         count += 1
