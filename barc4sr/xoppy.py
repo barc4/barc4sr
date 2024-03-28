@@ -166,15 +166,15 @@ def undulator_spectrum(file_name: str,
         else:
             print('> Performing on-axis spectrum from filament electron beam ... ', end='')
 
-        flux, x, y = srwlibCalcElecFieldSR(bl, 
-                                           eBeam, 
-                                           magFldCnt,
-                                           energy,
-                                           h_slit_points=1,
-                                           v_slit_points=1,
-                                           radiation_characteristic=0, 
-                                           radiation_dependence=0,
-                                           parallel=parallel)
+        flux, h_axis, v_axis = srwlibCalcElecFieldSR(bl, 
+                                                     eBeam, 
+                                                     magFldCnt,
+                                                     energy,
+                                                     h_slit_points=1,
+                                                     v_slit_points=1,
+                                                     radiation_characteristic=0, 
+                                                     radiation_dependence=0,
+                                                     parallel=parallel)
         print('completed')
     # -----------------------------------------
     # Flux through Finite Aperture (total pol.)
@@ -199,22 +199,21 @@ def undulator_spectrum(file_name: str,
     # accurate partially-coherent simulation
     if calculation == 1 and magnetic_measurement is not None:
         print('> Performing flux through finite aperture (accurate partially-coherent simulation)... ', end='')
-        flux, x, y = srwlibsrwl_wfr_emit_prop_multi_e(bl, 
-                                                      eBeam,
-                                                      magFldCnt,
-                                                      energy,
-                                                      1,
-                                                      1,
-                                                      number_macro_electrons,
-                                                      file_name)       
+        flux, h_axis, v_axis = srwlibsrwl_wfr_emit_prop_multi_e(bl, 
+                                                                eBeam,
+                                                                magFldCnt,
+                                                                energy,
+                                                                1,
+                                                                1,
+                                                                number_macro_electrons,
+                                                                file_name)       
         print('completed')
-
-    print("Undulator spectrum calculation using SRW: finished")
 
     file = open('%s_spectrum.pickle'%file_name, 'wb')
     pickle.dump([energy, flux], file)
     file.close()
 
+    print("Undulator spectrum calculation using SRW: finished")
     print_elapsed_time(t0)
 
     return energy, flux
@@ -317,8 +316,6 @@ def undulator_power_density(file_name: str,
     srwlib.srwl.CalcPowDenSR(stk, eBeam, 0, magFldCnt, arPrecPar)
     print('completed')
 
-    print("Undulator power density spatial distribution using SRW: finished")
-
     power_density = np.reshape(stk.arS[0:stk.mesh.ny*stk.mesh.nx], (stk.mesh.ny, stk.mesh.nx))
     h_axis = np.linspace(-bl['slitH'] / 2, bl['slitH'] / 2, hor_slit_n)
     v_axis = np.linspace(-bl['slitV'] / 2, bl['slitV'] / 2, ver_slit_n)
@@ -330,6 +327,7 @@ def undulator_power_density(file_name: str,
         sub_group.create_dataset('axis_x', data=h_axis*1e3)    # axis in [mm]
         sub_group.create_dataset('axis_y', data=v_axis*1e3)
 
+    print("Undulator power density spatial distribution using SRW: finished")
     print_elapsed_time(t0)
 
     return power_density, h_axis, v_axis
@@ -445,39 +443,43 @@ def undulator_radiation(file_name: str,
     if calculation == 0:
         print('> Performing flux through finite aperture (simplified partially-coherent simulation)... ', end='')
 
-        intesity, x, y = srwlibCalcElecFieldSR(bl, 
-                                               eBeam, 
-                                               magFldCnt,
-                                               energy,
-                                               h_slit_points=hor_slit_n,
-                                               v_slit_points=ver_slit_n,
-                                               radiation_characteristic=1, 
-                                               radiation_dependence=3,
-                                               parallel=parallel)
+        intensity, h_axis, v_axis = srwlibCalcElecFieldSR(bl, 
+                                                          eBeam, 
+                                                          magFldCnt,
+                                                          energy,
+                                                          h_slit_points=hor_slit_n,
+                                                          v_slit_points=ver_slit_n,
+                                                          radiation_characteristic=1, 
+                                                          radiation_dependence=3,
+                                                          parallel=parallel)
         print('completed')
 
 
     # accurate partially-coherent simulation
     if calculation == 1:
         print('> Performing flux through finite aperture (accurate partially-coherent simulation)... ', end='')
-        # flux = srwlibCalcStokesUR(bl, 
-        #                           eBeam, 
-        #                           magFldCnt, 
-        #                           energy, 
-        #                           resonant_energy,
-        #                           parallel)
-
+        flux, h_axis, v_axis = srwlibsrwl_wfr_emit_prop_multi_e(bl, 
+                                                                eBeam,
+                                                                magFldCnt,
+                                                                energy,
+                                                                hor_slit_n,
+                                                                ver_slit_n,
+                                                                number_macro_electrons,
+                                                                file_name) 
         print('completed')
-
     
-
-
+    with h5.File('%s_undulator_radiation.h5'%file_name, 'w') as f:
+        group = f.create_group('XOPPY_RADIATION')
+        radiation_group = group.create_group('Radiation')
+        radiation_group.create_dataset('stack_data', data=intensity)
+        radiation_group.create_dataset('axis0', data=energy)
+        radiation_group.create_dataset('axis1', data=h_axis)
+        radiation_group.create_dataset('axis2', data=v_axis)
 
     print("Undulator radiation spatial and spectral distribution using SRW: finished")
-
     print_elapsed_time(t0)
 
-    return #UR, h_axis, v_axis
+    return energy, intensity, h_axis, v_axis
 
 #***********************************************************************************
 # SRW interfaced functions
@@ -712,7 +714,7 @@ def srwlibCalcElecFieldSR(bl: dict,
                             it defaults to the number of available CPU cores.
 
     Returns:
-        np.ndarray: Array containing intensity data.
+        np.ndarray: Array containing intensity data, horizontal and vertical axes
     """
     
     arPrecPar = [0]*7
@@ -726,28 +728,38 @@ def srwlibCalcElecFieldSR(bl: dict,
 
     if num_cores is None:
         num_cores = mp.cpu_count()
-    dE1 = energy_array[2]-energy_array[1]
-    dE2 = energy_array[1]-energy_array[0]
 
-    # if parallel is True and dE1 == dE2: # approach for regular grid
-    #     chunk_size = 25
-    #     n_slices = len(energy_array)
-    #     chunks = [(spectral_flux_3D[i:i + chunk_size+1], energy[i:i + chunk_size+1], x, y) for i in range(0, n_slices, chunk_size)] 
-        # with mp.Pool() as pool:
-        #     processed_chunks = pool.map(process_chunk, chunks)
-    # for i, (PowDenSR_chunk, flux_chunk, energy_chunck) in enumerate(processed_chunks):
-    #     PowDenSR += PowDenSR_chunk
-    #     if i == 0:
-    #         flux.extend(flux_chunk)
-    #         previous_energy_chunck = energy_chunck
-    #     else: 
-    #         if energy_chunck[0] == previous_energy_chunck[-1]:
-    #             flux.extend(flux_chunk[1:])
-    #         else:
-    #             flux.extend(flux_chunk)
-    #     previous_energy_chunck = energy_chunck
-    # elif parallel:
-    if parallel:
+    dE = np.diff(energy_array)    
+    dE1 = np.min(dE)
+    dE2 = np.max(dE)
+
+    if parallel is True and np.allclose(dE1, dE2):
+
+        chunk_size = 20
+        n_slices = len(energy_array)
+
+        chunks = [(energy_array[i:i + chunk_size],
+                   bl, 
+                   eBeam,
+                   magFldCnt, 
+                   arPrecPar, 
+                   h_slit_points, 
+                   v_slit_points, 
+                   radiation_characteristic, 
+                   radiation_dependence,
+                   parallel) for i in range(0, n_slices, chunk_size)]
+        
+        with mp.Pool() as pool:
+            processed_chunks = pool.map(core_srwlibCalcElecFieldSR, chunks)
+
+        for i, (intensity_chunck) in enumerate(processed_chunks):
+            if i == 0:
+                intensity = intensity_chunck
+            else:
+                intensity = np.concatenate((intensity, intensity_chunck), axis=0)
+
+    elif parallel:
+
         dE = (energy_array[-1] - energy_array[0]) / num_cores
         energy_chunks = []
         for i in range(num_cores):
@@ -779,9 +791,9 @@ def srwlibCalcElecFieldSR(bl: dict,
             time_array.append(calcs[4])
             energy_chunks.append(len(calcs[3]))
             if k == 0:
-                intensArray = calcs[0]
+                intensity = calcs[0]
             else:
-                intensArray = np.concatenate((intensArray, calcs[0]), axis=0)
+                intensity = np.concatenate((intensity, calcs[0]), axis=0)
             k+=1
         print(">>> ellapse time:")
         for ptime in range(len(time_array)):
@@ -811,31 +823,6 @@ def srwlibCalcElecFieldSR(bl: dict,
 
     return intensity, x_axis, y_axis
 
-# def process_chunk(args):
-#     """
-#     Process a chunk of spectral flux data.
-
-#     This function calculates the power density and flux for a chunk of spectral flux data.
-
-#     Parameters:
-#         args (tuple): A tuple containing the following elements:
-#             - spectral_flux_3D_chunk (np.ndarray): A chunk of spectral flux data.
-#             - energy_chunk (np.ndarray): A chunk of energy values.
-#             - x (np.ndarray): A 1D numpy array containing the x-axis values.
-#             - y (np.ndarray): A 1D numpy array containing the y-axis values.
-
-#     Returns:
-#         tuple: A tuple containing the calculated power density and flux.
-#     """
-#     spectral_flux_3D_chunk, energy_chunk, x, y = args
-
-#     dx = x[1] - x[0]
-#     dy = y[1] - y[0]
-
-#     flux = dx * dy * np.sum(spectral_flux_3D_chunk, axis=(1, 2))
-#     PowDenSR = integrate.trapezoid(spectral_flux_3D_chunk * CHARGE * 1E3, energy_chunk, axis=0)
-
-#     return PowDenSR, flux, energy_chunk
 
 def core_srwlibCalcElecFieldSR(energy_array: np.ndarray,
                                bl: dict, 
