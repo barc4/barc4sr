@@ -128,25 +128,30 @@ def generate_magnetic_measurement(und_per: float, B: float, num_und_per: int,
     Returns:
         tuple: A tuple containing the magnetic field array and the axis array.
     """
-
+    # num_und_per += 2
     nsteps = int(num_und_per * und_per / step_size)
-    axis = np.linspace(-(num_und_per + 4) * und_per / 2, (num_und_per + 4) * und_per / 2, nsteps)
-
+    axis = np.linspace(-(num_und_per + 5) * und_per / 2, (num_und_per + 5) * und_per / 2, nsteps)
+    
     if und_per_disp != 0 or B_disp != 0 or initial_phase_disp != 0:
-        np.random.seed(seed)
+        print("Adding phase errors")
         Bd = B + B_disp * np.sin(2 * np.pi * axis / (und_per * np.random.uniform(7.5, 12.5)) + np.random.normal(0, 1))
+        magnetic_field = np.zeros((num_samples, len(axis)))
         dund_per = np.random.normal(loc=und_per, scale=und_per_disp, size=num_samples)
         dphase = np.random.normal(loc=0, scale=initial_phase_disp * np.pi / 180, size=num_samples)
-        magnetic_field = Bd * np.sin(2 * np.pi * axis[:, np.newaxis] / dund_per + dphase)
-        magnetic_field = np.mean(magnetic_field, axis=1) * Bd
+        for i in range(num_samples):
+            magnetic_field[i,:] = np.sin(2 * np.pi * axis / dund_per[i] + dphase[i])
+        magnetic_field = Bd*np.mean(magnetic_field, axis=0)
     else:
         magnetic_field = B * np.sin(2 * np.pi * axis / und_per)
 
     if add_terminations:
         magnetic_field[axis < -(num_und_per) * und_per / 2] *= 0.5
         magnetic_field[axis > (num_und_per) * und_per / 2] *= 0.5
-        magnetic_field[axis < -(num_und_per + 1) * und_per / 2] = 0
-        magnetic_field[axis > (num_und_per + 1) * und_per / 2] = 0
+        magnetic_field[axis < -(num_und_per + 1) * und_per / 2] *= 0
+        magnetic_field[axis > (num_und_per + 1) * und_per / 2] *= 0         
+        # TODO: force first and second integrals:
+        magnetic_field = np.gradient(magnetic_field)
+        magnetic_field = B*magnetic_field/np.amax(magnetic_field)
     else:
         magnetic_field[axis < -(num_und_per) * und_per / 2] = 0
         magnetic_field[axis > (num_und_per) * und_per / 2] = 0
@@ -162,24 +167,24 @@ def generate_magnetic_measurement(und_per: float, B: float, num_und_per: int,
     
     if file_path is not None:
         if save_srw:
-            magFldCnt = [axis, magnetic_field_vertical, magnetic_field_horizontal]
+            magFldCnt = np.zeros([len(axis), 3])
+            for i in range(len(axis)):
+                magFldCnt[i,0] = axis[i]
+                magFldCnt[i,1] = magnetic_field_horizontal[i]
+                magFldCnt[i,2] = magnetic_field_vertical[i]
             magFldCnt = generate_srw_magnetic_field(magFldCnt,file_path.replace(".txt", ".dat"))
 
         else:
+            print(field_direction)
+            print(np.amax(magnetic_field_vertical))
+            print(np.amax(magnetic_field_horizontal))
+
             print(f">>> saving {file_path}")
             with open(file_path, 'w') as file:
                 file.write("# Magnetic field data\n")
                 file.write("# Axis_position   Vertical_field   Horizontal_field\n")
                 for i in range(len(axis)):
-                    if i < len(magnetic_field_vertical):
-                        vertical_field = magnetic_field_vertical[i]
-                    else:
-                        vertical_field = 0
-                    if i < len(magnetic_field_horizontal):
-                        horizontal_field = magnetic_field_horizontal[i]
-                    else:
-                        horizontal_field = 0
-                    file.write(f"{axis[i]}   {vertical_field}   {horizontal_field}\n")
+                    file.write(f"{axis[i]}   {magnetic_field_horizontal[i]}   {magnetic_field_vertical[i]}\n")
 
     return magnetic_field, axis
 
@@ -246,18 +251,16 @@ def get_magnetic_field_properties(mag_field_component: np.ndarray,
                         
         Dictionary structure:
             {
-                "field": np.ndarray,           # Array containing the magnetic field component data.
-                "axis": np.ndarray,            # Array containing the axis data corresponding to the magnetic field component.
-                "mag_field_mean": float,       # Mean value of the magnetic field component.
-                "mag_field_std": float,        # Standard deviation of the magnetic field component.
-                "und_period_mean": float,      # Mean value of the undulator period.
-                "und_period_std": float,       # Standard deviation of the undulator period.
-                "field_integral": {            # Dictionary containing first and second field integrals.
-                    "first": np.ndarray,       # Array containing the first field integral.
-                    "second": np.ndarray       # Array containing the second field integral.
-                },
-                "freq": np.ndarray,            # Array containing frequency data for FFT analysis.
-                "fft": np.ndarray              # Array containing FFT data.
+                "field": np.ndarray,                  # Array containing the magnetic field component data.
+                "axis": np.ndarray,                   # Array containing the axis data corresponding to the magnetic field component.
+                "mag_field_mean": float,              # Mean value of the magnetic field component.
+                "mag_field_std": float,               # Standard deviation of the magnetic field component.
+                "und_period_mean": float,             # Mean value of the undulator period.
+                "und_period_std": float,              # Standard deviation of the undulator period.
+                "first_field_integral": np.ndarray,   # Array containing the first field integral.
+                "second_field_integral": np.ndarray,  # Array containing the first field integral.
+                "freq": np.ndarray,                   # Array containing frequency data for FFT analysis.
+                "fft": np.ndarray                     # Array containing FFT data.
             }
     """
 
@@ -271,7 +274,7 @@ def get_magnetic_field_properties(mag_field_component: np.ndarray,
     average_peak = np.mean(mag_field_component[peaks])
     peak_dispersion = np.std(mag_field_component[peaks])
 
-    print(f"Number of periods: {len(periods)-1}")
+    print(f"Number of peaks over 0.7*Bmax: {len(peaks)}")
     print(f"Average period: {average_period * 1e3:.3f}+-{period_dispersion * 1e3:.3f} [mm]")
     print(f"Average peak: {average_peak:.3f}+-{peak_dispersion:.3f} [T]")
 
@@ -292,11 +295,11 @@ def get_magnetic_field_properties(mag_field_component: np.ndarray,
 
     # First and second field integrals
 
-    first_field_integral = integrate.integrate.cumulative_trapezoid(mag_field_component, field_axis, initial=0)
-    second_field_integral = integrate.integrate.cumulative_trapezoid(first_field_integral, field_axis, initial=0)
+    first_field_integral = integrate.cumulative_trapezoid(mag_field_component, field_axis, initial=0)
+    second_field_integral = integrate.cumulative_trapezoid(first_field_integral, field_axis, initial=0)
 
-    mag_field_properties["field_integral"]["first"] = first_field_integral
-    mag_field_properties["field_integral"]["second"] = second_field_integral
+    mag_field_properties["first_field_integral"] = first_field_integral
+    mag_field_properties["second_field_integral"] = second_field_integral
 
     # Frequency analysis of the magnetic field
     pad = kwargs.get("pad", False)
