@@ -529,7 +529,6 @@ def set_light_source(file_name: str,
     # ----------------------------------------------------------------------------------
     print('> Electron trajectory calculation ... ', end='')
     if electron_trajectory:
-        print('>> srwlCalcPartTraj ... ', end='')
         electron_trajectory_file_name = file_name+"_eTraj.dat"
         eTraj = srwlCalcPartTraj(eBeam, magFldCnt)
         eTraj.save_ascii(electron_trajectory_file_name)

@@ -130,7 +130,7 @@ def generate_magnetic_measurement(und_per: float, B: float, num_und_per: int,
     """
     # num_und_per += 2
     nsteps = int(num_und_per * und_per / step_size)
-    axis = np.linspace(-(num_und_per + 5) * und_per / 2, (num_und_per + 5) * und_per / 2, nsteps)
+    axis = np.linspace(-(num_und_per + 10) * und_per / 2, (num_und_per + 10) * und_per / 2, nsteps)
     
     if und_per_disp != 0 or B_disp != 0 or initial_phase_disp != 0:
         print("Adding phase errors")
@@ -145,13 +145,15 @@ def generate_magnetic_measurement(und_per: float, B: float, num_und_per: int,
         magnetic_field = B * np.sin(2 * np.pi * axis / und_per)
 
     if add_terminations:
-        magnetic_field[axis < -(num_und_per) * und_per / 2] *= 0.5
-        magnetic_field[axis > (num_und_per) * und_per / 2] *= 0.5
-        magnetic_field[axis < -(num_und_per + 1) * und_per / 2] *= 0
-        magnetic_field[axis > (num_und_per + 1) * und_per / 2] *= 0         
-        # TODO: force first and second integrals:
-        magnetic_field = np.gradient(magnetic_field)
-        magnetic_field = B*magnetic_field/np.amax(magnetic_field)
+        magnetic_field[axis < -(num_und_per) * und_per / 2] *= 3/4
+        magnetic_field[axis > (num_und_per) * und_per / 2] *= 3/4
+        magnetic_field[axis < -(num_und_per + 1) * und_per / 2] *= 1/3
+        magnetic_field[axis > (num_und_per + 1) * und_per / 2] *= 1/3         
+        magnetic_field[axis < -(num_und_per + 2) * und_per / 2] *= 0 
+        magnetic_field[axis > (num_und_per + 2) * und_per / 2] *= 0  
+        # # TODO: force first and second integrals:
+        # magnetic_field = np.gradient(magnetic_field)
+        # magnetic_field = B*magnetic_field/np.amax(magnetic_field)
     else:
         magnetic_field[axis < -(num_und_per) * und_per / 2] = 0
         magnetic_field[axis > (num_und_per) * und_per / 2] = 0
