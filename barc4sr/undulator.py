@@ -10,11 +10,12 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '12/MAR/2024'
-__changed__ = '15/MAR/2024'
+__changed__ = '29/MAR/2024'
 
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
+import scipy.integrate as integrate
 from scipy.constants import physical_constants
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
@@ -39,6 +40,39 @@ CHARGE = physical_constants["atomic unit of charge"][0]
 MASS = physical_constants["electron mass"][0]
 PI = np.pi
 RMS = np.sqrt(2)/2
+
+#***********************************************************************************
+# electron trajectory
+#***********************************************************************************
+
+def read_electron_trajectory(file_path: str) -> Dict[str, List[Union[float, None]]]:
+    """
+    Reads SRW electron trajectory data from a .dat file.
+
+    Args:
+        file_path (str): The path to the .dat file containing electron trajectory data.
+
+    Returns:
+        dict: A dictionary where keys are the column names extracted from the header
+            (ct, X, BetaX, Y, BetaY, Z, BetaZ, Bx, By, Bz),
+            and values are lists containing the corresponding column data from the file.
+    """
+    data = []
+    header = None
+    with open(file_path, 'r') as file:
+        header_line = next(file).strip()
+        header = [col.split()[0] for col in header_line.split(',')]
+        header[0] = header[0].replace("#","")
+        for line in file:
+            values = line.strip().split('\t')
+            values = [float(value) if value != '' else None for value in values]
+            data.append(values)
+            
+    eTrajDict = {}
+    for i, key in enumerate(header):
+        eTrajDict[key] = np.asarray([row[i] for row in data])
+
+    return eTrajDict
 
 #***********************************************************************************
 # read/write functions for magnetic fields
@@ -66,11 +100,91 @@ def read_magnetic_measurement(file_path: str) -> np.ndarray:
     return np.asarray(data)
 
 
-def generate_magnetic_measurement():
-    pass
+def generate_magnetic_measurement(und_per: float, B: float, num_und_per: int, 
+                                  step_size: float, add_terminations: bool = True, 
+                                  field_direction: str="v",
+                                  und_per_disp: float = 0, B_disp: float = 0, 
+                                  initial_phase_disp: float = 0, seed: int = 69, 
+                                  num_samples: int = 1000, file_path: str=None, save_srw: bool=True) -> tuple:
+    """
+    Generate a magnetic measurement.
+
+    This function generates a magnetic measurement with optional variations and noise.
+
+    Args:
+        und_per (float): Period of the undulator.
+        B (float): Amplitude of the magnetic field.
+        num_und_per (int): Number of undulator periods.
+        step_size (float): Step size between samples.
+        add_terminations (bool, optional): Whether to add magnetic terminations. Defaults to True.
+        und_per_disp (float, optional): Standard deviation for random variation in undulator period. Defaults to 0.
+        B_disp (float, optional): Standard deviation for random variation in magnetic field amplitude. Defaults to 0.
+        initial_phase_disp (float, optional): Standard deviation for random variation in initial phase (in degrees). Defaults to 0.
+        seed (int, optional): Seed for the random number generator. Defaults to 69.
+        num_samples (int, optional): Number of samples for averaging. Defaults to 1000.
+        file_path (str, optional): File path to save the generated magnetic field object. If None, the object won't be saved.
+        save_srw (bool, optional): Whether to save the data in SRW format. Defaults to True.
+
+    Returns:
+        tuple: A tuple containing the magnetic field array and the axis array.
+    """
+
+    nsteps = int(num_und_per * und_per / step_size)
+    axis = np.linspace(-(num_und_per + 4) * und_per / 2, (num_und_per + 4) * und_per / 2, nsteps)
+
+    if und_per_disp != 0 or B_disp != 0 or initial_phase_disp != 0:
+        np.random.seed(seed)
+        Bd = B + B_disp * np.sin(2 * np.pi * axis / (und_per * np.random.uniform(7.5, 12.5)) + np.random.normal(0, 1))
+        dund_per = np.random.normal(loc=und_per, scale=und_per_disp, size=num_samples)
+        dphase = np.random.normal(loc=0, scale=initial_phase_disp * np.pi / 180, size=num_samples)
+        magnetic_field = Bd * np.sin(2 * np.pi * axis[:, np.newaxis] / dund_per + dphase)
+        magnetic_field = np.mean(magnetic_field, axis=1) * Bd
+    else:
+        magnetic_field = B * np.sin(2 * np.pi * axis / und_per)
+
+    if add_terminations:
+        magnetic_field[axis < -(num_und_per) * und_per / 2] *= 0.5
+        magnetic_field[axis > (num_und_per) * und_per / 2] *= 0.5
+        magnetic_field[axis < -(num_und_per + 1) * und_per / 2] = 0
+        magnetic_field[axis > (num_und_per + 1) * und_per / 2] = 0
+    else:
+        magnetic_field[axis < -(num_und_per) * und_per / 2] = 0
+        magnetic_field[axis > (num_und_per) * und_per / 2] = 0
+
+    if field_direction == "v":
+        magnetic_field_vertical = magnetic_field
+        magnetic_field_horizontal = magnetic_field*0
+    elif field_direction == "h":
+        magnetic_field_vertical = magnetic_field*0
+        magnetic_field_horizontal = magnetic_field
+    else:
+        raise ValueError("Not valid field direction given.")
+    
+    if file_path is not None:
+        if save_srw:
+            magFldCnt = [axis, magnetic_field_vertical, magnetic_field_horizontal]
+            magFldCnt = generate_srw_magnetic_field(magFldCnt,file_path.replace(".txt", ".dat"))
+
+        else:
+            print(f">>> saving {file_path}")
+            with open(file_path, 'w') as file:
+                file.write("# Magnetic field data\n")
+                file.write("# Axis_position   Vertical_field   Horizontal_field\n")
+                for i in range(len(axis)):
+                    if i < len(magnetic_field_vertical):
+                        vertical_field = magnetic_field_vertical[i]
+                    else:
+                        vertical_field = 0
+                    if i < len(magnetic_field_horizontal):
+                        horizontal_field = magnetic_field_horizontal[i]
+                    else:
+                        horizontal_field = 0
+                    file.write(f"{axis[i]}   {vertical_field}   {horizontal_field}\n")
+
+    return magnetic_field, axis
 
 
-def generate_magnetic_field_3D(mag_field_array: np.ndarray, file_path: Optional[str] = None) -> srwlib.SRWLMagFld3D:
+def generate_srw_magnetic_field(mag_field_array: np.ndarray, file_path: Optional[str] = None) -> srwlib.SRWLMagFld3D:
     """
     Generate a 3D magnetic field object based on the input magnetic field array.
 
@@ -106,37 +220,6 @@ def generate_magnetic_field_3D(mag_field_array: np.ndarray, file_path: Optional[
 
     return magFldCnt
 
-
-def read_electron_trajectory(file_path: str) -> Dict[str, List[Union[float, None]]]:
-    """
-    Reads SRW electron trajectory data from a .dat file.
-
-    Args:
-        file_path (str): The path to the .dat file containing electron trajectory data.
-
-    Returns:
-        dict: A dictionary where keys are the column names extracted from the header
-            (ct, X, BetaX, Y, BetaY, Z, BetaZ, Bx, By, Bz),
-            and values are lists containing the corresponding column data from the file.
-    """
-    data = []
-    header = None
-    with open(file_path, 'r') as file:
-        header_line = next(file).strip()
-        header = [col.split()[0] for col in header_line.split(',')]
-        header[0] = header[0].replace("#","")
-        for line in file:
-            values = line.strip().split('\t')
-            values = [float(value) if value != '' else None for value in values]
-            data.append(values)
-            
-    eTrajDict = {}
-    for i, key in enumerate(header):
-        eTrajDict[key] = np.asarray([row[i] for row in data])
-
-    return eTrajDict
-
-
 #***********************************************************************************
 # magnetic field properties
 #***********************************************************************************
@@ -158,7 +241,24 @@ def get_magnetic_field_properties(mag_field_component: np.ndarray,
 
     Returns:
         Dict[str, Any]: Dictionary containing magnetic field properties including mean, standard deviation,
-                        undulator period mean, undulator period standard deviation, frequency, and FFT data.
+                        undulator period mean, undulator period standard deviation, frequency, FFT data, 
+                        and first and second field integrals.
+                        
+        Dictionary structure:
+            {
+                "field": np.ndarray,           # Array containing the magnetic field component data.
+                "axis": np.ndarray,            # Array containing the axis data corresponding to the magnetic field component.
+                "mag_field_mean": float,       # Mean value of the magnetic field component.
+                "mag_field_std": float,        # Standard deviation of the magnetic field component.
+                "und_period_mean": float,      # Mean value of the undulator period.
+                "und_period_std": float,       # Standard deviation of the undulator period.
+                "field_integral": {            # Dictionary containing first and second field integrals.
+                    "first": np.ndarray,       # Array containing the first field integral.
+                    "second": np.ndarray       # Array containing the second field integral.
+                },
+                "freq": np.ndarray,            # Array containing frequency data for FFT analysis.
+                "fft": np.ndarray              # Array containing FFT data.
+            }
     """
 
     field_axis -= np.mean(field_axis)
@@ -190,6 +290,14 @@ def get_magnetic_field_properties(mag_field_component: np.ndarray,
     # plt.plot(np.zeros_like(mag_field_component), "--", color="gray")
     # plt.show()
 
+    # First and second field integrals
+
+    first_field_integral = integrate.integrate.cumulative_trapezoid(mag_field_component, field_axis, initial=0)
+    second_field_integral = integrate.integrate.cumulative_trapezoid(first_field_integral, field_axis, initial=0)
+
+    mag_field_properties["field_integral"]["first"] = first_field_integral
+    mag_field_properties["field_integral"]["second"] = second_field_integral
+
     # Frequency analysis of the magnetic field
     pad = kwargs.get("pad", False)
     positive_side = kwargs.get("positive_side", True)
@@ -213,7 +321,6 @@ def get_magnetic_field_properties(mag_field_component: np.ndarray,
     mag_field_properties["fft"] = fftfield
 
     return mag_field_properties
-
 
 #***********************************************************************************
 # undulator auxiliary functions
@@ -311,7 +418,6 @@ def get_B_from_gap(gap: Union[float, np.ndarray], und_per: float, coeff: Tuple[f
     B = coeff[0] * np.exp(coeff[1] * gp + coeff[2] * gp**2)
     return B
 
-
 #***********************************************************************************
 # undulator emission
 #***********************************************************************************
@@ -370,10 +476,6 @@ def find_emission_harmonic_and_K(energy: float, und_per: float, ring_e: float, K
 
     return harm, K
         
-
-def calculates_on_axis_flux():
-    pass
-
 #***********************************************************************************
 # power calculation
 #***********************************************************************************
@@ -407,5 +509,3 @@ def total_power(ring_e: float, ring_curr: float, und_per: float, und_n_per: int,
 
     return 0.63*(ring_e**2)*(B**2)*ring_curr*und_per*und_n_per
 
-def partial_power():
-   pass

@@ -1,16 +1,14 @@
-
 #!/bin/python
 
+""" 
+This module provides functions for...
 """
-This module provides ...
-"""
-
 __author__ = ['Rafael Celestre']
 __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '15/MAR/2024'
-__changed__ = '22/MAR/2024'
+__changed__ = '29/MAR/2024'
 
 
 import json
@@ -340,7 +338,15 @@ class MagneticStructure:
         if By is not None:
            self.K_horizontal = CHARGE * By * self.period_length / (2 * PI * MASS * LIGHT)
 
-    def print_resonant_energy(self,  K: float, harmonic: int, eBeamEnergy: float):
+    def print_resonant_energy(self,  K: float, harmonic: int, eBeamEnergy: float) -> None:
+        """
+        Prints the resonant energy based on the provided K-value, harmonic number, and electron beam energy.
+
+        Args:
+            K (float): The K-value of the undulator.
+            harmonic (int): The harmonic number.
+            eBeamEnergy (float): Energy of the electron beam in GeV.
+        """
 
         gamma = get_gamma(eBeamEnergy)
         wavelength = self.period_length/(2 * harmonic * gamma ** 2)*(1+(K**2)/2) 
