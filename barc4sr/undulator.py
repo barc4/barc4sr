@@ -128,9 +128,10 @@ def generate_magnetic_measurement(und_per: float, B: float, num_und_per: int,
     Returns:
         tuple: A tuple containing the magnetic field array and the axis array.
     """
-    # num_und_per += 2
-    nsteps = int(num_und_per * und_per / step_size)
-    axis = np.linspace(-(num_und_per + 10) * und_per / 2, (num_und_per + 10) * und_per / 2, nsteps)
+
+    pad = 10
+    nsteps = int((num_und_per+pad) * und_per / step_size)
+    axis = np.linspace(-(num_und_per + pad) * und_per / 2, (num_und_per + pad) * und_per / 2, nsteps)
     
     if und_per_disp != 0 or B_disp != 0 or initial_phase_disp != 0:
         print("Adding phase errors")
@@ -149,11 +150,9 @@ def generate_magnetic_measurement(und_per: float, B: float, num_und_per: int,
         magnetic_field[axis > (num_und_per) * und_per / 2] *= 3/4
         magnetic_field[axis < -(num_und_per + 1) * und_per / 2] *= 1/3
         magnetic_field[axis > (num_und_per + 1) * und_per / 2] *= 1/3         
-        magnetic_field[axis < -(num_und_per + 2) * und_per / 2] *= 0 
-        magnetic_field[axis > (num_und_per + 2) * und_per / 2] *= 0  
-        # # TODO: force first and second integrals:
-        # magnetic_field = np.gradient(magnetic_field)
-        # magnetic_field = B*magnetic_field/np.amax(magnetic_field)
+        magnetic_field[axis < -(num_und_per + 2) * und_per / 2] = 0 
+        magnetic_field[axis > (num_und_per + 2) * und_per / 2] = 0  
+
     else:
         magnetic_field[axis < -(num_und_per) * und_per / 2] = 0
         magnetic_field[axis > (num_und_per) * und_per / 2] = 0
@@ -171,10 +170,10 @@ def generate_magnetic_measurement(und_per: float, B: float, num_und_per: int,
         if save_srw:
             magFldCnt = np.zeros([len(axis), 3])
             for i in range(len(axis)):
-                magFldCnt[i,0] = axis[i]
+                magFldCnt[i,0] = axis[i]*1e3    # field is measured in mm on the benchtest
                 magFldCnt[i,1] = magnetic_field_horizontal[i]
                 magFldCnt[i,2] = magnetic_field_vertical[i]
-            magFldCnt = generate_srw_magnetic_field(magFldCnt,file_path.replace(".txt", ".dat"))
+            magFldCnt = generate_srw_magnetic_field(magFldCnt, file_path.replace(".txt", ".dat"))
 
         else:
             print(field_direction)
@@ -184,7 +183,7 @@ def generate_magnetic_measurement(und_per: float, B: float, num_und_per: int,
             print(f">>> saving {file_path}")
             with open(file_path, 'w') as file:
                 file.write("# Magnetic field data\n")
-                file.write("# Axis_position   Vertical_field   Horizontal_field\n")
+                file.write("# Axis_position   Horizontal_field   Vertical_field\n")
                 for i in range(len(axis)):
                     file.write(f"{axis[i]}   {magnetic_field_horizontal[i]}   {magnetic_field_vertical[i]}\n")
 
