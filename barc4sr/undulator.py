@@ -423,7 +423,7 @@ def get_B_from_gap(gap: Union[float, np.ndarray], und_per: float, coeff: Tuple[f
     return B
 
 #***********************************************************************************
-# undulator emission
+# undulator emission auxiliary functions
 #***********************************************************************************
 
 def get_emission_energy(und_per: float, K: float, ring_e: float, n: int = 1, theta: float = 0) -> float:
