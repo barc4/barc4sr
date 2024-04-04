@@ -14,6 +14,7 @@ __changed__ = '28/MARCH/2024'
 import array
 import copy
 import multiprocessing as mp
+import os
 import pickle
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -124,7 +125,7 @@ def undulator_spectrum(file_name: str,
     electron_trajectory = kwargs.get('electron_trajectory', False)
     filament_beam = kwargs.get('filament_beam', False)
     energy_spread = kwargs.get('energy_spread', True)
-    number_macro_electrons = kwargs.get('number_macro_electrons', 1000)
+    number_macro_electrons = kwargs.get('number_macro_electrons', 1)
     parallel = kwargs.get('parallel', False)
     num_cores = kwargs.get('num_cores', None)
 
@@ -133,7 +134,10 @@ def undulator_spectrum(file_name: str,
         hor_slit = 0
         ver_slit = 0
     else:
-        calculation = 1
+        if magnetic_measurement is None and number_macro_electrons == 1:
+            calculation = 1
+        if magnetic_measurement is not None or number_macro_electrons > 1:
+            calculation = 2
 
     bl = syned_dictionary(json_file, magnetic_measurement, observation_point, hor_slit, 
                         ver_slit, hor_slit_cen, ver_slit_cen, Kh, Kh_phase, Kh_symmetry, 
@@ -155,9 +159,9 @@ def undulator_spectrum(file_name: str,
     else:
         stepsize = np.log(photon_energy_max/resonant_energy)
         energy = generate_logarithmic_energy_values(photon_energy_min,
-                                                          photon_energy_max,
-                                                          resonant_energy,
-                                                          stepsize)
+                                                    photon_energy_max,
+                                                    resonant_energy,
+                                                    stepsize)
     # ---------------------------------------------------------
     # On-Axis Spectrum from Filament Electron Beam (total pol.)
     if calculation == 0:
@@ -174,13 +178,15 @@ def undulator_spectrum(file_name: str,
                                                      v_slit_points=1,
                                                      radiation_characteristic=0, 
                                                      radiation_dependence=0,
-                                                     parallel=parallel)
+                                                     parallel=parallel,
+                                                     num_cores=num_cores)
+        flux = flux.reshape((photon_energy_points))
         print('completed')
     # -----------------------------------------
     # Flux through Finite Aperture (total pol.)
 
     # simplified partially-coherent simulation
-    if calculation == 1 and magnetic_measurement is None:
+    if calculation == 1:
         if parallel:
             print('> Performing flux through finite aperture (simplified partially-coherent simulation) in parallel... ')
         else:
@@ -197,7 +203,7 @@ def undulator_spectrum(file_name: str,
         print('completed')
 
     # accurate partially-coherent simulation
-    if calculation == 1 and magnetic_measurement is not None:
+    if calculation == 2 and magnetic_measurement is not None:
         print('> Performing flux through finite aperture (accurate partially-coherent simulation)... ', end='')
         flux, h_axis, v_axis = srwlibsrwl_wfr_emit_prop_multi_e(bl, 
                                                                 eBeam,
@@ -206,7 +212,9 @@ def undulator_spectrum(file_name: str,
                                                                 1,
                                                                 1,
                                                                 number_macro_electrons,
-                                                                file_name)       
+                                                                file_name,
+                                                                parallel,
+                                                                num_cores)       
         print('completed')
 
     file = open('%s_spectrum.pickle'%file_name, 'wb')
@@ -732,81 +740,66 @@ def srwlibCalcElecFieldSR(bl: dict,
     dE1 = np.min(dE)
     dE2 = np.max(dE)
 
-    if parallel is True and np.allclose(dE1, dE2):
+    if parallel:
+        if np.allclose(dE1, dE2):
+            chunk_size = 20
+            n_slices = len(energy_array)
 
-        chunk_size = 20
-        n_slices = len(energy_array)
+            chunks = [(energy_array[i:i + chunk_size],
+                    bl, 
+                    eBeam,
+                    magFldCnt, 
+                    arPrecPar, 
+                    h_slit_points, 
+                    v_slit_points, 
+                    radiation_characteristic, 
+                    radiation_dependence,
+                    parallel) for i in range(0, n_slices, chunk_size)]
+            
+            with mp.Pool() as pool:
+                results = pool.map(core_srwlibCalcElecFieldSR, chunks)
+        else:
+            dE = (energy_array[-1] - energy_array[0]) / num_cores
+            energy_chunks = []
 
-        chunks = [(energy_array[i:i + chunk_size],
-                   bl, 
-                   eBeam,
-                   magFldCnt, 
-                   arPrecPar, 
-                   h_slit_points, 
-                   v_slit_points, 
-                   radiation_characteristic, 
-                   radiation_dependence,
-                   parallel) for i in range(0, n_slices, chunk_size)]
-        
-        with mp.Pool() as pool:
-            processed_chunks = pool.map(core_srwlibCalcElecFieldSR, chunks)
+            for i in range(num_cores):
+                bffr = copy.copy(energy_array)                
+                bffr = np.delete(bffr, bffr < dE * (i) + energy_array[0])
+                if i + 1 != num_cores:
+                    bffr = np.delete(bffr, bffr >= dE * (i + 1) + energy_array[0])
+                energy_chunks.append(bffr)
 
-        for i, (intensity_chunck) in enumerate(processed_chunks):
+            results = Parallel(n_jobs=num_cores)(delayed(core_srwlibCalcElecFieldSR)((
+                                                                        list_pairs,
+                                                                        bl,
+                                                                        eBeam,
+                                                                        magFldCnt,
+                                                                        arPrecPar,
+                                                                        h_slit_points,
+                                                                        v_slit_points,
+                                                                        radiation_characteristic,
+                                                                        radiation_dependence,
+                                                                        parallel))
+                                                for list_pairs in energy_chunks)
+            
+        for i, (intensity_chunck, h_chunck, v_chunck, e_chunck, t_chunck) in enumerate(results):
             if i == 0:
                 intensity = intensity_chunck
+                energy_array = np.asarray([e_chunck[0]])
+                energy_chunks = np.asarray([len(e_chunck)])
+                time_array = np.asarray([t_chunck])
             else:
                 intensity = np.concatenate((intensity, intensity_chunck), axis=0)
-
-    elif parallel:
-
-        dE = (energy_array[-1] - energy_array[0]) / num_cores
-        energy_chunks = []
-        for i in range(num_cores):
-            bffr = copy.copy(energy_array)
-            bffr = np.delete(bffr, bffr <= dE * (i))
-            if i + 1 != num_cores:
-                bffr = np.delete(bffr, bffr > dE * (i + 1))
-            energy_chunks.append(bffr)
-
-        results = Parallel(n_jobs=num_cores)(delayed(core_srwlibCalcElecFieldSR)(
-                                                                    list_pairs,
-                                                                    bl,
-                                                                    eBeam,
-                                                                    magFldCnt,
-                                                                    arPrecPar,
-                                                                    h_slit_points,
-                                                                    v_slit_points,
-                                                                    radiation_characteristic,
-                                                                    radiation_dependence,
-                                                                    parallel)
-                                             for list_pairs in energy_chunks)
-
-        energy_array = []
-        time_array = []
-        energy_chunks = []
-        k = 0
-        for calcs in results:
-            energy_array.append(calcs[3][0])
-            time_array.append(calcs[4])
-            energy_chunks.append(len(calcs[3]))
-            if k == 0:
-                intensity = calcs[0]
-            else:
-                intensity = np.concatenate((intensity, calcs[0]), axis=0)
-            k+=1
-        print(">>> ellapse time:")
-        for ptime in range(len(time_array)):
-            print(f" Core {ptime+1}: {time_array[ptime]:.2f} s for {energy_chunks[ptime]} pts (E0 = {energy_array[ptime]:.1f} eV).")
-            
-        if h_slit_points == 1 or v_slit_points == 1:
-            x_axis = np.asarray([0])
-            y_axis = np.asarray([0])
-        else:
-            x_axis = np.linspace(-bl['slitH']/2-bl['slitHcenter'], bl['slitH']/2-bl['slitHcenter'], h_slit_points)
-            y_axis = np.linspace(-bl['slitV']/2-bl['slitVcenter'], bl['slitV']/2-bl['slitVcenter'], v_slit_points)
+                energy_array = np.concatenate((energy_array, np.asarray([e_chunck[0]])))
+                energy_chunks = np.concatenate((energy_chunks, np.asarray([len(e_chunck)])))
+                time_array = np.concatenate((time_array, np.asarray([t_chunck])))
+        if np.allclose(dE1, dE2) is False:
+            print(">>> ellapse time:")
+            for ptime in range(len(time_array)):
+                print(f" Core {ptime+1}: {time_array[ptime]:.2f} s for {energy_chunks[ptime]} pts (E0 = {energy_array[ptime]:.1f} eV).")
 
     else:
-        results = core_srwlibCalcElecFieldSR(energy_array,
+        results = core_srwlibCalcElecFieldSR((energy_array,
                                              bl, 
                                              eBeam,
                                              magFldCnt, 
@@ -815,38 +808,35 @@ def srwlibCalcElecFieldSR(bl: dict,
                                              v_slit_points, 
                                              radiation_characteristic, 
                                              radiation_dependence,
-                                             parallel)
+                                             parallel))
         intensity = results[0]
-        x_axis = results[1]
-        y_axis = results[2] 
+
+    if h_slit_points == 1 or v_slit_points == 1:
+        x_axis = np.asarray([0])
+        y_axis = np.asarray([0])
+    else:
+        x_axis = np.linspace(-bl['slitH']/2-bl['slitHcenter'], bl['slitH']/2-bl['slitHcenter'], h_slit_points)
+        y_axis = np.linspace(-bl['slitV']/2-bl['slitVcenter'], bl['slitV']/2-bl['slitVcenter'], v_slit_points)
 
     return intensity, x_axis, y_axis
 
 
-def core_srwlibCalcElecFieldSR(energy_array: np.ndarray,
-                               bl: dict, 
-                               eBeam: srwlib.SRWLPartBeam, 
-                               magFldCnt: srwlib.SRWLMagFldC, 
-                               arPrecPar: List[float], 
-                               h_slit_points: int, 
-                               v_slit_points: int, 
-                               rad_characteristic: int, 
-                               rad_dependence: int, 
-                               parallel: bool) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+def core_srwlibCalcElecFieldSR(args: Tuple[np.ndarray, dict, srwlib.SRWLPartBeam, srwlib.SRWLMagFldC, List[float], int, int, int, int, bool]) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
     """
     Core function to calculate electric field for synchrotron radiation.
 
     Args:
-        energy_array (np.ndarray): Array of photon energies [eV].
-        bl (dict): Dictionary containing beamline parameters.
-        eBeam (srwlib.SRWLPartBeam): Electron beam properties.
-        magFldCnt (srwlib.SRWLMagFldC): Magnetic field container.
-        arPrecPar (List[float]): Array of parameters for SR calculation.
-        h_slit_points (int): Number of horizontal slit points.
-        v_slit_points (int): Number of vertical slit points.
-        rad_characteristic (int): Radiation characteristic (e.g., 0 for intensity).
-        rad_dependence (int): Radiation dependence (e.g., 1 for angular distribution).
-        parallel (bool): Whether to use parallel computation.
+        args (Tuple): Tuple containing the following elements:
+            energy_array (np.ndarray): Array of photon energies [eV].
+            bl (dict): Dictionary containing beamline parameters.
+            eBeam (srwlib.SRWLPartBeam): Electron beam properties.
+            magFldCnt (srwlib.SRWLMagFldC): Magnetic field container.
+            arPrecPar (List[float]): Array of parameters for SR calculation.
+            h_slit_points (int): Number of horizontal slit points.
+            v_slit_points (int): Number of vertical slit points.
+            rad_characteristic (int): Radiation characteristic (e.g., 0 for intensity).
+            rad_dependence (int): Radiation dependence (e.g., 1 for angular distribution).
+            parallel (bool): Whether to use parallel computation.
 
     Returns:
         Tuple[np.ndarray, np.ndarray, np.ndarray, float]: Tuple containing intensity data, 
@@ -854,6 +844,9 @@ def core_srwlibCalcElecFieldSR(energy_array: np.ndarray,
                                                           and computation time.
     """
 
+    energy_array, bl, eBeam, magFldCnt, arPrecPar,  h_slit_points, v_slit_points, \
+        rad_characteristic, rad_dependence, parallel = args
+    
     tzero = time.time()
 
     _inPol = 6
@@ -864,6 +857,7 @@ def core_srwlibCalcElecFieldSR(energy_array: np.ndarray,
         hAxis = np.asarray([0])
         vAxis = np.asarray([0])
         _inDepType = 0
+        intensity = np.zeros((energy_array.size))
     else:
         hAxis = np.linspace(-bl['slitH']/2-bl['slitHcenter'], bl['slitH']/2-bl['slitHcenter'], h_slit_points)
         vAxis = np.linspace(-bl['slitV']/2-bl['slitVcenter'], bl['slitV']/2-bl['slitVcenter'], v_slit_points)
@@ -889,13 +883,16 @@ def core_srwlibCalcElecFieldSR(energy_array: np.ndarray,
                 arI0 = array.array('f', [0]*wfr.mesh.nx*wfr.mesh.ny) #"flat" array to take 2D intensity data
                 srwlib.srwl.CalcIntFromElecField(arI0, wfr, _inPol, _inIntType, _inDepType, wfr.mesh.eStart, 0, 0)
 
-                data = np.ndarray(buffer=arI0, shape=(wfr.mesh.ny, wfr.mesh.nx), dtype=arI0.typecode)
+                if _inDepType == 0:    # 0 -vs e (photon energy or time);
+                    intensity[ie] = np.asarray(arI0, dtype="float64")
 
-                for ix in range(h_slit_points):
-                    for iy in range(v_slit_points):
-                        intensity[ie, ix, iy,] = data[iy, ix]
+                else:
+                    data = np.ndarray(buffer=arI0, shape=(wfr.mesh.ny, wfr.mesh.nx), dtype=arI0.typecode)
+                    for ix in range(h_slit_points):
+                        for iy in range(v_slit_points):
+                            intensity[ie, ix, iy,] = data[iy, ix]
             except:
-                print("Error running SRW")
+                 raise ValueError("Error running SRW.")
     else:
         try:
             mesh = srwlib.SRWLRadMesh(energy_array[0], energy_array[-1], len(energy_array),
@@ -918,9 +915,9 @@ def core_srwlibCalcElecFieldSR(energy_array: np.ndarray,
             else:
                 pass
         except:
-            print("Error running SRW")
+             raise ValueError("Error running SRW.")
 
-    return intensity, hAxis, vAxis, time.time()-tzero
+    return intensity, hAxis, vAxis, energy_array, time.time()-tzero
 
 
 def srwlibCalcStokesUR(bl: dict, 
@@ -1034,19 +1031,21 @@ def core_srwlibCalcStokesUR(energy_array: np.ndarray,
         srwlib.srwl.CalcStokesUR(stk, eBeam, und, arPrecPar)
         intensity = stk.arS[0:npts]
     except:
-        print("Error running SRW")
+         raise ValueError("Error running SRW.")
 
     return intensity, energy_array, time.time()-tzero
 
 
-def srwlibsrwl_wfr_emit_prop_multi_e(bl,
-                                     eBeam, 
-                                     magFldCnt, 
-                                     energy_array,
-                                     h_slit_points, 
-                                     v_slit_points, 
-                                     number_macro_electrons, 
-                                     aux_file_name):
+def srwlibsrwl_wfr_emit_prop_multi_e(bl: dict,
+                                     eBeam: srwlib.SRWLPartBeam, 
+                                     magFldCnt: srwlib.SRWLMagFldC, 
+                                     energy_array: np.ndarray,
+                                     h_slit_points: int, 
+                                     v_slit_points: int, 
+                                     number_macro_electrons: int, 
+                                     aux_file_name: str,
+                                     parallel: bool,
+                                     num_cores: int=None):
     """
     Interface function to compute multi-electron emission and propagation through a beamline using SRW.
 
@@ -1059,40 +1058,17 @@ def srwlibsrwl_wfr_emit_prop_multi_e(bl,
         v_slit_points (int): Number of vertical slit points.
         number_macro_electrons (int): Total number of macro-electrons.
         aux_file_name (str): Auxiliary file name for saving intermediate data.
-
+        parallel (bool): Whether to use parallel computation.
+        num_cores (int, optional): Number of CPU cores to use for parallel computation. If not specified, 
+                                   it defaults to the number of available CPU cores.
     Returns:
         np.ndarray: Array containing intensity data.
     """
-    mesh = srwlib.SRWLRadMesh(energy_array[0], 
-                              energy_array[-1], 
-                              len(energy_array),
-                              bl['slitHcenter'] - bl['slitH']/2,
-                              bl['slitHcenter'] + bl['slitH']/2, 
-                              h_slit_points,
-                              bl['slitVcenter'] - bl['slitV']/2, 
-                              bl['slitVcenter'] - bl['slitV']/2, 
-                              v_slit_points,
-                              bl['distance'])
-
-    MacroElecFileName = aux_file_name + '_'+ str(int(number_macro_electrons / 1000)).replace('.', 'p') +'k_ME_intensity.dat'
     nMacroElecAvgPerProc = 10   # number of macro-electrons / wavefront to average on worker processes
     nMacroElecSavePer = 100     # intermediate data saving periodicity (in macro-electrons)
     srCalcMeth = 1              # SR calculation method 
     srCalcPrec = 0.01           # SR calculation rel. accuracy
 
-    stk = srwlib.srwl_wfr_emit_prop_multi_e(_e_beam = eBeam, 
-                                            _mag = magFldCnt,
-                                            _mesh = mesh,
-                                            _sr_meth = srCalcMeth,
-                                            _sr_rel_prec = srCalcPrec,
-                                            _n_part_tot = number_macro_electrons,
-                                            _n_part_avg_proc=nMacroElecAvgPerProc, 
-                                            _n_save_per=nMacroElecSavePer,
-                                            _file_path=MacroElecFileName, 
-                                            _sr_samp_fact=-1, 
-                                            _opt_bl=None,
-                                            _char=0)
-    
     if h_slit_points == 1 or v_slit_points == 1:
         hAxis = np.asarray([0])
         vAxis = np.asarray([0])
@@ -1100,7 +1076,141 @@ def srwlibsrwl_wfr_emit_prop_multi_e(bl,
         hAxis = np.linspace(-bl['slitH']/2-bl['slitHcenter'], bl['slitH']/2-bl['slitHcenter'], h_slit_points)
         vAxis = np.linspace(-bl['slitV']/2-bl['slitVcenter'], bl['slitV']/2-bl['slitVcenter'], v_slit_points)
 
-    return stk.to_int(_pol=6), hAxis, vAxis
+    if num_cores is None:
+        num_cores = mp.cpu_count()
+
+    dE = np.diff(energy_array)    
+    dE1 = np.min(dE)
+    dE2 = np.max(dE)
+
+    if parallel is True and np.allclose(dE1, dE2):
+
+        chunk_size = 20
+        n_slices = len(energy_array)
+
+        chunks = [(energy_array[i:i + chunk_size],
+                   bl,
+                   eBeam, 
+                   magFldCnt, 
+                   h_slit_points, 
+                   v_slit_points, 
+                   number_macro_electrons, 
+                   aux_file_name,
+                   srCalcMeth,
+                   srCalcPrec,
+                   nMacroElecAvgPerProc,
+                   nMacroElecSavePer) for i in range(0, n_slices, chunk_size)]
+        
+        with mp.Pool() as pool:
+            processed_chunks = pool.map(core_srwlibsrwl_wfr_emit_prop_multi_e, chunks)
+
+        for i, (intensity_chunck) in enumerate(processed_chunks):
+            if i == 0:
+                intensity = intensity_chunck
+            else:
+                intensity = np.concatenate((intensity, intensity_chunck), axis=0)
+
+    elif parallel:
+
+        dE = (energy_array[-1] - energy_array[0]) / num_cores
+        energy_chunks = []
+        for i in range(num_cores):
+            bffr = copy.copy(energy_array)
+            bffr = np.delete(bffr, bffr <= dE * (i))
+            if i + 1 != num_cores:
+                bffr = np.delete(bffr, bffr > dE * (i + 1))
+            energy_chunks.append(bffr)
+
+        results = Parallel(n_jobs=num_cores)(delayed(core_srwlibsrwl_wfr_emit_prop_multi_e)(
+                                                                    list_pairs,
+                                                                    bl,
+                                                                    eBeam, 
+                                                                    magFldCnt, 
+                                                                    h_slit_points, 
+                                                                    v_slit_points, 
+                                                                    number_macro_electrons, 
+                                                                    aux_file_name,
+                                                                    srCalcMeth,
+                                                                    srCalcPrec,
+                                                                    nMacroElecAvgPerProc,
+                                                                    nMacroElecSavePer)
+                                             for list_pairs in energy_chunks)
+
+        energy_array = []
+        time_array = []
+        energy_chunks = []
+        k = 0
+        for calcs in results:
+            energy_array.append(calcs[3][0])
+            time_array.append(calcs[4])
+            energy_chunks.append(len(calcs[3]))
+            if k == 0:
+                intensity = calcs[0]
+            else:
+                intensity = np.concatenate((intensity, calcs[0]), axis=0)
+            k+=1
+        print(">>> ellapse time:")
+        for ptime in range(len(time_array)):
+            print(f" Core {ptime+1}: {time_array[ptime]:.2f} s for {energy_chunks[ptime]} pts (E0 = {energy_array[ptime]:.1f} eV).")
+    else:
+        results = core_srwlibsrwl_wfr_emit_prop_multi_e(energy_array,
+                                                        bl,
+                                                        eBeam, 
+                                                        magFldCnt, 
+                                                        h_slit_points, 
+                                                        v_slit_points, 
+                                                        number_macro_electrons, 
+                                                        aux_file_name,
+                                                        srCalcMeth,
+                                                        srCalcPrec,
+                                                        nMacroElecAvgPerProc,
+                                                        nMacroElecSavePer)
+        intensity = np.asarray(results[0], dtype="float64")
+
+    return intensity, hAxis, vAxis
+
+
+def core_srwlibsrwl_wfr_emit_prop_multi_e(args):
+
+    energy_array, bl, eBeam, magFldCnt, h_slit_points, v_slit_points, \
+        number_macro_electrons, aux_file_name, srCalcMeth, srCalcPrec, \
+        nMacroElecAvgPerProc, nMacroElecSavePer = args
+    
+    tzero = time.time()
+
+    try:    
+        mesh = srwlib.SRWLRadMesh(energy_array[0], 
+                            energy_array[-1], 
+                            len(energy_array),
+                            bl['slitHcenter'] - bl['slitH']/2,
+                            bl['slitHcenter'] + bl['slitH']/2, 
+                            h_slit_points,
+                            bl['slitVcenter'] - bl['slitV']/2, 
+                            bl['slitVcenter'] - bl['slitV']/2, 
+                            v_slit_points,
+                            bl['distance'])
+
+        MacroElecFileName = aux_file_name + '_'+ str(int(number_macro_electrons / 1000)).replace('.', 'p') +'k_ME_intensity.dat'
+
+        stk = srwlib.srwl_wfr_emit_prop_multi_e(_e_beam = eBeam, 
+                                                _mag = magFldCnt,
+                                                _mesh = mesh,
+                                                _sr_meth = srCalcMeth,
+                                                _sr_rel_prec = srCalcPrec,
+                                                _n_part_tot = number_macro_electrons,
+                                                _n_part_avg_proc=nMacroElecAvgPerProc, 
+                                                _n_save_per=nMacroElecSavePer,
+                                                _file_path=MacroElecFileName, 
+                                                _sr_samp_fact=-1, 
+                                                _opt_bl=None,
+                                                _char=0)
+        
+        os.system('rm %s*'% MacroElecFileName)
+        
+    except:
+         raise ValueError("Error running SRW.")
+
+    return np.asarray(stk.to_int(_pol=6)), time.time()-tzero
 
 #***********************************************************************************
 # Potpourri
