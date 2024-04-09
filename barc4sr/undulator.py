@@ -931,7 +931,10 @@ def undulator_radiation(file_name: str,
         
     # simplified partially-coherent simulation    
     if calculation == 0:
-        print('> Performing flux through finite aperture (simplified partially-coherent simulation)... ', end='')
+        if parallel:
+            print('> Performing flux through finite aperture (simplified partially-coherent simulation) in parallel... ')
+        else:
+            print('> Performing flux through finite aperture (simplified partially-coherent simulation)... ', end='')
 
         intensity, h_axis, v_axis = srwlibCalcElecFieldSR(bl, 
                                                           eBeam, 
@@ -941,9 +944,8 @@ def undulator_radiation(file_name: str,
                                                           v_slit_points=ver_slit_n,
                                                           radiation_characteristic=1, 
                                                           radiation_dependence=3,
-                                                          parallel=parallel)
+                                                          parallel=parallel)        
         print('completed')
-
 
     # accurate partially-coherent simulation
     if calculation == 1:
@@ -963,8 +965,8 @@ def undulator_radiation(file_name: str,
         radiation_group = group.create_group('Radiation')
         radiation_group.create_dataset('stack_data', data=intensity)
         radiation_group.create_dataset('axis0', data=energy)
-        radiation_group.create_dataset('axis1', data=h_axis)
-        radiation_group.create_dataset('axis2', data=v_axis)
+        radiation_group.create_dataset('axis1', data=h_axis*1e3)
+        radiation_group.create_dataset('axis2', data=v_axis*1e3)
 
     print("Undulator radiation spatial and spectral distribution using SRW: finished")
     print_elapsed_time(t0)
@@ -1347,7 +1349,7 @@ def core_srwlibCalcElecFieldSR(args: Tuple[np.ndarray, dict, srwlib.SRWLPartBeam
         hAxis = np.linspace(-bl['slitH']/2-bl['slitHcenter'], bl['slitH']/2-bl['slitHcenter'], h_slit_points)
         vAxis = np.linspace(-bl['slitV']/2-bl['slitVcenter'], bl['slitV']/2-bl['slitVcenter'], v_slit_points)
         _inDepType = 3
-        intensity = np.zeros((energy_array.size, hAxis.size, vAxis.size))
+        intensity = np.zeros((energy_array.size, vAxis.size, hAxis.size))
 
     if parallel:    
         # this is rather convinient for step by step calculations and less memory intensive
@@ -1364,18 +1366,15 @@ def core_srwlibCalcElecFieldSR(args: Tuple[np.ndarray, dict, srwlib.SRWLPartBeam
                 wfr.partBeam = eBeam
 
                 srwlib.srwl.CalcElecFieldSR(wfr, 0, magFldCnt, arPrecPar)
-
-                arI0 = array.array('f', [0]*wfr.mesh.nx*wfr.mesh.ny) #"flat" array to take 2D intensity data
-                srwlib.srwl.CalcIntFromElecField(arI0, wfr, _inPol, _inIntType, _inDepType, wfr.mesh.eStart, 0, 0)
+                arI1 = array.array('f', [0]*wfr.mesh.nx*wfr.mesh.ny) #"flat" array to take 2D intensity data
+                srwlib.srwl.CalcIntFromElecField(arI1, wfr, _inPol, _inIntType, _inDepType, wfr.mesh.eStart, 0, 0)
 
                 if _inDepType == 0:    # 0 -vs e (photon energy or time);
-                    intensity[ie] = np.asarray(arI0, dtype="float64")
+                    intensity[ie] = np.asarray(arI1, dtype="float64")
 
                 else:
-                    data = np.ndarray(buffer=arI0, shape=(wfr.mesh.ny, wfr.mesh.nx), dtype=arI0.typecode)
-                    for ix in range(h_slit_points):
-                        for iy in range(v_slit_points):
-                            intensity[ie, ix, iy,] = data[iy, ix]
+                    data = np.asarray(arI1, dtype="float64").reshape((wfr.mesh.ny, wfr.mesh.nx)) #np.ndarray(buffer=arI1, shape=(wfr.mesh.ny, wfr.mesh.nx),dtype=arI1.typecode)
+                    intensity[ie, :, :] = data
             except:
                  raise ValueError("Error running SRW.")
     else:
@@ -1398,7 +1397,12 @@ def core_srwlibCalcElecFieldSR(args: Tuple[np.ndarray, dict, srwlib.SRWLPartBeam
                 srwlib.srwl.CalcIntFromElecField(arI1, wfr, _inPol, _inIntType, _inDepType, wfr.mesh.eStart, 0, 0)
                 intensity = np.asarray(arI1, dtype="float64")
             else:
-                pass
+                for ie in range(len(energy_array)):
+                    arI1 = array.array('f', [0]*wfr.mesh.nx*wfr.mesh.ny)
+                    srwlib.srwl.CalcIntFromElecField(arI1, wfr, _inPol, _inIntType, _inDepType, energy_array[ie], 0, 0)
+                    data = np.asarray(arI1, dtype="float64").reshape((wfr.mesh.ny, wfr.mesh.nx)) #np.ndarray(buffer=arI1, shape=(wfr.mesh.ny, wfr.mesh.nx),dtype=arI1.typecode)
+                    intensity[ie, :, :] = data
+
         except:
              raise ValueError("Error running SRW.")
 

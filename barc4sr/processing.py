@@ -302,7 +302,7 @@ def trim_and_resample_power_density(PowDenSRdict: Dict[str, Any], **kwargs: Unio
 # barc4sr.xoppy.undulator_radiation()
 #***********************************************************************************
 
-def read_xoppy_undulator_radiation(file_list: List[str], parallel_processing: bool = False) -> dict:
+def read_undulator_radiation(file_list: List[str], computer_code: str = 'srw', parallel_processing: bool = False) -> dict:
     """
     Reads XOPPY undulator radiation data from a list of files and processes it.
 
@@ -312,6 +312,7 @@ def read_xoppy_undulator_radiation(file_list: List[str], parallel_processing: bo
 
     Parameters:
         - file_list (List[str]): A list of file paths containing the XOPPY undulator radiation data.
+        - computer_code (str): The code used to generate the power density data ('xoppy' or 'srw').
         - parallel_processing (bool, optional): Whether to use parallel processing. Defaults to False.
 
     Returns:
@@ -343,7 +344,8 @@ def read_xoppy_undulator_radiation(file_list: List[str], parallel_processing: bo
         energy = np.concatenate((energy, f["XOPPY_RADIATION"]["Radiation"]["axis0"][()]))
 
     print("UR files loaded")
-    spectral_flux_3D = spectral_flux_3D.swapaxes(1, 2)
+    if computer_code == 'xoppy':
+        spectral_flux_3D = spectral_flux_3D.swapaxes(1, 2)
 
     x = f["XOPPY_RADIATION"]["Radiation"]["axis1"][()]
     y = f["XOPPY_RADIATION"]["Radiation"]["axis2"][()]
@@ -591,7 +593,6 @@ def select_energy_range_undulator_radiation(URdict: Dict[str, Any], ei: float, e
     Notes:
         - If 'ei' or 'ef' is set to -1, the function selects the minimum or maximum energy from the available data, respectively.
         - If 'ei' is equal to 'ef', the function duplicates the data for that energy and increments the energy values by 1.
-        - If 'trim' is True, the function trims the data based on the specified criteria and returns the processed data.
 
     """
     x = URdict["axis"]["x"]
