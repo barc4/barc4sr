@@ -11,7 +11,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '12/MAR/2024'
-__changed__ = '08/APR/2024'
+__changed__ = '10/APR/2024'
 
 import array
 import copy
