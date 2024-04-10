@@ -685,7 +685,7 @@ def undulator_spectrum(file_name: str,
         if parallel:
             print('> Performing flux through finite aperture (accurate partially-coherent simulation) in parallel... ')
         else:
-            print('> Performing flux through finite aperture (accurate partially-coherent simulation)...  ', end='')
+            print('> Performing flux through finite aperture (accurate partially-coherent simulation)...')
 
         flux, h_axis, v_axis = srwlibsrwl_wfr_emit_prop_multi_e(bl, 
                                                                 eBeam,
@@ -897,6 +897,7 @@ def undulator_radiation(file_name: str,
     energy_spread = kwargs.get('energy_spread', True)
     number_macro_electrons = kwargs.get('number_macro_electrons', -1)
     parallel = kwargs.get('parallel', False)
+    num_cores = kwargs.get('num_cores', None)
 
     if number_macro_electrons <= 0 :
         calculation = 0
@@ -949,15 +950,21 @@ def undulator_radiation(file_name: str,
 
     # accurate partially-coherent simulation
     if calculation == 1:
-        print('> Performing flux through finite aperture (accurate partially-coherent simulation)... ', end='')
-        flux, h_axis, v_axis = srwlibsrwl_wfr_emit_prop_multi_e(bl, 
-                                                                eBeam,
-                                                                magFldCnt,
-                                                                energy,
-                                                                hor_slit_n,
-                                                                ver_slit_n,
-                                                                number_macro_electrons,
-                                                                file_name) 
+        if parallel:
+            print('> Performing flux through finite aperture (accurate partially-coherent simulation) in parallel... ')
+        else:
+            print('> Performing flux through finite aperture (accurate partially-coherent simulation)...')
+
+        intensity, h_axis, v_axis = srwlibsrwl_wfr_emit_prop_multi_e(bl, 
+                                                                     eBeam,
+                                                                     magFldCnt,
+                                                                     energy,
+                                                                     hor_slit_n,
+                                                                     ver_slit_n,
+                                                                     number_macro_electrons,
+                                                                     file_name,
+                                                                     parallel,
+                                                                     num_cores) 
         print('completed')
     
     with h5.File('%s_undulator_radiation.h5'%file_name, 'w') as f:
@@ -1631,19 +1638,19 @@ def srwlibsrwl_wfr_emit_prop_multi_e(bl: dict,
         for i, (intensity_chunck, e_chunck, t_chunck) in enumerate(results):
             if i == 0:
                 intensity = intensity_chunck
-                energy_array = np.asarray([e_chunck[0]])
+                energy_chunck = np.asarray([e_chunck[0]])
                 energy_chunks = np.asarray([len(e_chunck)])
                 time_array = np.asarray([t_chunck])
             else:
                 intensity = np.concatenate((intensity, intensity_chunck), axis=0)
-                energy_array = np.concatenate((energy_array, np.asarray([e_chunck[0]])))
+                energy_chunck = np.concatenate((energy_chunck, np.asarray([e_chunck[0]])))
                 energy_chunks = np.concatenate((energy_chunks, np.asarray([len(e_chunck)])))
                 time_array = np.concatenate((time_array, np.asarray([t_chunck])))
 
         if not wiggler_regime:
             print(">>> ellapse time:")
             for ptime in range(len(time_array)):
-                print(f" Core {ptime+1}: {time_array[ptime]:.2f} s for {energy_chunks[ptime]} pts (E0 = {energy_array[ptime]:.1f} eV).")
+                print(f" Core {ptime+1}: {time_array[ptime]:.2f} s for {energy_chunks[ptime]} pts (E0 = {energy_chunck[ptime]:.1f} eV).")
     else:
         results = core_srwlibsrwl_wfr_emit_prop_multi_e((energy_array,
                                                         bl,
@@ -1717,13 +1724,24 @@ def core_srwlibsrwl_wfr_emit_prop_multi_e(args: Tuple[np.ndarray, dict, srwlib.S
                                                 _sr_samp_fact=-1, 
                                                 _opt_bl=None,
                                                 _char=0)
-        
+    
         os.system('rm %s'% MacroElecFileName)
-        
+        me_intensity = np.asarray(stk.to_int(_pol=6), dtype='float64')
+
+        if h_slit_points != 1 or v_slit_points != 1:
+            data = np.zeros((len(energy_array), v_slit_points, h_slit_points))
+            k = 0
+            for iy in range(v_slit_points):
+                for ix in range(h_slit_points):
+                    for ie in range(len(energy_array)):
+                        data[ie, iy, ix] = me_intensity[k]
+                        k+=1
+            me_intensity = data
+
     except:
          raise ValueError("Error running SRW.")
 
-    return (np.asarray(stk.to_int(_pol=6), dtype='float64'), energy_array, time.time()-tzero)
+    return (me_intensity, energy_array, time.time()-tzero)
 
 
 #***********************************************************************************
