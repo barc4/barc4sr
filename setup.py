@@ -11,6 +11,16 @@ setup(
     url='https://github.com/barc4/barc4sr',
     license='GPL-3.0',
     packages=find_packages(),
+    install_requires=[
+        'numpy',
+        'scipy',
+        'joblib',
+        'h5py',
+        'matplotlib',
+        'xraylib',
+        'Pillow',
+        'imageio',
+    ],
     classifiers=[
         'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
