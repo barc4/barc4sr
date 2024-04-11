@@ -834,7 +834,7 @@ def undulator_radiation(file_name: str,
                         ver_slit_n: int,
                         **kwargs) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Calculate undulator power density spatial distribution using SRW.
+    Calculate undulator radiation spatial and spectral distribution using SRW.
 
     Args:
         file_name (str): The name of the output file.

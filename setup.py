@@ -5,7 +5,7 @@ setup(
     version='2024.04.08',
     author='Rafael Celestre',
     author_email='rafael.celestre@synchrotron-soleil.fr',
-    description='A Python package for Synchrotron Radiaiton calculations',
+    description='A Python package for Synchrotron Radiation calculations',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
     url='https://github.com/barc4/barc4sr',
@@ -20,6 +20,7 @@ setup(
         'xraylib',
         'Pillow',
         'imageio',
+        'barc4plots'
     ],
     classifiers=[
         'Development Status :: 3 - Alpha',
