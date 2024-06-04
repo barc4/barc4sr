@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 setup(
     name='barc4sr',
-    version='2024.04.08',
+    version='2024.06.04',
     author='Rafael Celestre',
     author_email='rafael.celestre@synchrotron-soleil.fr',
     description='A Python package for Synchrotron Radiation calculations',
@@ -17,7 +17,6 @@ setup(
         'joblib',
         'h5py',
         'matplotlib',
-        'xraylib',
         'Pillow',
         'imageio',
         'barc4plots'
