@@ -219,6 +219,8 @@ class ElectronBeam:
         #<(y'-<y'>)^2>        
         self.moment_ypyp = emittance_y*(1 + alpha_y*alpha_y)/beta_y + sigE2*etap_y*etap_y     
 
+        self.to_rms()
+
     def from_rms(self, energy: float, energy_spread: float, current: float, x: float, xp: float,
                  y: float, yp: float, xxp: float = 0, yyp: float = 0) -> None:
         """
@@ -247,6 +249,8 @@ class ElectronBeam:
         self.moment_yyp = yyp       # <(y-<y>)(y'-<y'>)>          
         self.moment_ypyp = yp*yp    # <(y'-<y'>)^2>        
 
+        self.to_rms()
+
     def propagate(self, dist: float) -> None:
         """
         Propagates electron beam statistical moments over a distance in free space.
@@ -259,7 +263,28 @@ class ElectronBeam:
         self.moment_yy  += (self.moment_yyp + self.moment_ypyp)*dist**2
         self.moment_yyp += (self.moment_ypyp)*dist
 
-    def get_attribute(self):
+        self.to_rms()
+
+    def to_rms(self):
+        """
+        Computes the RMS sizes and divergences of the electron beam based on its 
+        second-order statistical moments. The calculated values are stored back in the 
+        object attributes (x, y, xp, yp).
+        """
+        self.x = np.sqrt(self.moment_xx)
+        self.y = np.sqrt(self.moment_yy)
+        self.xp = np.sqrt(self.moment_xpxp)
+        self.yp = np.sqrt(self.moment_ypyp)
+
+    def print_rms(self):
+        """
+        Prints electron beam rms sizes and divergences 
+        """
+        print(f"electron beam:\n\
+              >> x/xp = {self.x*1e6:0.2f} um vs. {self.xp*1e6:0.2f} urad\n\
+              >> y/yp = {self.y*1e6:0.2f} um vs. {self.yp*1e6:0.2f} urad")
+        
+    def get_attributes(self):
         """
         Prints all attribute of object
         """
@@ -267,16 +292,8 @@ class ElectronBeam:
         for i in (vars(self)):
             print("{0:10}: {1}".format(i, vars(self)[i]))
 
-    def print_rms(self):
-        """
-        Prints electron beam rms sizes and divergences 
-        """
 
-        print(f"electron beam:\n\
-              >> x/xp = {np.sqrt(self.moment_xx)*1e6:0.2f} um vs. {np.sqrt(self.moment_xpxp)*1e6:0.2f} urad\n\
-              >> y/yp = {np.sqrt(self.moment_yy)*1e6:0.2f} um vs. {np.sqrt(self.moment_ypyp)*1e6:0.2f} urad")
-
-class MagneticStructure:
+class UMagneticStructure:
     """
     Class for entering the undulator parameters
     """
@@ -353,6 +370,15 @@ class MagneticStructure:
         energy = energy_wavelength(wavelength, 'm')
 
         print(f">> resonant energy {energy:.2f} eV")
+
+    def get_attributes(self):
+        """
+        Prints all attribute of object
+        """
+
+        for i in (vars(self)):
+            print("{0:10}: {1}".format(i, vars(self)[i]))
+
 
 
 def write_syned_file(json_file: str, light_source_name: str, ElectronBeamClass: type, 
