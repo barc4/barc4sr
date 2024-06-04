@@ -17,11 +17,9 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '26/JAN/2024'
-__changed__ = '10/APR/2024'
+__changed__ = '04/MAY/2024'
 
-import json
 import multiprocessing
-import pickle
 import sys
 from typing import Any, Dict, List, Union
 
@@ -30,7 +28,6 @@ import imageio
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.integrate as integrate
-import xraylib
 from PIL import Image, ImageDraw, ImageFont
 from scipy.constants import physical_constants
 from scipy.interpolate import RegularGridInterpolator
@@ -38,53 +35,8 @@ from scipy.interpolate import RegularGridInterpolator
 CHARGE = physical_constants["atomic unit of charge"][0]
 
 #***********************************************************************************
-# barc4sr.xoppy.undulator_spectrum()
+# Spectrum
 #***********************************************************************************
-
-def read_undulator_spectrum(file_list: List[str], computer_code: str = 'xoppy') -> Dict[str, Any]:
-    """
-    Reads spectrum data from files and processes it using process_spectrum function.
-
-    This function reads spectrum data from files specified in the 'file_list' and processes
-    it using the 'process_spectrum' function to compute spectral power, cumulated power, and integrated power.
-
-    Parameters:
-        - file_list (List[str]): A list of file paths containing spectrum data.
-        - computer_code (str): The code used to generate the spectrum data ('xoppy', 'srw', or 'spectra').
-
-    Returns:
-        Dict[str, Any]: A dictionary containing processed spectrum data with the following keys:
-            - 'spectrum': A dictionary containing various properties of the spectrum including:
-                - 'energy': Array containing energy values.
-                - 'flux': Array containing spectral flux data.
-                - 'spectral_power': Array containing computed spectral power.
-                - 'cumulated_power': Cumulated power computed using cumulative trapezoid integration.
-                - 'integrated_power': Integrated power computed using trapezoid integration.
-    """
-    energy = []
-    flux = []
-
-    if computer_code == 'xoppy' or computer_code == 'srw':
-        for sim in file_list:
-            f = open(sim, "rb")
-            data = np.asarray(pickle.load(f))
-            f.close()
-
-            energy = np.concatenate((energy, data[0, :]))
-            flux = np.concatenate((flux, data[1, :]))
-    elif computer_code == 'spectra':
-        for jsonfile in file_list:
-            f = open(jsonfile)
-            data = json.load(f)
-            f.close()
-
-            energy = np.concatenate((energy, data['Output']['data'][0]))
-            flux = np.concatenate((flux, data['Output']['data'][1]))
-    else:
-        raise ValueError("Invalid computer code. Please specify either 'xoppy', 'srw', or 'spectra'.")
-
-    return process_spectrum(flux, energy)
-
 
 def process_spectrum(flux: np.ndarray, energy: np.ndarray) -> Dict[str, Any]:
     """
@@ -125,62 +77,8 @@ def process_spectrum(flux: np.ndarray, energy: np.ndarray) -> Dict[str, Any]:
     return spectrumSRdict
 
 #***********************************************************************************
-# barc4sr.xoppy.undulator_power_density()
+# Power density
 #***********************************************************************************
-
-def read_undulator_power(file_name: str, computer_code: str = 'xoppy') -> Dict[str, Any]:
-    """
-    Reads power density data from an XOPPY HDF5 file or SPECTRA JSON file and processes it.
-
-    This function reads power density data from either an XOPPY HDF5 file or a SPECTRA JSON 
-    file specified by 'file_name'. It extracts the power density map along with 
-    corresponding x and y axes from the file, and then processes this data using the 
-    'process_power_density' function
-
-    Parameters:
-        - file_name (str): File path containing power density data.
-        - computer_code (str): The code used to generate the power density data ('xoppy', 'srw', or 'spectra').
-
-    Returns:
-        Dict[str, Any]: A dictionary containing processed power density data with the following keys:
-            - 'axis': A dictionary containing 'x' and 'y' axes arrays.
-            - 'power_density': A dictionary containing power density-related data, including the power density map,
-              total received power, and peak power density.
-    """
-    if computer_code == 'xoppy' or computer_code == 'srw':
-        f = h5.File(file_name, "r")
-        PowDenSR = f["XOPPY_POWERDENSITY"]["PowerDensity"]["image_data"][()]
-
-        x = f["XOPPY_POWERDENSITY"]["PowerDensity"]["axis_x"][()]
-        y = f["XOPPY_POWERDENSITY"]["PowerDensity"]["axis_y"][()]
-
-    elif computer_code == 'spectra':
-        f = open(file_name)
-        data = json.load(f)
-        f.close()
-
-        PowDenSR = np.reshape(data['Output']['data'][2],
-                            (len(data['Output']['data'][1]), 
-                            len(data['Output']['data'][0])))
-
-        if "mrad" in data['Output']['units'][2]:
-            dist = data["Input"]["Configurations"]["Distance from the Source (m)"]
-            dx = (data["Input"]["Configurations"]["x Range (mm)"][1]-data["Input"]["Configurations"]["x Range (mm)"][0])*1e-3
-            dy = (data["Input"]["Configurations"]["y Range (mm)"][1]-data["Input"]["Configurations"]["y Range (mm)"][0])*1e-3
-
-            dtx = 2*np.arctan(dx/dist/2)*1e3    # mrad
-            dty = 2*np.arctan(dy/dist/2)*1e3
-
-            PowDenSR *= 1e3 * (dtx*dty)/(dx*dy*1e3*1e3)
-            x = data['Output']['data'][0]
-            y = data['Output']['data'][1]
-        else:
-            PowDenSR *= 1e3
-    else:
-        raise ValueError("Invalid computer code. Please specify either 'xoppy', 'srw', or 'spectra'.")
-
-    return process_power_density(PowDenSR, x, y)
-
 
 def process_power_density(PowDenSR: np.ndarray, x: np.ndarray, y: np.ndarray) -> Dict[str, Any]:
     """
@@ -299,64 +197,10 @@ def trim_and_resample_power_density(PowDenSRdict: Dict[str, Any], **kwargs: Unio
     }
 
 #***********************************************************************************
-# barc4sr.xoppy.undulator_radiation()
+# Spatial-spectral distribution
 #***********************************************************************************
 
-def read_undulator_radiation(file_list: List[str], computer_code: str = 'srw', parallel_processing: bool = False) -> dict:
-    """
-    Reads XOPPY undulator radiation data from a list of files and processes it.
-
-    This function reads the XOPPY undulator radiation data from a list of HDF5 files,
-    concatenates the spectral flux data, and processes it using either the process_undulator_radiation function
-    or the process_undulator_radiation_parallel function based on the value of parallel_processing.
-
-    Parameters:
-        - file_list (List[str]): A list of file paths containing the XOPPY undulator radiation data.
-        - computer_code (str): The code used to generate the power density data ('xoppy' or 'srw').
-        - parallel_processing (bool, optional): Whether to use parallel processing. Defaults to False.
-
-    Returns:
-        dict: A dictionary containing processed undulator radiation data.
-
-    Notes:
-        - The input HDF5 files should contain the following datasets:
-            - 'XOPPY_RADIATION/Radiation/stack_data': 3D array representing the spectral flux data.
-            - 'XOPPY_RADIATION/Radiation/axis0': 1D array representing the energy axis.
-            - 'XOPPY_RADIATION/Radiation/axis1': 1D array representing the x-axis.
-            - 'XOPPY_RADIATION/Radiation/axis2': 1D array representing the y-axis.
-        - The spectral flux data from different files will be concatenated along the 0-axis.
-        - The x and y axes are assumed to be the same for all files in the file_list.
-    """
-    energy = []
-    spectral_flux_3D = []
-
-    k = 0
-
-    for sim in file_list:
-        print(sim)
-        f = h5.File(sim, "r")
-
-        if k == 0:
-            spectral_flux_3D = f["XOPPY_RADIATION"]["Radiation"]["stack_data"][()]
-            k+=1
-        else:
-            spectral_flux_3D = np.concatenate((spectral_flux_3D, f["XOPPY_RADIATION"]["Radiation"]["stack_data"][()]), 0)
-        energy = np.concatenate((energy, f["XOPPY_RADIATION"]["Radiation"]["axis0"][()]))
-
-    print("UR files loaded")
-    if computer_code == 'xoppy':
-        spectral_flux_3D = spectral_flux_3D.swapaxes(1, 2)
-
-    x = f["XOPPY_RADIATION"]["Radiation"]["axis1"][()]
-    y = f["XOPPY_RADIATION"]["Radiation"]["axis2"][()]
-
-    if parallel_processing:
-        return process_undulator_radiation_parallel(spectral_flux_3D, energy, x, y)
-    else:
-        return process_undulator_radiation(spectral_flux_3D, energy, x, y)
-
-
-def process_undulator_radiation(spectral_flux_3D: np.ndarray, energy: np.ndarray, x: np.ndarray, y: np.ndarray) -> dict:
+def proc_spatial_spectral_dist(spectral_flux_3D: np.ndarray, energy: np.ndarray, x: np.ndarray, y: np.ndarray) -> dict:
     """
     Processes the undulator radiation data.
 
@@ -437,7 +281,7 @@ def process_undulator_radiation(spectral_flux_3D: np.ndarray, energy: np.ndarray
     return URdict
 
 
-def process_undulator_radiation_parallel(spectral_flux_3D: np.ndarray, energy: np.ndarray, x: np.ndarray, y: np.ndarray, chunk_size: int = 25) -> dict:
+def proc_spatial_spectral_dist_parallel(spectral_flux_3D: np.ndarray, energy: np.ndarray, x: np.ndarray, y: np.ndarray, chunk_size: int = 25) -> dict:
     """
     Process undulator radiation data in parallel.
 
@@ -566,7 +410,7 @@ def process_chunk(args):
     return PowDenSR, flux, energy_chunk
 
 
-def select_energy_range_undulator_radiation(URdict: Dict[str, Any], ei: float, ef: float, **kwargs: Union[float, bool]) -> Dict[str, Any]:
+def select_energy_range(URdict: Dict[str, Any], ei: float, ef: float, **kwargs: Union[float, bool]) -> Dict[str, Any]:
     """
     Selects a specific energy range from the undulator radiation data and returns processed data within that range.
 
@@ -630,10 +474,10 @@ def select_energy_range_undulator_radiation(URdict: Dict[str, Any], ei: float, e
         x = np.delete(x, np.logical_not(bool_x)) - xc
         y = np.delete(y, np.logical_not(bool_y)) - yc
 
-    return process_undulator_radiation_parallel(spectral_flux_3D, energy, x, y)
+    return proc_spatial_spectral_dist_parallel(spectral_flux_3D, energy, x, y)
 
 
-def animate_undulator_radiation(URdict: dict, file_name: str, **kwargs: Any) -> None:
+def animate_energy_scan(URdict: dict, file_name: str, **kwargs: Any) -> None:
     """
     Generate an animated GIF of an energy scan.
 
@@ -826,6 +670,11 @@ def animate_undulator_radiation(URdict: dict, file_name: str, **kwargs: Any) -> 
                     writer.append_data(frame_with_tag)
 
             print(f"GIF created successfully: {file_name.split('/')[-1]+'_CumSum'}")
+
+
+#***********************************************************************************
+# Mutual intensity, (Cross-) Spectral Density and Degree of Coherence
+#***********************************************************************************
 
 
 if __name__ == '__main__':
