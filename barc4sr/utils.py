@@ -24,15 +24,12 @@ from scipy.constants import physical_constants
 
 try:
     import srwpy.srwlib as srwlib
-
     USE_SRWLIB = True
-    print('SRW distribution of SRW')
 except:
     import oasys_srw.srwlib as srwlib
     USE_SRWLIB = True
-    print('OASYS distribution of SRW')
 if USE_SRWLIB is False:
-    print("SRW is not available")
+     raise AttributeError("SRW is not available")
 
 PLANCK = physical_constants["Planck constant"][0]
 LIGHT = physical_constants["speed of light in vacuum"][0]
@@ -198,7 +195,6 @@ class ElectronBeam(object):
 
         for i in (vars(self)):
             print("{0:10}: {1}".format(i, vars(self)[i]))
-
 
 class MagneticStructure(object):
     """
@@ -372,6 +368,101 @@ class MagneticStructure(object):
         for i in (vars(self)):
             print("{0:10}: {1}".format(i, vars(self)[i]))
 
+class SynchrotronSource(object):
+    """
+    Class representing a synchrotron radiation source, which combines an electron beam and a magnetic structure.
+    """
+    def __init__(self, electron_beam: ElectronBeam, magnetic_structure: MagneticStructure) -> None:
+        """
+        Initializes an instance of the SynchrotronSource class.
+
+        Args:
+            electron_beam (ElectronBeam): An instance of the ElectronBeam class representing the electron beam parameters.
+            magnetic_structure (MagneticStructure): An instance of the MagneticStructure class representing the magnetic structure parameters.
+        """
+        self.ElectronBeam = electron_beam
+        self.MagneticStructure = magnetic_structure
+    
+    def __getattr__(self, name):
+        """
+        Retrieves an attribute from either the ElectronBeam or MagneticStructure instances if it exists.
+
+        Args:
+            name (str): The name of the attribute to retrieve.
+
+        Returns:
+            The value of the attribute from either the ElectronBeam or MagneticStructure instance.
+
+        """
+        if name in self.__dict__:
+            return self.__dict__[name]
+        elif hasattr(self.ElectronBeam, name):
+            return getattr(self.ElectronBeam, name)
+        elif hasattr(self.MagneticStructure, name):
+            return getattr(self.MagneticStructure, name)
+        else:
+            raise AttributeError(f"'SynchrotronSource' object has no attribute '{name}'")
+        
+        
+    def write_syned_config(self, json_file: str, light_source_name: str=None):
+        """
+        Writes a SYNED JSON configuration file.
+
+        Parameters:
+            json_file (str): The path to the JSON file where the dictionary will be written.
+            light_source_name (str): The name of the light source.
+        """
+        if light_source_name is None:
+            light_source_name = json_file.split('/')[-1].replace('.json','')
+
+        write_syned_file(json_file, light_source_name, self.ElectronBeam, self.MagneticStructure)
+
+class UndulatorSource(object):
+    """
+    Class representing an undulator radiation source, which combines an electron beam and a magnetic structure.
+    """
+    def __init__(self, electron_beam: ElectronBeam, magnetic_structure: MagneticStructure) -> None:
+        """
+        Initializes an instance of the SynchrotronSource class.
+
+        Args:
+            electron_beam (ElectronBeam): An instance of the ElectronBeam class representing the electron beam parameters.
+            magnetic_structure (MagneticStructure): An instance of the MagneticStructure class representing the magnetic structure parameters.
+        """
+        self.ElectronBeam = electron_beam
+        self.MagneticStructure = magnetic_structure
+    
+    def __getattr__(self, name):
+        if hasattr(self.ElectronBeam, name):
+            return getattr(self.ElectronBeam, name)
+        elif hasattr(self.MagneticStructure, name):
+            return getattr(self.MagneticStructure, name)
+        else:
+            raise AttributeError(f"'SynchrotronSource' object has no attribute '{name}'")
+        
+    def get_beam_dimensions(self, mth):
+
+        # Tanaka - https://doi.org/10.1107/S0909049509009479
+
+        # Boaz    - https://doi.org/10.1063/1.5084711
+
+        # Convolution
+        pass
+
+    def print_beam_dimensions(self):
+        # prints electron beam size
+        # prints undulator natural size at resonance
+        # prints source size at resonance
+        pass
+
+    def get_attributes(self) -> None:
+        """
+        Prints all attribute of object
+        """
+
+        for i in (vars(self)):
+            print("{0:10}: {1}".format(i, vars(self)[i]))
+        
 #***********************************************************************************
 # SRW interface functions
 #***********************************************************************************
@@ -1277,8 +1368,8 @@ def core_srwlibCalcStokesUR(energy_array: np.ndarray,
 # io/rw files
 #***********************************************************************************
 
-def write_syned_file(json_file: str, light_source_name: str, ElectronBeamClass: type, 
-                     MagneticStructureClass: type) -> None:
+def write_syned_file(json_file: str, light_source_name: str, ElectronBeamClass: ElectronBeam, 
+                     MagneticStructureClass: MagneticStructure) -> None:
     """
     Writes a Python dictionary into a SYNED JSON configuration file.
 
