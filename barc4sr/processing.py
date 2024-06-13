@@ -19,7 +19,9 @@ __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '26/JAN/2024'
 __changed__ = '04/MAY/2024'
 
+import json
 import multiprocessing
+import pickle
 import sys
 from typing import Any, Dict, List, Union
 
@@ -38,19 +40,18 @@ CHARGE = physical_constants["atomic unit of charge"][0]
 # Spectrum
 #***********************************************************************************
 
-def read_spectrum(file_list: List[str], computer_code: str = 'xoppy') -> Dict[str, Any]:
+def read_spectrum(file_list: List[str]) -> Dict:
     """
-    Reads spectrum data from files and processes it using proc_spectrum function.
+    Reads and processes spectrum data from files.
 
-    This function reads spectrum data from files specified in the 'file_list' and processes
-    it using the 'proc_spectrum' function to compute spectral power, cumulated power, and integrated power.
+    This function reads spectrum data from files specified in 'file_list' and processes 
+    it to compute spectral power, cumulated power, and integrated power.
 
     Parameters:
-        - file_list (List[str]): A list of file paths containing spectrum data.
-        - computer_code (str): The code used to generate the spectrum data ('xoppy', 'srw', or 'spectra').
+        file_list (List[str]): A list of file paths containing spectrum data.
 
     Returns:
-        Dict[str, Any]: A dictionary containing processed spectrum data with the following keys:
+        Dict: A dictionary containing processed spectrum data with the following keys:
             - 'spectrum': A dictionary containing various properties of the spectrum including:
                 - 'energy': Array containing energy values.
                 - 'flux': Array containing spectral flux data.
@@ -61,15 +62,30 @@ def read_spectrum(file_list: List[str], computer_code: str = 'xoppy') -> Dict[st
     energy = []
     flux = []
 
-    if computer_code == 'xoppy' or computer_code == 'srw':
+    if isinstance(file_list, List) is False:
+        file_list = [file_list]
+
+    # new and official barc4sr format
+    if file_list[0].endswith("h5") or file_list[0].endswith("hdf5"):
         for sim in file_list:
+            print(sim)
+            f = h5.File(sim, "r")
+            energy = np.concatenate((energy, f["XOPPY_SPECTRUM"]["Spectrum"]["energy"][()]))
+            flux = np.concatenate((flux, f["XOPPY_SPECTRUM"]["Spectrum"]["flux"][()]))
+
+    # backwards compatibility - old barc4sr format
+    elif file_list[0].endswith("pickle"):
+        for sim in file_list:
+            print(sim)
             f = open(sim, "rb")
             data = np.asarray(pickle.load(f))
             f.close()
 
             energy = np.concatenate((energy, data[0, :]))
             flux = np.concatenate((flux, data[1, :]))
-    elif computer_code == 'spectra':
+
+    # SPECTRA format
+    elif file_list[0].endswith("json"):
         for jsonfile in file_list:
             f = open(jsonfile)
             data = json.load(f)
@@ -78,31 +94,7 @@ def read_spectrum(file_list: List[str], computer_code: str = 'xoppy') -> Dict[st
             energy = np.concatenate((energy, data['Output']['data'][0]))
             flux = np.concatenate((flux, data['Output']['data'][1]))
     else:
-        raise ValueError("Invalid computer code. Please specify either 'xoppy', 'srw', or 'spectra'.")
-
-    return proc_spectrum(flux, energy)
-
-
-def proc_spectrum(flux: np.ndarray, energy: np.ndarray) -> Dict[str, Any]:
-    """
-    Processes spectrum data to compute spectral power, cumulated power, and integrated power.
-
-    This function processes spectrum data provided as 'flux' and 'energy' arrays to compute spectral power,
-    cumulated power, and integrated power.
-
-    Parameters:
-        - flux (np.ndarray): Array containing the spectral flux data.
-        - energy (np.ndarray): Array containing the energy values corresponding to the spectral flux.
-
-    Returns:
-        Dict[str, Any]: A dictionary containing processed spectrum data with the following keys:
-            - 'spectrum': A dictionary containing various properties of the spectrum including:
-                - 'energy': Array containing energy values.
-                - 'flux': Array containing spectral flux data.
-                - 'spectral_power': Array containing computed spectral power.
-                - 'cumulated_power': Cumulated power computed using cumulative trapezoid integration.
-                - 'integrated_power': Integrated power computed using trapezoid integration.
-    """
+        raise ValueError("Invalid file extension.")
 
     spectral_power = flux*CHARGE*1E3
 
@@ -125,24 +117,55 @@ def proc_spectrum(flux: np.ndarray, energy: np.ndarray) -> Dict[str, Any]:
 # Power density
 #***********************************************************************************
 
-def proc_power_density(PowDenSR: np.ndarray, x: np.ndarray, y: np.ndarray) -> Dict[str, Any]:
+def read_power_density(file_name: str) -> Dict:
     """
-    Processes the power density data and calculates the total received power and peak power density.
+    Reads power density data from an HDF5 (barc4sr) or JSON (SPECTRA) file and processes it.
 
-    This function processes the power density data provided in 'PowDenSR' array along with corresponding x and y axes,
-    and calculates the total received power and peak power density. The processed data is returned in a dictionary format.
+    This function reads power density data from either an  HDF5 (barc4sr) or JSON (SPECTRA)
+    file specified by 'file_name'. It extracts the power density map along with 
+    corresponding x and y axes from the file.
 
     Parameters:
-        - PowDenSR (np.ndarray): An array representing the power density map.
-        - x (np.ndarray): Array containing x-axis coordinates.
-        - y (np.ndarray): Array containing y-axis coordinates.
+        file_name (str): File path containing power density data.
 
     Returns:
-        Dict[str, Any]: A dictionary containing the processed power density data with the following keys:
+        Dict[str, Any]: A dictionary containing processed power density data with the following keys:
             - 'axis': A dictionary containing 'x' and 'y' axes arrays.
             - 'power_density': A dictionary containing power density-related data, including the power density map,
               total received power, and peak power density.
     """
+    if file_name.endswith("h5") or file_name.endswith("hdf5"):
+        f = h5.File(file_name, "r")
+        PowDenSR = f["XOPPY_POWERDENSITY"]["PowerDensity"]["image_data"][()]
+
+        x = f["XOPPY_POWERDENSITY"]["PowerDensity"]["axis_x"][()]
+        y = f["XOPPY_POWERDENSITY"]["PowerDensity"]["axis_y"][()]
+
+    elif file_name.endswith("json"):
+        f = open(file_name)
+        data = json.load(f)
+        f.close()
+
+        PowDenSR = np.reshape(data['Output']['data'][2],
+                            (len(data['Output']['data'][1]), 
+                            len(data['Output']['data'][0])))
+
+        if "mrad" in data['Output']['units'][2]:
+            dist = data["Input"]["Configurations"]["Distance from the Source (m)"]
+            dx = (data["Input"]["Configurations"]["x Range (mm)"][1]-data["Input"]["Configurations"]["x Range (mm)"][0])*1e-3
+            dy = (data["Input"]["Configurations"]["y Range (mm)"][1]-data["Input"]["Configurations"]["y Range (mm)"][0])*1e-3
+
+            dtx = 2*np.arctan(dx/dist/2)*1e3    # mrad
+            dty = 2*np.arctan(dy/dist/2)*1e3
+
+            PowDenSR *= 1e3 * (dtx*dty)/(dx*dy*1e3*1e3)
+            x = data['Output']['data'][0]
+            y = data['Output']['data'][1]
+        else:
+            PowDenSR *= 1e3
+    else:
+        raise ValueError("Invalid file extension.")
+
     dx = x[1]-x[0]
     dy = y[1]-y[0]
 
@@ -155,14 +178,14 @@ def proc_power_density(PowDenSR: np.ndarray, x: np.ndarray, y: np.ndarray) -> Di
         "axis": {
             "x": x,
             "y": y,
-        },
+            },
         "power_density": {
             "map":PowDenSR,
             "CumPow": CumPow,
             "PowDenSRmax": PowDenSR.max()
-        },
-    }
-
+            }
+        }
+    
     return PowDenSRdict
 
 
@@ -234,7 +257,7 @@ def trim_and_resample_power_density(PowDenSRdict: Dict[str, Any], **kwargs: Unio
     CumPow = PowDenSR.sum() * dx * dy
 
     print(f"Total received power: {CumPow:.3f} W")
-    print(f"Peak received power density (normal incidence): {PowDenSR.max():.3f} W/mm^2")
+    print(f"Peak power density: {PowDenSR.max():.3f} W/mm^2")
 
     return {
         "axis": {"x": x, "y": y},
@@ -721,65 +744,8 @@ def animate_energy_scan(URdict: dict, file_name: str, **kwargs: Any) -> None:
 # Mutual intensity, (Cross-) Spectral Density and Degree of Coherence
 #***********************************************************************************
 
-#***********************************************************************************
-# read calculations
-#***********************************************************************************
 
 
-
-
-def read_power_density(file_name: str, computer_code: str = 'xoppy') -> Dict[str, Any]:
-    """
-    Reads power density data from an XOPPY HDF5 file or SPECTRA JSON file and processes it.
-
-    This function reads power density data from either an XOPPY HDF5 file or a SPECTRA JSON 
-    file specified by 'file_name'. It extracts the power density map along with 
-    corresponding x and y axes from the file, and then processes this data using the 
-    'proc_power_density' function
-
-    Parameters:
-        - file_name (str): File path containing power density data.
-        - computer_code (str): The code used to generate the power density data ('xoppy', 'srw', or 'spectra').
-
-    Returns:
-        Dict[str, Any]: A dictionary containing processed power density data with the following keys:
-            - 'axis': A dictionary containing 'x' and 'y' axes arrays.
-            - 'power_density': A dictionary containing power density-related data, including the power density map,
-              total received power, and peak power density.
-    """
-    if computer_code == 'xoppy' or computer_code == 'srw':
-        f = h5.File(file_name, "r")
-        PowDenSR = f["XOPPY_POWERDENSITY"]["PowerDensity"]["image_data"][()]
-
-        x = f["XOPPY_POWERDENSITY"]["PowerDensity"]["axis_x"][()]
-        y = f["XOPPY_POWERDENSITY"]["PowerDensity"]["axis_y"][()]
-
-    elif computer_code == 'spectra':
-        f = open(file_name)
-        data = json.load(f)
-        f.close()
-
-        PowDenSR = np.reshape(data['Output']['data'][2],
-                            (len(data['Output']['data'][1]), 
-                            len(data['Output']['data'][0])))
-
-        if "mrad" in data['Output']['units'][2]:
-            dist = data["Input"]["Configurations"]["Distance from the Source (m)"]
-            dx = (data["Input"]["Configurations"]["x Range (mm)"][1]-data["Input"]["Configurations"]["x Range (mm)"][0])*1e-3
-            dy = (data["Input"]["Configurations"]["y Range (mm)"][1]-data["Input"]["Configurations"]["y Range (mm)"][0])*1e-3
-
-            dtx = 2*np.arctan(dx/dist/2)*1e3    # mrad
-            dty = 2*np.arctan(dy/dist/2)*1e3
-
-            PowDenSR *= 1e3 * (dtx*dty)/(dx*dy*1e3*1e3)
-            x = data['Output']['data'][0]
-            y = data['Output']['data'][1]
-        else:
-            PowDenSR *= 1e3
-    else:
-        raise ValueError("Invalid computer code. Please specify either 'xoppy', 'srw', or 'spectra'.")
-
-    return proc_power_density(PowDenSR, x, y)
 
 
 def read_emitted_radiation(file_list: List[str], computer_code: str = 'srw', parallel_processing: bool = False) -> dict:
