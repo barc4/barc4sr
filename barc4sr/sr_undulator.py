@@ -13,8 +13,6 @@ __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '12/MAR/2024'
 __changed__ = '13/JUN/2024'
 
-import array
-import copy
 import os
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -36,6 +34,7 @@ from barc4sr.aux_utils import (
     srwlibCalcStokesUR,
     srwlibsrwl_wfr_emit_prop_multi_e,
     syned_dictionary,
+    write_magnetic_field,
 )
 
 try:
@@ -53,7 +52,6 @@ CHARGE = physical_constants["atomic unit of charge"][0]
 MASS = physical_constants["electron mass"][0]
 PI = np.pi
 RMS = np.sqrt(2)/2
-
 
 #***********************************************************************************
 # undulator radiation
@@ -204,7 +202,7 @@ def spectrum(file_name: str,
         print('completed')
 
     # -----------------------------------------
-    # Flux through Finite Aperture (total pol.)
+    # Flux through Finite Aperture 
 
     # simplified partially-coherent simulation
     if calculation == 1:
@@ -269,7 +267,7 @@ def power_density(file_name: str,
                   hor_slit_n: int,
                   ver_slit: float,
                   ver_slit_n: int,
-                  **kwargs) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+                  **kwargs) -> Dict:
     """
     Calculate undulator power density spatial distribution using SRW.
 
@@ -285,6 +283,14 @@ def power_density(file_name: str,
         observation_point (float): Distance to the observation point. Default is 10 [m].
         hor_slit_cen (float): Horizontal slit center position [m]. Default is 0.
         ver_slit_cen (float): Vertical slit center position [m]. Default is 0.
+        radiation_polarisation (int): Polarisation component to be extracted. Default is 6.
+            =0 -Linear Horizontal; 
+            =1 -Linear Vertical; 
+            =2 -Linear 45 degrees; 
+            =3 -Linear 135 degrees; 
+            =4 -Circular Right; 
+            =5 -Circular Left; 
+            =6 -Total
         Kh (float): Horizontal undulator parameter K. If -1, taken from the SYNED file. Default is -1.
         Kh_phase (float): Initial phase of the horizontal magnetic field [rad]. Default is 0.
         Kh_symmetry (int): Symmetry of the horizontal magnetic field vs longitudinal position.
@@ -305,7 +311,7 @@ def power_density(file_name: str,
         energy_spread (bool): Whether to include energy spread. Default is True.
 
     Returns:
-        Tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing power density, horizontal axis, and vertical axis.
+        Dict: A dictionary containing power density, horizontal axis, and vertical axis.
     """
     
     t0 = time.time()
@@ -315,6 +321,7 @@ def power_density(file_name: str,
     observation_point = kwargs.get('observation_point', 10.)
     hor_slit_cen = kwargs.get('hor_slit_cen', 0)
     ver_slit_cen = kwargs.get('ver_slit_cen', 0)
+    radiation_polarisation = kwargs.get('radiation_polarisation', 6)
     Kh = kwargs.get('Kh', -1)
     Kh_phase = kwargs.get('Kh_phase', 0)
     Kh_symmetry = kwargs.get('Kh_symmetry', 1)
@@ -327,14 +334,16 @@ def power_density(file_name: str,
     filament_beam = kwargs.get('filament_beam', False)
     energy_spread = kwargs.get('energy_spread', True)
 
-    bl = syned_dictionary(json_file, magnetic_measurement, observation_point, hor_slit, 
-                    ver_slit, hor_slit_cen, ver_slit_cen, Kh, Kh_phase, Kh_symmetry, 
-                    Kv, Kv_phase, Kv_symmetry)
-    
+    bl = syned_dictionary(json_file, magnetic_measurement, observation_point, 
+                          hor_slit, ver_slit, hor_slit_cen, ver_slit_cen, 
+                          Kh=Kh, Kh_phase=Kh_phase, Kh_symmetry=Kh_symmetry, 
+                          Kv=Kv, Kv_phase=Kv_phase, Kv_symmetry=Kv_symmetry)
+
+   
     eBeam, magFldCnt, eTraj = set_light_source(file_name, bl, filament_beam, 
-                                               energy_spread, magnetic_measurement,
-                                               tabulated_undulator_mthd, 
-                                               electron_trajectory)
+                                               energy_spread, electron_trajectory, 'u',
+                                               magnetic_measurement=magnetic_measurement,
+                                               tabulated_undulator_mthd=tabulated_undulator_mthd)
     
     # ----------------------------------------------------------------------------------
     # power density calculations
@@ -360,7 +369,7 @@ def power_density(file_name: str,
     srwlib.srwl.CalcPowDenSR(stk, eBeam, 0, magFldCnt, arPrecPar)
     print('completed')
 
-    power_density = np.reshape(stk.arS[0:stk.mesh.ny*stk.mesh.nx], (stk.mesh.ny, stk.mesh.nx))
+    power_density = np.reshape(stk.to_int(radiation_polarisation), (stk.mesh.ny, stk.mesh.nx))
     h_axis = np.linspace(-bl['slitH'] / 2, bl['slitH'] / 2, hor_slit_n)
     v_axis = np.linspace(-bl['slitV'] / 2, bl['slitV'] / 2, ver_slit_n)
 
@@ -374,7 +383,7 @@ def power_density(file_name: str,
     print("Undulator power density spatial distribution using SRW: finished")
     print_elapsed_time(t0)
 
-    return power_density, h_axis, v_axis
+    return {'power_density':power_density, 'axis': {'x': h_axis, 'y': v_axis}}
 
 
 def emitted_radiation(file_name: str, 
@@ -542,10 +551,12 @@ def emitted_wavefront():
     pass
 
 
-#***********************************************************************************
-# read/write functions for magnetic fields
-#***********************************************************************************
+def coherent_modes():
+    pass
 
+#***********************************************************************************
+# Magnetic field functions
+#***********************************************************************************
 
 def generate_magnetic_measurement(und_per: float, B: float, num_und_per: int, 
                                   step_size: float, add_terminations: bool = True, 
@@ -620,7 +631,7 @@ def generate_magnetic_measurement(und_per: float, B: float, num_und_per: int,
                 magFldCnt[i,0] = axis[i]*1e3    # field is measured in mm on the benchtest
                 magFldCnt[i,1] = magnetic_field_horizontal[i]
                 magFldCnt[i,2] = magnetic_field_vertical[i]
-            magFldCnt = generate_srw_magnetic_field(magFldCnt, file_path.replace(".txt", ".dat"))
+            magFldCnt = write_magnetic_field(magFldCnt, file_path.replace(".txt", ".dat"))
 
         else:
             print(field_direction)
@@ -636,12 +647,6 @@ def generate_magnetic_measurement(und_per: float, B: float, num_und_per: int,
 
     return magnetic_field, axis
 
-
-
-
-#***********************************************************************************
-# magnetic field properties
-#***********************************************************************************
 
 def get_magnetic_field_properties(mag_field_component: np.ndarray, 
                                   field_axis: np.ndarray, 
@@ -739,42 +744,6 @@ def get_magnetic_field_properties(mag_field_component: np.ndarray,
 
     return mag_field_properties
 
-#***********************************************************************************
-# undulator auxiliary functions - magnetic field and K values
-#***********************************************************************************
-
-def get_K_from_B(B: float, und_per: float) -> float:
-    """
-    Calculate the undulator parameter K from the magnetic field B and the undulator period.
-
-    Parameters:
-    B (float): Magnetic field in Tesla.
-    und_per (float): Undulator period in meters.
-
-    Returns:
-    float: The undulator parameter K.
-    """
-    K = CHARGE * B * und_per / (2 * PI * MASS * LIGHT)
-    return K
-
-
-def get_B_from_K(K: float, und_per: float) -> float:
-    """
-    Calculate the undulator magnetic field in Tesla from the undulator parameter K and the undulator period.
-
-    Parameters:
-    K (float): The undulator parameter K.
-    und_per (float): Undulator period in meters.
-
-    Returns:
-    float: Magnetic field in Tesla.
-    """
-    B = K * 2 * PI * MASS * LIGHT/(CHARGE * und_per)
-    return B
-
-#***********************************************************************************
-# undulator auxiliary functions - field-gap relationship
-#***********************************************************************************
 
 def fit_gap_field_relation(gap_table: List[float], B_table: List[float], 
                            und_per: float) -> Tuple[float, float, float]:
@@ -834,6 +803,44 @@ def get_B_from_gap(gap: Union[float, np.ndarray], und_per: float, coeff: Tuple[f
 
     B = coeff[0] * np.exp(coeff[1] * gp + coeff[2] * gp**2)
     return B
+
+#***********************************************************************************
+# undulator auxiliary functions - magnetic field and K values
+#***********************************************************************************
+
+def get_K_from_B(B: float, und_per: float) -> float:
+    """
+    Calculate the undulator parameter K from the magnetic field B and the undulator period.
+
+    Parameters:
+    B (float): Magnetic field in Tesla.
+    und_per (float): Undulator period in meters.
+
+    Returns:
+    float: The undulator parameter K.
+    """
+    K = CHARGE * B * und_per / (2 * PI * MASS * LIGHT)
+    return K
+
+
+def get_B_from_K(K: float, und_per: float) -> float:
+    """
+    Calculate the undulator magnetic field in Tesla from the undulator parameter K and the undulator period.
+
+    Parameters:
+    K (float): The undulator parameter K.
+    und_per (float): Undulator period in meters.
+
+    Returns:
+    float: Magnetic field in Tesla.
+    """
+    B = K * 2 * PI * MASS * LIGHT/(CHARGE * und_per)
+    return B
+
+#***********************************************************************************
+# undulator auxiliary functions - field-gap relationship
+#***********************************************************************************
+
 
 #***********************************************************************************
 # undulator auxiliary functions - undulator emission

@@ -13,12 +13,7 @@ __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '12/MAR/2024'
 __changed__ = '12/JUN/2024'
 
-import array
-import copy
-import json
-import multiprocessing as mp
 import os
-import pickle
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -26,7 +21,6 @@ import h5py as h5
 import numpy as np
 import scipy.integrate as integrate
 from scipy.constants import physical_constants
-from scipy.signal import find_peaks
 
 from barc4sr.aux_utils import (
     energy_wavelength,
@@ -54,7 +48,6 @@ CHARGE = physical_constants["atomic unit of charge"][0]
 MASS = physical_constants["electron mass"][0]
 PI = np.pi
 RMS = np.sqrt(2)/2
-
 #***********************************************************************************
 # Bending magnet radiation
 #***********************************************************************************
@@ -108,7 +101,7 @@ def spectrum(file_name: str,
 
     t0 = time.time()
 
-    function_txt = "Undulator spectrum calculation using SRW:"
+    function_txt = "Bending magnet spectrum calculation using SRW:"
     calc_txt = "> Performing flux through finite aperture (___CALC___ partially-coherent simulation)"
     print(f"{function_txt} please wait...")
 
@@ -121,7 +114,7 @@ def spectrum(file_name: str,
     radiation_polarisation = kwargs.get('radiation_polarisation', 6)
     magfield_central_position = kwargs.get('magfield_central_position', 0)
     magnetic_measurement = kwargs.get('magnetic_measurement', None)
-
+    ebeam_initial_position = kwargs.get('ebeam_initial_position', 0)
     electron_trajectory = kwargs.get('electron_trajectory', False)
     filament_beam = kwargs.get('filament_beam', False)
     energy_spread = kwargs.get('energy_spread', True)
@@ -140,29 +133,26 @@ def spectrum(file_name: str,
             calculation = 2
 
     bl = syned_dictionary(json_file, magnetic_measurement, observation_point, 
-                          hor_slit, ver_slit, hor_slit_cen, ver_slit_cen, 
-                          Kh=Kh, Kh_phase=Kh_phase, Kh_symmetry=Kh_symmetry, 
-                          Kv=Kv, Kv_phase=Kv_phase, Kv_symmetry=Kv_symmetry)
+                          hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
 
    
     eBeam, magFldCnt, eTraj = set_light_source(file_name, bl, filament_beam, 
-                                               energy_spread, electron_trajectory, 'u',
+                                               energy_spread, electron_trajectory, 'bm',
                                                magnetic_measurement=magnetic_measurement,
-                                               tabulated_undulator_mthd=tabulated_undulator_mthd)
+                                               ebeam_initial_position=ebeam_initial_position,
+                                               magfield_central_position=magfield_central_position)
 
     # ----------------------------------------------------------------------------------
     # spectrum calculations
     # ----------------------------------------------------------------------------------
-    resonant_energy = get_emission_energy(bl['PeriodID'], 
-                                        np.sqrt(bl['Kv']**2 + bl['Kh']**2),
-                                        bl['ElectronEnergy'])
+
     if energy_sampling == 0: 
         energy = np.linspace(photon_energy_min, photon_energy_max, photon_energy_points)
     else:
-        stepsize = np.log(photon_energy_max/resonant_energy)
+        stepsize = np.log(photon_energy_max/photon_energy_min)
         energy = generate_logarithmic_energy_values(photon_energy_min,
                                                     photon_energy_max,
-                                                    resonant_energy,
+                                                    photon_energy_min,
                                                     stepsize)
     # ---------------------------------------------------------
     # On-Axis Spectrum from Filament Electron Beam
@@ -181,33 +171,33 @@ def spectrum(file_name: str,
                                                      radiation_characteristic=0, 
                                                      radiation_dependence=0,
                                                      radiation_polarisation=radiation_polarisation,
-                                                     id_type='u',
+                                                     id_type='bm',
                                                      parallel=parallel,
                                                      num_cores=num_cores)
         flux = flux.reshape((photon_energy_points))
         print('completed')
 
     # -----------------------------------------
-    # Flux through Finite Aperture (total pol.)
+    # Flux through Finite Aperture
 
-    # simplified partially-coherent simulation
-    if calculation == 1:
-        calc_txt = calc_txt.replace("___CALC___", "simplified")
-        if parallel:
-            print(f'{calc_txt} in parallel... ')
-        else:
-            print(f'{calc_txt} ... ', end='')
+    # # simplified partially-coherent simulation
+    # if calculation == 1:
+    #     calc_txt = calc_txt.replace("___CALC___", "simplified")
+    #     if parallel:
+    #         print(f'{calc_txt} in parallel... ')
+    #     else:
+    #         print(f'{calc_txt} ... ', end='')
 
-        flux = srwlibCalcStokesUR(bl, 
-                                  eBeam, 
-                                  magFldCnt, 
-                                  energy, 
-                                  resonant_energy,
-                                  radiation_polarisation,
-                                  parallel,
-                                  num_cores)
+    #     flux = srwlibCalcStokesUR(bl, 
+    #                               eBeam, 
+    #                               magFldCnt, 
+    #                               energy, 
+    #                               resonant_energy,
+    #                               radiation_polarisation,
+    #                               parallel,
+    #                               num_cores)
 
-        print('completed')
+    #     print('completed')
 
     # accurate partially-coherent simulation
     if calculation == 2:
@@ -224,7 +214,7 @@ def spectrum(file_name: str,
                                                                 h_slit_points=1,
                                                                 v_slit_points=1,
                                                                 radiation_polarisation=radiation_polarisation,
-                                                                id_type='u',
+                                                                id_type='bm',
                                                                 number_macro_electrons=number_macro_electrons,
                                                                 aux_file_name=file_name,
                                                                 parallel=parallel,
@@ -591,8 +581,8 @@ def emitted_wavefront(file_name: str,
     else:
         calculation = 1
 
-    bl = syned_dictionary(json_file, magnetic_measurement, observation_point, hor_slit, 
-                          ver_slit, hor_slit_cen, ver_slit_cen)
+    bl = syned_dictionary(json_file, magnetic_measurement, observation_point, 
+                          hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
     
     eBeam, magFldCnt, eTraj = set_light_source(file_name, bl, filament_beam, 
                                                energy_spread, electron_trajectory, 'bm',
@@ -674,169 +664,7 @@ def emitted_wavefront(file_name: str,
     return {"photon_energy":photon_energy, "wavefront": {"phase":phase, "intensity":intensity}, "axis":{"x":h_axis, "y":v_axis} }
 
 #***********************************************************************************
-# read/write functions for magnetic fields
-#***********************************************************************************
-
-def read_magnetic_measurement(file_path: str) -> np.ndarray:
-    """
-    Read magnetic measurement data from a file.
-
-    Parameters:
-        file_path (str): The path to the file containing magnetic measurement data.
-
-    Returns:
-        np.ndarray: A NumPy array containing the magnetic measurement data.
-    """
-
-    data = []
-
-    with open(file_path, 'r') as file:
-        for line in file:
-            if not line.startswith('#'):
-                values = line.split( )
-                data.append([float(value) for value in values])
-                
-    return np.asarray(data)
-
-
-def generate_srw_magnetic_field(mag_field_array: np.ndarray, file_path: Optional[str] = None) -> srwlib.SRWLMagFld3D:
-    """
-    Generate a 3D magnetic field object based on the input magnetic field array.
-
-    Parameters:
-        mag_field_array (np.ndarray): Array containing magnetic field data. Each row corresponds to a point in the 3D space,
-                                      where the first column represents the position along the longitudinal axis, and subsequent 
-                                      columns represent magnetic field components (e.g., Bx, By, Bz).
-        file_path (str, optional): File path to save the generated magnetic field object. If None, the object won't be saved.
-
-    Returns:
-        SRWLMagFld3D: Generated 3D magnetic field object.
-
-    """
-    nfield, ncomponents = mag_field_array.shape
-
-    field_axis = (mag_field_array[:, 0] - np.mean(mag_field_array[:, 0])) * 1e-3
-
-    Bx = mag_field_array[:, 1]
-    if ncomponents > 2:
-        By = mag_field_array[:, 2]
-    else:
-        By = np.zeros(nfield)
-    if ncomponents > 3:
-        Bz = mag_field_array[:, 3]
-    else:
-        Bz = np.zeros(nfield)
-
-    magFldCnt = srwlib.SRWLMagFld3D(Bx, By, Bz, 1, 1, nfield - 1, 0, 0, field_axis[-1]-field_axis[0], 1)
-
-    if file_path is not None:
-        print(f">>> saving {file_path}")
-        magFldCnt.save_ascii(file_path)
-
-    return magFldCnt
-
-#***********************************************************************************
-# magnetic field properties
-#***********************************************************************************
-
-def get_magnetic_field_properties(mag_field_component: np.ndarray, 
-                                  field_axis: np.ndarray, 
-                                  threshold: float = 0.7,
-                                  **kwargs: Any) -> Dict[str, Any]:
-    """
-    Perform analysis on magnetic field data.
-
-    Parameters:
-        mag_field_component (np.ndarray): Array containing magnetic field component data.
-        field_axis (np.ndarray): Array containing axis data corresponding to the magnetic field component.
-        threshold (float, optional): Peak detection threshold as a fraction of the maximum value.
-        **kwargs: Additional keyword arguments.
-            - pad (bool): Whether to pad the magnetic field component array for FFT analysis. Default is False.
-            - positive_side (bool): Whether to consider only the positive side of the FFT. Default is True.
-
-    Returns:
-        Dict[str, Any]: Dictionary containing magnetic field properties including mean, standard deviation,
-                        undulator period mean, undulator period standard deviation, frequency, FFT data, 
-                        and first and second field integrals.
-                        
-        Dictionary structure:
-            {
-                "field": np.ndarray,                  # Array containing the magnetic field component data.
-                "axis": np.ndarray,                   # Array containing the axis data corresponding to the magnetic field component.
-                "mag_field_mean": float,              # Mean value of the magnetic field component.
-                "mag_field_std": float,               # Standard deviation of the magnetic field component.
-                "und_period_mean": float,             # Mean value of the undulator period.
-                "und_period_std": float,              # Standard deviation of the undulator period.
-                "first_field_integral": np.ndarray,   # Array containing the first field integral.
-                "second_field_integral": np.ndarray,  # Array containing the first field integral.
-                "freq": np.ndarray,                   # Array containing frequency data for FFT analysis.
-                "fft": np.ndarray                     # Array containing FFT data.
-            }
-    """
-
-    field_axis -= np.mean(field_axis)
-    peaks, _ = find_peaks(mag_field_component, height=np.amax(mag_field_component) *threshold)
-
-    # Calculate distances between consecutive peaks
-    periods = np.diff(field_axis[peaks])
-    average_period = np.mean(periods)
-    period_dispersion = np.std(periods)
-    average_peak = np.mean(mag_field_component[peaks])
-    peak_dispersion = np.std(mag_field_component[peaks])
-
-    print(f"Number of peaks over 0.7*Bmax: {len(peaks)}")
-    print(f"Average period: {average_period * 1e3:.3f}+-{period_dispersion * 1e3:.3f} [mm]")
-    print(f"Average peak: {average_peak:.3f}+-{peak_dispersion:.3f} [T]")
-
-    mag_field_properties = {
-        "field": mag_field_component,
-        "axis": field_axis,
-        "mag_field_mean": average_peak,
-        "mag_field_std": peak_dispersion,
-        "und_period_mean": average_period,
-        "und_period_std": period_dispersion,
-    }
-    # # RC20240315: debug
-    # import matplotlib.pyplot as plt
-    # plt.plot(mag_field_component)
-    # plt.plot(peaks, mag_field_component[peaks], "x")
-    # plt.plot(np.zeros_like(mag_field_component), "--", color="gray")
-    # plt.show()
-
-    # First and second field integrals
-
-    first_field_integral = integrate.cumulative_trapezoid(mag_field_component, field_axis, initial=0)
-    second_field_integral = integrate.cumulative_trapezoid(first_field_integral, field_axis, initial=0)
-
-    mag_field_properties["first_field_integral"] = first_field_integral
-    mag_field_properties["second_field_integral"] = second_field_integral
-
-    # Frequency analysis of the magnetic field
-    pad = kwargs.get("pad", False)
-    positive_side = kwargs.get("positive_side", True)
-
-    if pad:
-        mag_field_component = np.pad(mag_field_component, 
-                                     (int(len(mag_field_component) / 2), 
-                                      int(len(mag_field_component) / 2)))
-    
-    naxis = len(mag_field_component)
-    daxis = field_axis[1] - field_axis[0]
-
-    fftfield = np.abs(np.fft.fftshift(np.fft.fft(mag_field_component)))
-    freq = np.fft.fftshift(np.fft.fftfreq(naxis, daxis))
-
-    if positive_side:
-        fftfield = 2 * fftfield[freq > 0]
-        freq = freq[freq > 0]
-
-    mag_field_properties["freq"] = freq
-    mag_field_properties["fft"] = fftfield
-
-    return mag_field_properties
-
-#***********************************************************************************
-# undulator auxiliary functions - power calculation
+# bending magnet auxiliary functions - power calculation
 #***********************************************************************************
 
 def total_power(ring_e: float, ring_curr: float, und_per: float, und_n_per: int,
@@ -858,15 +686,7 @@ def total_power(ring_e: float, ring_curr: float, und_per: float, und_n_per: int,
     :return: Total power emitted by the undulator in kilowatts (kW).
     """
 
-    if B is None:
-        if K is None:
-            raise TypeError("Please, provide either B or K for the undulator")
-        else:
-            B = get_B_from_K(K, und_per)
-            if verbose:
-                print(">>> B = %.5f [T]"%B)
-
-    return 0.63*(ring_e**2)*(B**2)*ring_curr*und_per*und_n_per
+    pass
 
 
 

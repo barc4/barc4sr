@@ -1,14 +1,16 @@
 #!/bin/python
 
 """ 
-This module provides functions for...
+This module provides SR classes, SRW interfaced functions, r/w SYNED compatible functions,
+r/w functions for the electron trajectory and magnetic field as well as other auxiliary 
+functions.
 """
 __author__ = ['Rafael Celestre']
 __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '15/MAR/2024'
-__changed__ = '13/JUN/2024'
+__changed__ = '14/JUN/2024'
 
 import array
 import copy
@@ -355,7 +357,7 @@ class MagneticStructure(object):
             raise ValueError("invalid operation for undulator or wiggler sources")
         else:
             gamma = get_gamma(eBeamEnergy)
-            energy = (3*PLANCK*self.magnetic_field*gamma**2)/(2*PI*MASS)
+            energy = (3*PLANCK*self.magnetic_field*gamma**2)/(4*PI*MASS)
             print(f">> critical energy {energy:.2f} eV")
     # -------------------------------------        
     # auxiliary functions
@@ -423,7 +425,7 @@ class UndulatorSource(object):
     """
     def __init__(self, electron_beam: ElectronBeam, magnetic_structure: MagneticStructure) -> None:
         """
-        Initializes an instance of the SynchrotronSource class.
+        Initializes an instance of the UndulatorSource class.
 
         Args:
             electron_beam (ElectronBeam): An instance of the ElectronBeam class representing the electron beam parameters.
@@ -433,12 +435,14 @@ class UndulatorSource(object):
         self.MagneticStructure = magnetic_structure
     
     def __getattr__(self, name):
-        if hasattr(self.ElectronBeam, name):
+        if name in self.__dict__:
+            return self.__dict__[name]
+        elif hasattr(self.ElectronBeam, name):
             return getattr(self.ElectronBeam, name)
         elif hasattr(self.MagneticStructure, name):
             return getattr(self.MagneticStructure, name)
         else:
-            raise AttributeError(f"'SynchrotronSource' object has no attribute '{name}'")
+            raise AttributeError(f"'UndulatorSource' object has no attribute '{name}'")
         
     def get_beam_dimensions(self, mth):
 
@@ -463,7 +467,6 @@ class UndulatorSource(object):
         for i in (vars(self)):
             print("{0:10}: {1}".format(i, vars(self)[i]))
         
-
 #***********************************************************************************
 # SRW interface functions
 #***********************************************************************************
@@ -1049,6 +1052,8 @@ def srwlibsrwl_wfr_emit_prop_multi_e(bl: dict,
         srCalcMeth = 2          # SR calculation method: 0- "manual", 1- "auto-undulator", 2- "auto-wiggler"
     else:
         srCalcMeth = 1
+
+    srApprox = 0
     srCalcPrec = 0.01           # SR calculation rel. accuracy
 
     if h_slit_points == 1 or v_slit_points == 1:
@@ -1082,6 +1087,7 @@ def srwlibsrwl_wfr_emit_prop_multi_e(bl: dict,
                         aux_file_name+'_'+str(i),
                         srCalcMeth,
                         srCalcPrec,
+                        srApprox,
                         radiation_polarisation,
                         nMacroElecAvgPerProc,
                         nMacroElecSavePer) for i in range(0, n_slices, chunk_size)]
@@ -1110,6 +1116,7 @@ def srwlibsrwl_wfr_emit_prop_multi_e(bl: dict,
                                                                         aux_file_name+'_'+str(list_pairs[0]),
                                                                         srCalcMeth,
                                                                         srCalcPrec,
+                                                                        srApprox,
                                                                         radiation_polarisation,
                                                                         nMacroElecAvgPerProc,
                                                                         nMacroElecSavePer))
@@ -1142,6 +1149,7 @@ def srwlibsrwl_wfr_emit_prop_multi_e(bl: dict,
                                                         aux_file_name,
                                                         srCalcMeth,
                                                         srCalcPrec,
+                                                        srApprox,
                                                         radiation_polarisation,
                                                         nMacroElecAvgPerProc,
                                                         nMacroElecSavePer))
@@ -1155,7 +1163,7 @@ def core_srwlibsrwl_wfr_emit_prop_multi_e(args: Tuple[np.ndarray,
                                                       srwlib.SRWLPartBeam, 
                                                       srwlib.SRWLMagFldC, 
                                                       int, int, int, str, int, float,
-                                                      int, int, int]) -> Tuple[np.ndarray, float]:
+                                                      int, int, int, int]) -> Tuple[np.ndarray, float]:
     """
     Core function for computing multi-electron emission and propagation through a beamline using SRW.
 
@@ -1171,6 +1179,9 @@ def core_srwlibsrwl_wfr_emit_prop_multi_e(args: Tuple[np.ndarray,
             - aux_file_name (str): Auxiliary file name for saving intermediate data.
             - srCalcMeth (int): SR calculation method.
             - srCalcPrec (float): SR calculation relative accuracy.
+            - srApprox (int): Approximation to be used at multi-electron integration: 
+                    0- none (i.e. do standard M-C integration over 5D phase space volume of e-beam), 
+                    1- integrate numerically only over e-beam energy spread and use convolution to treat transverse emittance
             - radiation_polarisation (int): Polarisation component to be extracted.
             - nMacroElecAvgPerProc (int): Number of macro-electrons / wavefront to average on worker processes.
             - nMacroElecSavePer (int): Intermediate data saving periodicity (in macro-electrons).
@@ -1180,7 +1191,7 @@ def core_srwlibsrwl_wfr_emit_prop_multi_e(args: Tuple[np.ndarray,
     """
 
     energy_array, bl, eBeam, magFldCnt, h_slit_points, v_slit_points, \
-        number_macro_electrons, aux_file_name, srCalcMeth, srCalcPrec, radiation_polarisation,\
+        number_macro_electrons, aux_file_name, srCalcMeth, srCalcPrec, srApprox, radiation_polarisation,\
         nMacroElecAvgPerProc, nMacroElecSavePer = args
     
     tzero = time()
@@ -1221,7 +1232,8 @@ def core_srwlibsrwl_wfr_emit_prop_multi_e(args: Tuple[np.ndarray,
                                                 _file_path=MacroElecFileName, 
                                                 _sr_samp_fact=-1, 
                                                 _opt_bl=None,
-                                                _char=0)
+                                                _char=0,
+                                                _me_approx=srApprox)
     
         os.system('rm %s'% MacroElecFileName)
         me_intensity = np.asarray(stk.to_int(_pol=radiation_polarisation), dtype='float64')
@@ -1513,9 +1525,6 @@ def read_magnetic_measurement(file_path: str) -> np.ndarray:
     return np.asarray(data)
 
 
-
-
-
 #***********************************************************************************
 # auxiliary functions accelerator functions
 #***********************************************************************************
@@ -1586,6 +1595,7 @@ def get_undulator_max_harmonic_number(resonant_energy: float, photonEnergyMax: f
 #***********************************************************************************
 # potpourri
 #***********************************************************************************
+
 def syned_dictionary(json_file: str, magnetic_measurement: Union[str, None], observation_point: float, 
                      hor_slit: float, ver_slit: float, hor_slit_cen: float, ver_slit_cen: float, **kwargs) -> dict:
     """
