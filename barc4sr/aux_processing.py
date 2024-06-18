@@ -190,7 +190,7 @@ def read_power_density(file_name: str) -> Dict:
     return PowDenSRdict
 
 
-def trim_and_resample_power_density(PowDenSRdict: Dict[str, Any], **kwargs: Union[float, bool]) -> Dict[str, Any]:
+def trim_and_resample_power_density(PowDenSRdict: Dict, **kwargs: Union[float, bool]) -> Dict:
     """
     Trims and optionally resamples the power density data map.
 
@@ -199,7 +199,7 @@ def trim_and_resample_power_density(PowDenSRdict: Dict[str, Any], **kwargs: Unio
     along with cumulative power and maximum power density.
 
     Parameters:
-        - PowDenSRdict (Dict[str, Any]): A dictionary containing power density data with the following keys:
+        - PowDenSRdict (Dict): A dictionary containing power density data with the following keys:
             - 'axis': A dictionary containing 'x' and 'y' axes arrays.
             - 'power_density': A dictionary containing the power density map.
         - **kwargs (Union[float, bool]): Additional keyword arguments for optional trimming and resampling:
@@ -211,7 +211,7 @@ def trim_and_resample_power_density(PowDenSRdict: Dict[str, Any], **kwargs: Unio
             - 'Y' (array_like): New y-axis values for resampling.
 
     Returns:
-        Dict[str, Any]: A dictionary containing trimmed and resampled power density data with the following keys:
+        Dict: A dictionary containing trimmed and resampled power density data with the following keys:
             - 'axis': A dictionary containing trimmed and resampled 'x' and 'y' axes arrays.
             - 'power_density': A dictionary containing the trimmed and resampled power density map,
               along with cumulative power and maximum power density.
@@ -269,17 +269,16 @@ def trim_and_resample_power_density(PowDenSRdict: Dict[str, Any], **kwargs: Unio
 # Spatial-spectral distribution
 #***********************************************************************************
 
-def read_emitted_radiation(file_list: List[str], computer_code: str = 'srw', parallel_processing: bool = False) -> dict:
+def read_emitted_radiation(file_list: List[str], parallel_processing: bool = False) -> Dict:
     """
-    Reads XOPPY undulator radiation data from a list of files and processes it.
+    Reads synchrotron radiation emission (I vs x vs y vs E) data from from a list of files and processes it.
 
-    This function reads the XOPPY undulator radiation data from a list of HDF5 files,
-    concatenates the spectral flux data, and processes it using either the proc_undulator_radiation function
-    or the proc_undulator_radiation_parallel function based on the value of parallel_processing.
+    This function reads emitted radiation data from a list of HDF5 files, concatenates the spectral 
+    flux data, and processes it using either the proc_undulator_radiation function or the 
+    proc_undulator_radiation_parallel function based on the value of parallel_processing.
 
     Parameters:
-        - file_list (List[str]): A list of file paths containing the XOPPY undulator radiation data.
-        - computer_code (str): The code used to generate the power density data ('xoppy' or 'srw').
+        - file_list (List[str]): A list of file paths containing synchrotron radiation data.
         - parallel_processing (bool, optional): Whether to use parallel processing. Defaults to False.
 
     Returns:
@@ -294,6 +293,10 @@ def read_emitted_radiation(file_list: List[str], computer_code: str = 'srw', par
         - The spectral flux data from different files will be concatenated along the 0-axis.
         - The x and y axes are assumed to be the same for all files in the file_list.
     """
+
+    if isinstance(file_list, List) is False:
+        file_list = [file_list]
+        
     energy = []
     spectral_flux_3D = []
 
@@ -311,8 +314,8 @@ def read_emitted_radiation(file_list: List[str], computer_code: str = 'srw', par
         energy = np.concatenate((energy, f["XOPPY_RADIATION"]["Radiation"]["axis0"][()]))
 
     print("UR files loaded")
-    if computer_code == 'xoppy':
-        spectral_flux_3D = spectral_flux_3D.swapaxes(1, 2)
+
+    spectral_flux_3D = spectral_flux_3D.swapaxes(1, 2)
 
     x = f["XOPPY_RADIATION"]["Radiation"]["axis1"][()]
     y = f["XOPPY_RADIATION"]["Radiation"]["axis2"][()]
@@ -322,11 +325,12 @@ def read_emitted_radiation(file_list: List[str], computer_code: str = 'srw', par
     else:
         return proc_spatial_spectral_dist(spectral_flux_3D, energy, x, y)
 
+
 def proc_spatial_spectral_dist(spectral_flux_3D: np.ndarray, energy: np.ndarray, x: np.ndarray, y: np.ndarray) -> dict:
     """
-    Processes the undulator radiation data.
+    Processes the synchotron radiation data.
 
-    This function calculates various properties of undulator radiation based on the provided 3D spectral flux data.
+    This function calculates various properties of synchotron radiation based on the provided 3D spectral flux data.
 
     Parameters:
         - spectral_flux_3D (np.ndarray): A 3D numpy array representing the spectral flux data. Shape: (n_slices, ny, nx)
@@ -335,7 +339,7 @@ def proc_spatial_spectral_dist(spectral_flux_3D: np.ndarray, energy: np.ndarray,
         - y (np.ndarray): A 1D numpy array containing the y-axis values.
 
     Returns:
-        dict: A dictionary containing processed undulator radiation data with the following keys:
+        dict: A dictionary containing processed synchotron radiation data with the following keys:
             - 'axis': Dictionary containing the x and y axis values.
             - 'spectral_power_3D': 3D numpy array of spectral power.
             - 'power_density': Dictionary containing the power density information with keys:
@@ -405,9 +409,9 @@ def proc_spatial_spectral_dist(spectral_flux_3D: np.ndarray, energy: np.ndarray,
 
 def proc_spatial_spectral_dist_parallel(spectral_flux_3D: np.ndarray, energy: np.ndarray, x: np.ndarray, y: np.ndarray, chunk_size: int = 25) -> dict:
     """
-    Process undulator radiation data in parallel.
+    Process synchotron radiation data in parallel.
 
-    This function calculates various properties of undulator radiation based on the provided 3D spectral flux data.
+    This function calculates various properties of synchotron radiation based on the provided 3D spectral flux data.
 
     Parameters:
         - spectral_flux_3D (np.ndarray): A 3D numpy array representing the spectral flux data. Shape: (n_slices, ny, nx)
@@ -417,7 +421,7 @@ def proc_spatial_spectral_dist_parallel(spectral_flux_3D: np.ndarray, energy: np
         - chunk_size (int, optional): Size of each chunk of spectral flux data for parallel processing. Default is 25.
 
     Returns:
-        dict: A dictionary containing processed undulator radiation data with the following keys:
+        dict: A dictionary containing processed synchotron radiation data with the following keys:
             - 'axis': Dictionary containing the x and y axis values.
             - 'spectral_power_3D': 3D numpy array of spectral power.
             - 'power_density': Dictionary containing the power density information with keys:
@@ -534,13 +538,13 @@ def process_chunk(args):
 
 def select_energy_range(URdict: Dict[str, Any], ei: float, ef: float, **kwargs: Union[float, bool]) -> Dict[str, Any]:
     """
-    Selects a specific energy range from the undulator radiation data and returns processed data within that range.
+    Selects a specific energy range from the synchotron radiation data and returns processed data within that range.
 
-    This function selects a specific energy range from the given undulator radiation data dictionary (URdict)
+    This function selects a specific energy range from the given synchotron radiation data dictionary (URdict)
     and returns processed data within that range. Optionally, it allows trimming the data based on specified criteria.
 
     Parameters:
-        - URdict (Dict[str, Any]): A dictionary containing undulator radiation data with the following keys:
+        - URdict (Dict[str, Any]): A dictionary containing synchotron radiation data with the following keys:
             - 'axis': A dictionary containing 'x' and 'y' axes arrays.
             - 'spectrum': A dictionary containing energy-related data, including 'energy' array.
             - 'spectral_power_3D': A 3D array representing spectral power density.
@@ -553,7 +557,7 @@ def select_energy_range(URdict: Dict[str, Any], ei: float, ef: float, **kwargs: 
             - 'yc' (float): Center of the trimming region along the y-axis.
 
     Returns:
-        Dict[str, Any]: A dictionary containing processed undulator radiation data within the selected energy range,
+        Dict[str, Any]: A dictionary containing processed synchotron radiation data within the selected energy range,
         trimmed based on the specified criteria (if any).
 
     Notes:

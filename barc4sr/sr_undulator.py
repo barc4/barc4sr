@@ -395,7 +395,7 @@ def emitted_radiation(file_name: str,
                       hor_slit_n: int,
                       ver_slit: float,
                       ver_slit_n: int,
-                      **kwargs) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+                      **kwargs) -> Dict:
     """
     Calculate undulator radiation spatial and spectral distribution using SRW.
 
@@ -415,6 +415,14 @@ def emitted_radiation(file_name: str,
         observation_point (float): Distance to the observation point. Default is 10 [m].
         hor_slit_cen (float): Horizontal slit center position [m]. Default is 0.
         ver_slit_cen (float): Vertical slit center position [m]. Default is 0.
+        radiation_polarisation (int): Polarisation component to be extracted. Default is 6.
+            =0 -Linear Horizontal; 
+            =1 -Linear Vertical; 
+            =2 -Linear 45 degrees; 
+            =3 -Linear 135 degrees; 
+            =4 -Circular Right; 
+            =5 -Circular Left; 
+            =6 -Total
         Kh (float): Horizontal undulator parameter K. If -1, taken from the SYNED file. Default is -1.
         Kh_phase (float): Initial phase of the horizontal magnetic field [rad]. Default is 0.
         Kh_symmetry (int): Symmetry of the horizontal magnetic field vs longitudinal position.
@@ -444,12 +452,15 @@ def emitted_radiation(file_name: str,
 
     t0 = time.time()
 
-    print("Undulator radiation spatial and spectral distribution using SRW. Please wait...")
+    function_txt = "Undulator radiation spatial and spectral distribution using SRW:"
+    calc_txt = "> Performing flux through finite aperture (___CALC___ partially-coherent simulation)"
+    print(f"{function_txt} please wait...")
 
     energy_sampling = kwargs.get('energy_sampling', 0)
     observation_point = kwargs.get('observation_point', 10.)
     hor_slit_cen = kwargs.get('hor_slit_cen', 0)
     ver_slit_cen = kwargs.get('ver_slit_cen', 0)
+    radiation_polarisation = kwargs.get('radiation_polarisation', 6)
     Kh = kwargs.get('Kh', -1)
     Kh_phase = kwargs.get('Kh_phase', 0)
     Kh_symmetry = kwargs.get('Kh_symmetry', 1)
@@ -470,14 +481,17 @@ def emitted_radiation(file_name: str,
     else:
         calculation = 1
 
-    bl = syned_dictionary(json_file, magnetic_measurement, observation_point, hor_slit, 
-                    ver_slit, hor_slit_cen, ver_slit_cen, Kh, Kh_phase, Kh_symmetry, 
-                    Kv, Kv_phase, Kv_symmetry)
-    
+    bl = syned_dictionary(json_file, magnetic_measurement, observation_point, 
+                          hor_slit, ver_slit, hor_slit_cen, ver_slit_cen, 
+                          Kh=Kh, Kh_phase=Kh_phase, Kh_symmetry=Kh_symmetry, 
+                          Kv=Kv, Kv_phase=Kv_phase, Kv_symmetry=Kv_symmetry)
+
+   
     eBeam, magFldCnt, eTraj = set_light_source(file_name, bl, filament_beam, 
-                                               energy_spread, magnetic_measurement,
-                                               tabulated_undulator_mthd, 
-                                               electron_trajectory)
+                                               energy_spread, electron_trajectory, 'u',
+                                               magnetic_measurement=magnetic_measurement,
+                                               tabulated_undulator_mthd=tabulated_undulator_mthd)
+
     
     # ----------------------------------------------------------------------------------
     # spectrum calculations
@@ -498,10 +512,11 @@ def emitted_radiation(file_name: str,
         
     # simplified partially-coherent simulation    
     if calculation == 0:
+        calc_txt = calc_txt.replace("___CALC___", "simplified")
         if parallel:
-            print('> Performing flux through finite aperture (simplified partially-coherent simulation) in parallel... ')
+            print(f'{calc_txt} in parallel... ')
         else:
-            print('> Performing flux through finite aperture (simplified partially-coherent simulation)... ', end='')
+            print(f'{calc_txt} ... ', end='')
 
         intensity, h_axis, v_axis = srwlibCalcElecFieldSR(bl, 
                                                           eBeam, 
@@ -511,15 +526,19 @@ def emitted_radiation(file_name: str,
                                                           v_slit_points=ver_slit_n,
                                                           radiation_characteristic=1, 
                                                           radiation_dependence=3,
-                                                          parallel=parallel)        
+                                                          radiation_polarisation=radiation_polarisation,
+                                                          id_type='u',
+                                                          parallel=parallel,
+                                                          num_cores=num_cores)        
         print('completed')
 
     # accurate partially-coherent simulation
     if calculation == 1:
+        calc_txt = calc_txt.replace("___CALC___", "accurate")
         if parallel:
-            print('> Performing flux through finite aperture (accurate partially-coherent simulation) in parallel... ')
+            print(f'{calc_txt} in parallel... ')
         else:
-            print('> Performing flux through finite aperture (accurate partially-coherent simulation)...')
+            print(f'{calc_txt} ... ', end='')
 
         intensity, h_axis, v_axis = srwlibsrwl_wfr_emit_prop_multi_e(bl, 
                                                                      eBeam,
@@ -527,10 +546,12 @@ def emitted_radiation(file_name: str,
                                                                      energy,
                                                                      hor_slit_n,
                                                                      ver_slit_n,
-                                                                     number_macro_electrons,
-                                                                     file_name,
-                                                                     parallel,
-                                                                     num_cores) 
+                                                                     radiation_polarisation=radiation_polarisation,
+                                                                     id_type='u',
+                                                                     number_macro_electrons=number_macro_electrons,
+                                                                     aux_file_name=file_name,
+                                                                     parallel=parallel,
+                                                                     num_cores=num_cores) 
         print('completed')
     
     with h5.File('%s_undulator_radiation.h5'%file_name, 'w') as f:
@@ -544,7 +565,7 @@ def emitted_radiation(file_name: str,
     print("Undulator radiation spatial and spectral distribution using SRW: finished")
     print_elapsed_time(t0)
 
-    return energy, intensity, h_axis, v_axis
+    return {'energy': energy, 'intensity':intensity, 'axis': {'x': h_axis, 'y': v_axis}}
 
 
 def emitted_wavefront():

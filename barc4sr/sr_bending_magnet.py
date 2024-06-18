@@ -609,6 +609,7 @@ def emitted_wavefront(file_name: str,
                                                           radiation_polarisation=radiation_polarisation,
                                                           id_type = 'bm',
                                                           parallel=False)     
+        
         phase, h_axis, v_axis = srwlibCalcElecFieldSR(bl, 
                                                       eBeam, 
                                                       magFldCnt,
@@ -620,6 +621,8 @@ def emitted_wavefront(file_name: str,
                                                       radiation_polarisation=radiation_polarisation,
                                                       id_type = 'bm',
                                                       parallel=False)     
+        
+        # TODO: phase unwrap
         
         print('completed')
 
