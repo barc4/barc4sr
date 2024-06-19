@@ -41,6 +41,27 @@ CHARGE = physical_constants["atomic unit of charge"][0]
 # Spectrum
 #***********************************************************************************
 
+def write_spectrum(file_name: str, flux: np.array, energy: np.array) -> None:
+    """
+    Writes spectrum data to an HDF5 file.
+
+    This function writes the provided energy and flux data to an HDF5 file. The data is stored 
+    in the 'XOPPY_SPECTRUM' group within the file, with a subgroup for 'Spectrum'.
+
+    Parameters:
+        file_name (str): Base file path for saving the spectrum data. The file will be saved 
+                         with the suffix '_spectrum.h5'.
+        flux (np.array): 1D numpy array containing the flux data.
+        energy (np.array): 1D numpy array containing the energy data.
+
+    """
+    with h5.File('%s_spectrum.h5'%file_name, 'w') as f:
+        group = f.create_group('XOPPY_SPECTRUM')
+        intensity_group = group.create_group('Spectrum')
+        intensity_group.create_dataset('energy', data=energy)
+        intensity_group.create_dataset('flux', data=flux) 
+
+
 def read_spectrum(file_list: List[str]) -> Dict:
     """
     Reads and processes spectrum data from files.
@@ -118,6 +139,30 @@ def read_spectrum(file_list: List[str]) -> Dict:
 # Power density
 #***********************************************************************************
 
+def write_power_density(file_name: str, power_density: np.array, h_axis: np.array, v_axis: np.array) -> None:
+    """
+    Writes power density data to an HDF5 file.
+
+    This function writes the provided power density data along with the corresponding 
+    horizontal (h_axis) and vertical (v_axis) axes to an HDF5 file. The data is stored in 
+    the 'XOPPY_POWERDENSITY' group within the file, with a subgroup for 'PowerDensity'.
+
+    Parameters:
+        file_name (str): Base file path for saving the power density data. The file will be 
+                         saved with the suffix '_power_density.h5'.
+        power_density (np.array): 2D numpy array containing the power density data.
+        h_axis (np.array): 1D numpy array containing the horizontal axis data.
+        v_axis (np.array): 1D numpy array containing the vertical axis data.
+
+    """
+    with h5.File('%s_power_density.h5' % file_name, 'w') as f:
+        group = f.create_group('XOPPY_POWERDENSITY')
+        sub_group = group.create_group('PowerDensity')
+        sub_group.create_dataset('image_data', data=power_density)
+        sub_group.create_dataset('axis_x', data=h_axis * 1e3)  # axis in [mm]
+        sub_group.create_dataset('axis_y', data=v_axis * 1e3)
+
+
 def read_power_density(file_name: str) -> Dict:
     """
     Reads power density data from an HDF5 (barc4sr) or JSON (SPECTRA) file and processes it.
@@ -130,7 +175,7 @@ def read_power_density(file_name: str) -> Dict:
         file_name (str): File path containing power density data.
 
     Returns:
-        Dict[str, Any]: A dictionary containing processed power density data with the following keys:
+        Dict: A dictionary containing processed power density data with the following keys:
             - 'axis': A dictionary containing 'x' and 'y' axes arrays.
             - 'power_density': A dictionary containing power density-related data, including the power density map,
               total received power, and peak power density.
@@ -269,6 +314,32 @@ def trim_and_resample_power_density(PowDenSRdict: Dict, **kwargs: Union[float, b
 # Spatial-spectral distribution
 #***********************************************************************************
 
+def write_emitted_radiation(file_name: str, intensity: np.array, energy: np.array, h_axis: np.array, v_axis: np.array) -> None:
+    """
+    Writes synchrotron radiation (I vs x vs y vs E) data to an HDF5 file.
+
+    This function writes the provided intensity data along with the corresponding energy, 
+    horizontal (h_axis), and vertical (v_axis) axes to an HDF5 file. The data is stored 
+    in the 'XOPPY_RADIATION' group within the file, with a subgroup for 'Radiation'.
+
+    Parameters:
+        file_name (str): Base file path for saving the undulator radiation data. The file will be 
+                         saved with the suffix '_undulator_radiation.h5'.
+        intensity (np.array): 3D numpy array containing the intensity data.
+        energy (np.array): 1D numpy array containing the energy axis data.
+        h_axis (np.array): 1D numpy array containing the horizontal axis data.
+        v_axis (np.array): 1D numpy array containing the vertical axis data.
+
+    """
+    with h5.File('%s_undulator_radiation.h5' % file_name, 'w') as f:
+        group = f.create_group('XOPPY_RADIATION')
+        radiation_group = group.create_group('Radiation')
+        radiation_group.create_dataset('stack_data', data=intensity)
+        radiation_group.create_dataset('axis0', data=energy)
+        radiation_group.create_dataset('axis1', data=h_axis * 1e3)
+        radiation_group.create_dataset('axis2', data=v_axis * 1e3)
+
+
 def read_emitted_radiation(file_list: List[str], parallel_processing: bool = False) -> Dict:
     """
     Reads synchrotron radiation emission (I vs x vs y vs E) data from from a list of files and processes it.
@@ -282,7 +353,7 @@ def read_emitted_radiation(file_list: List[str], parallel_processing: bool = Fal
         - parallel_processing (bool, optional): Whether to use parallel processing. Defaults to False.
 
     Returns:
-        dict: A dictionary containing processed undulator radiation data.
+        Dict: A dictionary containing processed undulator radiation data.
 
     Notes:
         - The input HDF5 files should contain the following datasets:
@@ -326,7 +397,7 @@ def read_emitted_radiation(file_list: List[str], parallel_processing: bool = Fal
         return proc_spatial_spectral_dist(spectral_flux_3D, energy, x, y)
 
 
-def proc_spatial_spectral_dist(spectral_flux_3D: np.ndarray, energy: np.ndarray, x: np.ndarray, y: np.ndarray) -> dict:
+def proc_spatial_spectral_dist(spectral_flux_3D: np.ndarray, energy: np.ndarray, x: np.ndarray, y: np.ndarray) -> Dict:
     """
     Processes the synchotron radiation data.
 
@@ -339,7 +410,7 @@ def proc_spatial_spectral_dist(spectral_flux_3D: np.ndarray, energy: np.ndarray,
         - y (np.ndarray): A 1D numpy array containing the y-axis values.
 
     Returns:
-        dict: A dictionary containing processed synchotron radiation data with the following keys:
+        Dict: A dictionary containing processed synchotron radiation data with the following keys:
             - 'axis': Dictionary containing the x and y axis values.
             - 'spectral_power_3D': 3D numpy array of spectral power.
             - 'power_density': Dictionary containing the power density information with keys:
@@ -407,7 +478,7 @@ def proc_spatial_spectral_dist(spectral_flux_3D: np.ndarray, energy: np.ndarray,
     return URdict
 
 
-def proc_spatial_spectral_dist_parallel(spectral_flux_3D: np.ndarray, energy: np.ndarray, x: np.ndarray, y: np.ndarray, chunk_size: int = 25) -> dict:
+def proc_spatial_spectral_dist_parallel(spectral_flux_3D: np.ndarray, energy: np.ndarray, x: np.ndarray, y: np.ndarray, chunk_size: int = 25) -> Dict:
     """
     Process synchotron radiation data in parallel.
 
@@ -421,7 +492,7 @@ def proc_spatial_spectral_dist_parallel(spectral_flux_3D: np.ndarray, energy: np
         - chunk_size (int, optional): Size of each chunk of spectral flux data for parallel processing. Default is 25.
 
     Returns:
-        dict: A dictionary containing processed synchotron radiation data with the following keys:
+        Dict: A dictionary containing processed synchotron radiation data with the following keys:
             - 'axis': Dictionary containing the x and y axis values.
             - 'spectral_power_3D': 3D numpy array of spectral power.
             - 'power_density': Dictionary containing the power density information with keys:
@@ -536,7 +607,7 @@ def process_chunk(args):
     return PowDenSR, flux, energy_chunk
 
 
-def select_energy_range(URdict: Dict[str, Any], ei: float, ef: float, **kwargs: Union[float, bool]) -> Dict[str, Any]:
+def select_energy_range(URdict: Dict, ei: float, ef: float, **kwargs: Union[float, bool]) -> Dict:
     """
     Selects a specific energy range from the synchotron radiation data and returns processed data within that range.
 
@@ -544,7 +615,7 @@ def select_energy_range(URdict: Dict[str, Any], ei: float, ef: float, **kwargs: 
     and returns processed data within that range. Optionally, it allows trimming the data based on specified criteria.
 
     Parameters:
-        - URdict (Dict[str, Any]): A dictionary containing synchotron radiation data with the following keys:
+        - URdict (Dict): A dictionary containing synchotron radiation data with the following keys:
             - 'axis': A dictionary containing 'x' and 'y' axes arrays.
             - 'spectrum': A dictionary containing energy-related data, including 'energy' array.
             - 'spectral_power_3D': A 3D array representing spectral power density.
@@ -557,7 +628,7 @@ def select_energy_range(URdict: Dict[str, Any], ei: float, ef: float, **kwargs: 
             - 'yc' (float): Center of the trimming region along the y-axis.
 
     Returns:
-        Dict[str, Any]: A dictionary containing processed synchotron radiation data within the selected energy range,
+        Dict: A dictionary containing processed synchotron radiation data within the selected energy range,
         trimmed based on the specified criteria (if any).
 
     Notes:
@@ -603,12 +674,12 @@ def select_energy_range(URdict: Dict[str, Any], ei: float, ef: float, **kwargs: 
     return proc_spatial_spectral_dist_parallel(spectral_flux_3D, energy, x, y)
 
 
-def animate_energy_scan(URdict: dict, file_name: str, **kwargs: Any) -> None:
+def animate_energy_scan(URdict: Dict, file_name: str, **kwargs: Any) -> None:
     """
     Generate an animated GIF of an energy scan.
 
     Args:
-        URdict (dict): Dictionary containing spectral power data.
+        URdict (Dict): Dictionary containing spectral power data.
         file_name (str): Name of the output GIF file.
         **kwargs: Additional keyword arguments.
             duration_per_frame (float): Duration of each frame in seconds. Defaults to 0.05.
@@ -799,9 +870,80 @@ def animate_energy_scan(URdict: dict, file_name: str, **kwargs: Any) -> None:
 
 
 #***********************************************************************************
+# Wavevfront
+#***********************************************************************************
+   
+def write_wavefront(file_name: str, intensity:np.array, phase:np.array, h_axis:np.array,
+                    v_axis:np.array) -> None:
+    """
+    Writes wavefront data to an HDF5 file.
+
+    This function writes the provided intensity and phase maps along with the corresponding 
+    horizontal (h_axis) and vertical (v_axis) axes to an HDF5 file. The data is stored in the 
+    'XOPPY_WAVEFRONT' group within the file, with subgroups for 'Intensity' and 'Phase'.
+
+    Parameters:
+        file_name (str): Base file path for saving the wavefront data. The file will be saved with 
+                         the suffix '_undulator_wft.h5'.
+        intensity (np.array): 2D numpy array containing the intensity data.
+        phase (np.array): 2D numpy array containing the phase data.
+        h_axis (np.array): 1D numpy array containing the horizontal axis data.
+        v_axis (np.array): 1D numpy array containing the vertical axis data.
+
+    """
+    with h5.File('%s_undulator_wft.h5'%file_name, 'w') as f:
+        group = f.create_group('XOPPY_WAVEFRONT')
+        intensity_group = group.create_group('Intensity')
+        intensity_group.create_dataset('image_data', data=intensity)
+        intensity_group.create_dataset('axis_x', data=h_axis*1e3) 
+        intensity_group.create_dataset('axis_y', data=v_axis*1e3)
+        intensity_group = group.create_group('Phase')
+        intensity_group.create_dataset('image_data', data=phase)
+        intensity_group.create_dataset('axis_x', data=h_axis*1e3) 
+        intensity_group.create_dataset('axis_y', data=v_axis*1e3)
+
+
+def read_wavefront(file_name: str) -> Dict:
+    """
+    Reads wavefront data from an HDF5  file and processes it.
+
+    This function reads wavefront data from an HDF5 file (barc4sr) file specified by 
+    'file_name'. It extracts the intensity and phase maps along with  corresponding x 
+    and y axes from the file.
+
+    Parameters:
+        file_name (str): File path containing wavefront data.
+
+    Returns:
+        Dict: A dictionary containing processed wavefront data with the following keys:
+            - 'axis': A dictionary containing 'x' and 'y' axes arrays.
+            - 'intensity': 2D numpy array of intensity data.
+            - 'phase': 2D numpy array of phase data.
+    """
+    if file_name.endswith("h5") or file_name.endswith("hdf5"):
+        f = h5.File(file_name, "r")
+        phase = f["XOPPY_WAVEFRONT"]["Phase"]["image_data"][()]
+        intensity = f["XOPPY_WAVEFRONT"]["Intensity"]["image_data"][()]
+
+        x = f["XOPPY_WAVEFRONT"]["Phase"]["axis_x"][()]
+        y = f["XOPPY_WAVEFRONT"]["Phase"]["axis_y"][()]
+        
+    wftDict = {
+        "axis": {
+            "x": x,
+            "y": y,
+            },
+        "wavefront": {
+            "intensity":intensity,
+            "phase": phase,
+            }
+        }
+    
+    return wftDict
+
+#***********************************************************************************
 # Mutual intensity, (Cross-) Spectral Density and Degree of Coherence
 #***********************************************************************************
-
 
 if __name__ == '__main__':
 

@@ -24,6 +24,12 @@ from scipy.constants import physical_constants
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
 
+from barc4sr.aux_processing import (
+    write_emitted_radiation,
+    write_power_density,
+    write_spectrum,
+    write_wavefront,
+)
 from barc4sr.aux_utils import (
     energy_wavelength,
     generate_logarithmic_energy_values,
@@ -246,15 +252,7 @@ def spectrum(file_name: str,
                                                                 num_cores=num_cores)       
         print('completed')
 
-    # file = open('%s_spectrum.pickle'%file_name, 'wb')
-    # pickle.dump([energy, flux], file)
-    # file.close()
-
-    with h5.File('%s_spectrum.h5'%file_name, 'w') as f:
-        group = f.create_group('XOPPY_SPECTRUM')
-        intensity_group = group.create_group('Spectrum')
-        intensity_group.create_dataset('energy', data=energy)
-        intensity_group.create_dataset('flux', data=flux) 
+    write_spectrum(file_name, flux, energy)
 
     print(f"{function_txt} finished.")
     print_elapsed_time(t0)
@@ -374,12 +372,7 @@ def power_density(file_name: str,
     h_axis = np.linspace(-bl['slitH'] / 2, bl['slitH'] / 2, hor_slit_n)
     v_axis = np.linspace(-bl['slitV'] / 2, bl['slitV'] / 2, ver_slit_n)
 
-    with h5.File('%s_power_density.h5'%file_name, 'w') as f:
-        group = f.create_group('XOPPY_POWERDENSITY')
-        sub_group = group.create_group('PowerDensity')
-        sub_group.create_dataset('image_data', data=power_density)
-        sub_group.create_dataset('axis_x', data=h_axis*1e3)    # axis in [mm]
-        sub_group.create_dataset('axis_y', data=v_axis*1e3)
+    write_power_density(file_name, power_density, h_axis, v_axis)
 
     print("Undulator power density spatial distribution using SRW: finished")
     print_elapsed_time(t0)
@@ -555,13 +548,7 @@ def emitted_radiation(file_name: str,
                                                                      num_cores=num_cores) 
         print('completed')
     
-    with h5.File('%s_undulator_radiation.h5'%file_name, 'w') as f:
-        group = f.create_group('XOPPY_RADIATION')
-        radiation_group = group.create_group('Radiation')
-        radiation_group.create_dataset('stack_data', data=intensity)
-        radiation_group.create_dataset('axis0', data=energy)
-        radiation_group.create_dataset('axis1', data=h_axis*1e3)
-        radiation_group.create_dataset('axis2', data=v_axis*1e3)
+    write_emitted_radiation(file_name, intensity, energy, h_axis, v_axis)
 
     print("Undulator radiation spatial and spectral distribution using SRW: finished")
     print_elapsed_time(t0)
@@ -716,16 +703,7 @@ def emitted_wavefront(file_name: str,
         phase = np.zeros(intensity.shape)
         print('completed')
     
-    with h5.File('%s_undulator_wft.h5'%file_name, 'w') as f:
-        group = f.create_group('XOPPY_WAVEFRONT')
-        intensity_group = group.create_group('Intensity')
-        intensity_group.create_dataset('image_data', data=intensity)
-        intensity_group.create_dataset('axis_x', data=h_axis*1e3) 
-        intensity_group.create_dataset('axis_y', data=v_axis*1e3)
-        intensity_group = group.create_group('Phase')
-        intensity_group.create_dataset('image_data', data=phase)
-        intensity_group.create_dataset('axis_x', data=h_axis*1e3) 
-        intensity_group.create_dataset('axis_y', data=v_axis*1e3)
+    write_wavefront(file_name, intensity, phase, h_axis, v_axis)
 
     print(f"{function_txt} finished.")
     print_elapsed_time(t0)
