@@ -516,9 +516,9 @@ def emitted_wavefront(file_name: str,
                       hor_slit_n: int,
                       ver_slit: float,
                       ver_slit_n: int,
-                      **kwargs) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+                      **kwargs) -> Dict:
     """
-    Calculate undulator radiation spatial and spectral distribution using SRW.
+    Calculate bending magnet emitted wavefront using SRW.
 
     Args:
         file_name (str): The name of the output file.
@@ -553,7 +553,7 @@ def emitted_wavefront(file_name: str,
         num_cores (int): Number of CPU cores to use for parallel computation. If not specified, 
             it defaults to the number of available CPU cores.
     Returns:
-        Tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing power density, horizontal axis, and vertical axis.
+        Dict: A dictionary intensity, phase, horizontal axis, and vertical axis.
     """
 
     t0 = time.time()

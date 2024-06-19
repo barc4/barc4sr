@@ -660,7 +660,8 @@ def set_magnetic_structure(bl: dict,
                 _max_nh=50
                 _max_per=0.1
                 arHarm = []
-                for i in range(_max_nh): arHarm.append(srwlib.SRWLMagFldH())
+                for i in range(_max_nh): 
+                    arHarm.append(srwlib.SRWLMagFldH())
                 magFldCntHarm = srwlib.SRWLMagFldC(srwlib.SRWLMagFldU(arHarm))
                 srwlib.srwl.UtiUndFromMagFldTab(magFldCntHarm, magFldCnt, [_rel_ac_thr, _max_nh, _max_per])
                 return magFldCntHarm
@@ -1019,7 +1020,8 @@ def srwlibsrwl_wfr_emit_prop_multi_e(bl: dict,
                                      number_macro_electrons: int, 
                                      aux_file_name: str,
                                      parallel: bool,
-                                     num_cores: int=None):
+                                     num_cores: int=None,
+                                     srApprox: int=0):
     """
     Interface function to compute multi-electron emission and propagation through a beamline using SRW.
 
@@ -1044,6 +1046,9 @@ def srwlibsrwl_wfr_emit_prop_multi_e(bl: dict,
         parallel (bool): Whether to use parallel computation.
         num_cores (int, optional): Number of CPU cores to use for parallel computation. If not specified, 
                                    it defaults to the number of available CPU cores.
+        srApprox (int): Approximation to be used at multi-electron integration: 
+                0- none (i.e. do standard M-C integration over 5D phase space volume of e-beam), 
+                1- integrate numerically only over e-beam energy spread and use convolution to treat transverse emittance
     Returns:
         np.ndarray: Array containing intensity data.
     """

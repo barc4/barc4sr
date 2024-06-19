@@ -676,7 +676,7 @@ def emitted_wavefront(file_name: str,
                                                       id_type = 'u',
                                                       parallel=False)     
 
-        phase = unwrap_wft_phase()
+        phase = unwrap_wft_phase(phase, h_axis, v_axis, observation_point, photon_energy)
         print('completed')
 
     # accurate partially-coherent simulation
@@ -697,8 +697,9 @@ def emitted_wavefront(file_name: str,
                                                                      id_type = 'u',
                                                                      number_macro_electrons=number_macro_electrons,
                                                                      aux_file_name=file_name,
-                                                                     parallel=parallel,
-                                                                     num_cores=num_cores) 
+                                                                     parallel=False,
+                                                                     num_cores=num_cores,
+                                                                     srApprox=1) 
         
         phase = np.zeros(intensity.shape)
         print('completed')
