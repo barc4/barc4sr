@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 setup(
     name='barc4sr',
-    version='2024.06.04',
+    version='2024.17.19',
     author='Rafael Celestre',
     author_email='rafael.celestre@synchrotron-soleil.fr',
     description='A Python package for Synchrotron Radiation calculations',
