@@ -11,7 +11,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '12/MAR/2024'
-__changed__ = '12/JUN/2024'
+__changed__ = '19/JUL/2024'
 
 import os
 import time
@@ -22,6 +22,12 @@ import numpy as np
 import scipy.integrate as integrate
 from scipy.constants import physical_constants
 
+from barc4sr.aux_processing import (
+    write_emitted_radiation,
+    write_power_density,
+    write_spectrum,
+    write_wavefront,
+)
 from barc4sr.aux_utils import (
     energy_wavelength,
     generate_logarithmic_energy_values,
@@ -31,6 +37,7 @@ from barc4sr.aux_utils import (
     srwlibCalcElecFieldSR,
     srwlibsrwl_wfr_emit_prop_multi_e,
     syned_dictionary,
+    unwrap_wft_phase,
 )
 
 try:
@@ -221,15 +228,7 @@ def spectrum(file_name: str,
                                                                 num_cores=num_cores)       
         print('completed')
 
-    # file = open('%s_spectrum.pickle'%file_name, 'wb')
-    # pickle.dump([energy, flux], file)
-    # file.close()
-
-    with h5.File('%s_spectrum.h5'%file_name, 'w') as f:
-        group = f.create_group('XOPPY_SPECTRUM')
-        intensity_group = group.create_group('Spectrum')
-        intensity_group.create_dataset('energy', data=energy)
-        intensity_group.create_dataset('flux', data=flux) 
+    write_spectrum(file_name, flux, energy)
 
     print(f"{function_txt} finished.")
     print_elapsed_time(t0)
@@ -692,10 +691,6 @@ def total_power(ring_e: float, ring_curr: float, und_per: float, und_n_per: int,
     pass
 
 
-
-#***********************************************************************************
-# Potpourri
-#***********************************************************************************
 
 
 if __name__ == '__main__':
