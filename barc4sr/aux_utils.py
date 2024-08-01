@@ -10,7 +10,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '15/MAR/2024'
-__changed__ = '19/JUL/2024'
+__changed__ = '01/AUG/2024'
 
 import array
 import copy
@@ -79,11 +79,15 @@ class ElectronBeam(object):
         self.moment_yy = moment_yy
         self.moment_yyp = moment_yyp
         self.moment_ypyp = moment_ypyp
+                
+        moments_list = [moment_xx, moment_xxp, moment_xpxp, moment_yy, moment_yyp, moment_ypyp]
+        if any(moment is None for moment in moments_list) is False:
+            self.to_rms()
 
-    def from_twiss(self, energy: float, energy_spread: float, current: float, emittance: float,
-                   coupling: float, emittance_x: float, beta_x: float, alpha_x: float, eta_x: float,
-                   etap_x: float, emittance_y: float, beta_y: float, alpha_y: float, eta_y: float,
-                   etap_y: float) -> None:
+    def from_twiss(self, energy: float, energy_spread: float, current: float, 
+                   beta_x: float, alpha_x: float, eta_x: float, etap_x: float, 
+                   beta_y: float, alpha_y: float, eta_y: float, etap_y: float,
+                   **kwargs) -> None:
         """
         Sets up electron beam internal data from Twiss parameters.
 
@@ -91,24 +95,33 @@ class ElectronBeam(object):
             energy (float): Energy of the electron beam in GeV.
             energy_spread (float): RMS energy spread of the electron beam.
             current (float): Average current of the electron beam in Amperes.
-            emittance (float): Emittance of the electron beam.
-            coupling (float): Coupling coefficient between horizontal and vertical emittances.
-            emittance_x (float): Horizontal emittance in meters.
             beta_x (float): Horizontal beta-function in meters.
             alpha_x (float): Horizontal alpha-function in radians.
             eta_x (float): Horizontal dispersion function in meters.
             etap_x (float): Horizontal dispersion function derivative in radians.
-            emittance_y (float): Vertical emittance in meters.
             beta_y (float): Vertical beta-function in meters.
             alpha_y (float): Vertical alpha-function in radians.
             eta_y (float): Vertical dispersion function in meters.
             etap_y (float): Vertical dispersion function derivative in radians.
+
+        Keyword Args for emittance and coupling or emittance_x and emittance_y:
+            emittance (float): Emittance of the electron beam.
+            coupling (float): Coupling coefficient between horizontal and vertical emittances.
+            emittance_x (float): Horizontal emittance in meters.
+            emittance_y (float): Vertical emittance in meters.
         """
-        if emittance_x is None:
-            emittance_x = emittance*(1/(coupling+1))
-        if emittance_y is None:
-            emittance_y = emittance*(coupling/(coupling+1))
-            
+
+        emittance = kwargs.get('emittance')
+        coupling = kwargs.get('coupling')
+        emittance_x = kwargs.get('emittance_x')
+        emittance_y = kwargs.get('emittance_y')
+
+        if emittance_x is None or emittance_y is None:
+            if emittance is None or coupling is None:
+                raise ValueError("Either emittance and coupling, or both emittance_x and emittance_y must be provided.")
+            emittance_x = emittance * (1 / (coupling + 1)) if emittance_x is None else emittance_x
+            emittance_y = emittance * (coupling / (coupling + 1)) if emittance_y is None else emittance_y
+
         self.energy_in_GeV = energy
         self.energy_spread = energy_spread
         self.current = current
@@ -176,22 +189,22 @@ class ElectronBeam(object):
         """
         Computes the RMS sizes and divergences of the electron beam based on its 
         second-order statistical moments. The calculated values are stored back in the 
-        object attributes (x, y, xp, yp).
+        object attributes (e_x, e_y, e_xp, e_yp).
         """
-        self.x = np.sqrt(self.moment_xx)
-        self.y = np.sqrt(self.moment_yy)
-        self.xp = np.sqrt(self.moment_xpxp)
-        self.yp = np.sqrt(self.moment_ypyp)
+        self.e_x = np.sqrt(self.moment_xx)
+        self.e_y = np.sqrt(self.moment_yy)
+        self.e_xp = np.sqrt(self.moment_xpxp)
+        self.e_yp = np.sqrt(self.moment_ypyp)
 
     def print_rms(self) -> None:
         """
         Prints electron beam rms sizes and divergences 
         """
         print(f"electron beam:\n\
-              >> x/xp = {self.x*1e6:0.2f} um vs. {self.xp*1e6:0.2f} urad\n\
-              >> y/yp = {self.y*1e6:0.2f} um vs. {self.yp*1e6:0.2f} urad")
+            >> x/xp = {self.e_x*1e6:0.2f} um vs. {self.e_xp*1e6:0.2f} urad\n\
+            >> y/yp = {self.e_y*1e6:0.2f} um vs. {self.e_yp*1e6:0.2f} urad")
         
-    def get_attributes(self) -> None:
+    def print_attributes(self) -> None:
         """
         Prints all attribute of object
         """
@@ -220,8 +233,10 @@ class MagneticStructure(object):
             number_of_periods (int): Number of periods of the undulator.
             radius (float): Bending magnet: radius of curvature of the central trajectory in meters (effective if > 0).
             length (float): Bending magnet: Effective length in meters (effective if > 0).
-            length_edge (float): Bending magnet: "soft" edge length for field variation from 10% to 90% in meters; G/(1 + ((z-zc)/d)^2)^2 fringe field dependence is assumed.
-            mag_structure (str): Type of magnetic structure, can be undulator (u), wiggler (w), or bending magnet (bm). Defaults to "u".
+            length_edge (float): Bending magnet: "soft" edge length for field variation from  10% to 90% in meters; 
+              G/(1 + ((z-zc)/d)^2)^2 fringe field dependence is assumed.
+            mag_structure (str): Type of magnetic structure, can be undulator (u), wiggler (w), or bending magnet (bm).
+              Defaults to "u".
         """
 
         if not mag_structure.startswith(('u', 'w', 'bm')):
@@ -422,51 +437,242 @@ class SynchrotronSource(object):
 
 class UndulatorSource(object):
     """
-    Class representing an undulator radiation source, which combines an electron beam and a magnetic structure.
+    Class representing an undulator radiation source, which combines an electron beam and 
+    a magnetic structure.
     """
-    def __init__(self, electron_beam: ElectronBeam, magnetic_structure: MagneticStructure) -> None:
+    def __init__(self, electron_beam: ElectronBeam = None, magnetic_structure: MagneticStructure = None, **kwargs) -> None:
         """
         Initializes an instance of the UndulatorSource class.
 
         Args:
-            electron_beam (ElectronBeam): An instance of the ElectronBeam class representing the electron beam parameters.
-            magnetic_structure (MagneticStructure): An instance of the MagneticStructure class representing the magnetic structure parameters.
+            electron_beam (ElectronBeam): An instance of the ElectronBeam class 
+               representing the electron beam parameters.
+            magnetic_structure (MagneticStructure): An instance of the MagneticStructure 
+               class representing the magnetic structure parameters.
         """
-        self.ElectronBeam = electron_beam
-        self.MagneticStructure = magnetic_structure
-    
+        self.electron_beam = electron_beam
+        self.magnetic_structure = magnetic_structure
+
+        # initializes attributes for a frozen object
+        self.wavelength = None
+        self.sigma_u = None
+        self.sigma_up = None
+
+        super().__init__(**kwargs)
+
     def __getattr__(self, name):
+        """
+        Provides attribute access to the attributes of electron_beam and magnetic_structure 
+        if they are not directly found in the instance of UndulatorSource.
+
+        Args:
+            name (str): The name of the attribute to access.
+
+        Returns:
+            The value of the attribute from either electron_beam or magnetic_structure.
+
+        Raises:
+            AttributeError: If the attribute is not found in either the instance, electron_beam, 
+            or magnetic_structure.
+        """
         if name in self.__dict__:
             return self.__dict__[name]
-        elif hasattr(self.ElectronBeam, name):
-            return getattr(self.ElectronBeam, name)
-        elif hasattr(self.MagneticStructure, name):
-            return getattr(self.MagneticStructure, name)
+        elif hasattr(self.electron_beam, name):
+            return getattr(self.electron_beam, name)
+        elif hasattr(self.magnetic_structure, name):
+            return getattr(self.magnetic_structure, name)
         else:
             raise AttributeError(f"'UndulatorSource' object has no attribute '{name}'")
         
-    def get_beam_dimensions(self, mth):
-
-        # Tanaka - https://doi.org/10.1107/S0909049509009479
-
-        # Boaz    - https://doi.org/10.1063/1.5084711
-
-        # Convolution
-        pass
-
-    def print_beam_dimensions(self):
-        # prints electron beam size
-        # prints undulator natural size at resonance
-        # prints source size at resonance
-        pass
-
-    def get_attributes(self) -> None:
+    def write_syned_config(self, json_file: str, light_source_name: str=None):
         """
-        Prints all attribute of object
+        Writes a SYNED JSON configuration file.
+
+        Parameters:
+            json_file (str): The path to the JSON file where the dictionary will be written.
+            light_source_name (str): The name of the light source.
+        """
+        if json_file.endswith('.json') is False:
+            json_file += '.json'
+
+        if light_source_name is None:
+            light_source_name = json_file.split('/')[-1].replace('.json','')
+
+        write_syned_file(json_file, light_source_name, self.electron_beam, self.magnetic_structure)
+
+    def print_attributes(self) -> None:
+        """
+        Prints all attribute of the object
         """
 
         for i in (vars(self)):
             print("{0:10}: {1}".format(i, vars(self)[i]))
+
+    def set_undulator(self, wavelength, **kwargs) -> None:
+        """
+        Sets the parameters of the undulator.
+
+        Args:
+            wavelength (float): The wavelength of the undulator radiation [m].
+
+        Keyword Args:
+            verbose (bool): If True, prints additional information. Default is False.
+            mth_emittance (int): Method for emittance calculation. Default is 0.
+            mth_fillament_emittance (int): Method for filament emittance calculation. Default is 0.
+            L (float): Length of the undulator. Defaults to period length times number of periods.
+            center_undulator (float): Center position of the undulator. Default is 0.
+            center_straight_section (float): Center position of the straight section. Default is 0.
+        """
+        verbose = kwargs.get('verbose', False)
+
+        mth_emittance = kwargs.get('mth_emittance', 0)
+        mth_fillament_emittance = kwargs.get('mth_fillament_emittance', 0)
+        L = kwargs.get('L', self.period_length*self.number_of_periods)
+        cund = kwargs.get('center_undulator', 0)
+        css = kwargs.get('center_straight_section', 0)
+
+        if verbose:
+            self.print_rms()
+
+        self.set_filament_emittance(verbose=verbose, wavelength=wavelength, mth=mth_fillament_emittance, L=L)
+        self.set_waist(verbose=verbose,center_undulator=cund, center_straight_section=css)
+        self.set_emittance(verbose=verbose,  mth=mth_emittance)
+
+    def set_waist(self, **kwargs) -> None:
+        """
+        Sets the waist position of the photon beam.
+
+        Keyword Args:
+            verbose (bool): If True, prints additional information. Default is False.
+            center_undulator (float): Center position of the undulator. Distance straight section/undulator 
+               used as origin (positive sence: downstream)
+            center_straight_section (float): Center position of the straight section. Distance undulator/straight section 
+               used as origin (positive sence: downstream)
+        """
+
+        verbose = kwargs.get('verbose', False)
+        cund = kwargs.get('center_undulator', 0)
+        css = kwargs.get('center_straight_section', 0)
+
+        if cund == 0:
+            Zy = np.sqrt(self.e_yp)/(self.e_yp**2 + self.sigma_up**2)*css
+            Zx = self.e_xp**2/(self.e_xp**2 + self.sigma_up**2)*css
+        else:
+            Zy = self.sigma_up**2/(self.e_yp**2 + self.sigma_up**2)*cund
+            Zx = self.sigma_up**2/(self.e_xp**2 + self.sigma_up**2)*cund
+
+        self.waist_x = Zx
+        self.waist_y = Zy
+
+        if verbose :        
+            print(f"photon beam waist positon:\n\
+            >> hor. x ver. waist position = {Zx:0.3f} m vs. {Zy:0.3f} m")
+
+    def set_filament_emittance(self, **kwargs) -> None:
+        """
+        Sets the zero-emittance source size and divergence.
+
+        Keyword Args:
+            verbose (bool): If True, prints additional information. Default is False.
+            wavelength (float): The wavelength of the undulator radiation. Default is the instance wavelength.
+            mth (int): Method for filament emittance calculation. 
+                mth = 0: based on Elleaume's formulation - doi:10.4324/9780203218235 (Chapter 2.5 and 2.6)
+                mth = 1: based on Kim's laser mode approximation - doi:10.1016/0168-9002(86)90048-3
+
+            L (float): Length of the undulator. Defaults to period length times number of periods.
+        """
+
+        verbose = kwargs.get('verbose', False)
+        wavelength = kwargs.get('wavelength', self.wavelength)
+        mth = kwargs.get('mth', 0)
+        L = kwargs.get('L', self.period_length*self.number_of_periods)
+
+        # Elleaume - doi:10.4324/9780203218235 (Chapter 2.5 and 2.6)
+        if mth == 0:
+            self.sigma_u =  2.74*np.sqrt(wavelength*L)/(4*PI)
+            self.sigma_up = 0.69*np.sqrt(wavelength/L)
+
+        # Kim (laser mode approximation) - doi:10.1016/0168-9002(86)90048-3
+        elif mth == 1:
+            self.sigma_u = np.sqrt(wavelength*L)/(4*PI)
+            self.sigma_up = np.sqrt(wavelength/L)
+        else:
+            raise ValueError("Not a valid method for emittance calculation.")
+        
+        if verbose :        
+            print(f"filament photon beam:\n\
+            >> u/up = {self.sigma_u*1e6:0.2f} um vs. {self.sigma_up*1e6:0.2f} urad")
+        
+    def set_emittance(self, **kwargs) -> None:
+        """
+        Sets the emittance of the undulator photon beam.
+
+        Keyword Args:
+            verbose (bool): If True, prints additional information. Default is False.
+            mth (int): Method for emittance calculation. Default is 0.
+                mth = 0: Gaussian convolution - doi:10.1016/0168-9002(86)90048-3
+                mth = 1: Energy spread effects for at resonant emission - doi:10.1107/S0909049509009479  
+            center_undulator (float): Center position of the undulator. Default is 0.
+            center_straight_section (float): Center position of the straight section. Default is 0.
+        """
+
+        verbose = kwargs.get('verbose', False)
+        mth = kwargs.get('mtd', 0)
+        cund = kwargs.get('center_undulator', 0)
+        css = kwargs.get('center_straight_section', 0)
+
+        if self.sigma_u is None or self.sigma_up is None:
+            raise ValueError("Undulator fillament beam emittance needs to be calculated first.")
+
+        # Gaussian Convolution - doi:10.1016/0168-9002(86)90048-3
+        if mth == 0:
+            sigma_x = np.sqrt(self.sigma_u**2 + self.e_x**2)
+            sigma_y = np.sqrt(self.sigma_u**2 + self.e_y**2)
+            sigma_x_div = np.sqrt(self.sigma_up**2 + self.e_xp**2)
+            sigma_y_div = np.sqrt(self.sigma_up**2 + self.e_yp**2)
+
+        # Tanaka & Kitamura - doi:10.1107/S0909049509009479
+        elif mth == 1:
+
+            def _qa(es:float) -> float:
+                if es <= 0:
+                    es=1e-10
+                numerator   = 2*es**2
+                denominator = -1 + np.exp(-2*es**2)+np.sqrt(2*PI)*es*erf(np.sqrt(2)*es)
+                return np.sqrt(numerator/denominator)
+            
+            def _qs(es:float) -> float:
+                qs = 2*(_qa(es/4))**(2/3)
+                if qs<2: qs=2
+                return qs
+            
+            sigma_x = np.sqrt(self.sigma_u**2*_qs(self.energy_spread) + self.e_x**2)
+            sigma_y = np.sqrt(self.sigma_u**2*_qs(self.energy_spread) + self.e_y**2)
+            sigma_x_div = np.sqrt(self.sigma_up**2*_qa(self.energy_spread) + self.e_xp**2)
+            sigma_y_div = np.sqrt(self.sigma_up**2*_qa(self.energy_spread) + self.e_yp**2)
+
+        else:
+            raise ValueError("Not a valid method for emittance calculation.")
+        
+        sqv2 = 1. / ( 1./self.e_yp**2 + 1./self.sigma_up**2)
+        sqh2 = 1. / ( 1./self.e_xp**2 + 1./self.sigma_up**2)
+
+        if cund == 0:
+            self.sigma_x = np.sqrt(sigma_x**2 + css**2 * sqv2)
+            self.sigma_y = np.sqrt(sigma_y**2 + css**2 * sqh2)
+        else:
+            self.sigma_x = np.sqrt(sigma_x**2 + cund**2 * sqv2)
+            self.sigma_y = np.sqrt(sigma_y**2 + cund**2 * sqh2)
+
+        # self.sigma_x = sigma_x
+        # self.sigma_y = sigma_y
+        self.sigma_x_div = sigma_x_div
+        self.sigma_y_div = sigma_y_div
+
+        if verbose :        
+            print(f"convolved photon beam:\n\
+            >> x/xp = {sigma_x*1e6:0.2f} um vs. {sigma_x_div*1e6:0.2f} urad\n\
+            >> y/yp = {sigma_y*1e6:0.2f} um vs. {sigma_y_div*1e6:0.2f} urad")
         
 #***********************************************************************************
 # SRW interface functions
