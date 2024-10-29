@@ -715,6 +715,201 @@ def emitted_wavefront(file_name: str,
 def coherent_modes():
     pass
 
+def tuning_cureve(file_name: str,
+             json_file: str,
+             photon_energy_min: float,
+             photon_energy_max: float,
+             photon_energy_points: int, 
+             **kwargs) -> Dict:
+    """
+    Calculate 1D undulator spectrum using SRW.
+
+    Args:
+        file_name (str): The name of the output file.
+        json_file (str): The path to the SYNED JSON configuration file.
+        photon_energy_min (float): Minimum photon energy [eV].
+        photon_energy_max (float): Maximum photon energy [eV].
+        photon_energy_points (int): Number of photon energy points.
+
+    Optional Args (kwargs):
+        energy_sampling (int): Energy sampling method (0: linear, 1: logarithmic). Default is 0.
+        observation_point (float): Distance to the observation point. Default is 10 [m].
+        hor_slit (float): Horizontal slit size [m]. Default is 1e-3 [m].
+        ver_slit (float): Vertical slit size [m]. Default is 1e-3 [m].
+        hor_slit_cen (float): Horizontal slit center position [m]. Default is 0.
+        ver_slit_cen (float): Vertical slit center position [m]. Default is 0.
+        radiation_polarisation (int): Polarisation component to be extracted. Default is 6.
+            =0 -Linear Horizontal; 
+            =1 -Linear Vertical; 
+            =2 -Linear 45 degrees; 
+            =3 -Linear 135 degrees; 
+            =4 -Circular Right; 
+            =5 -Circular Left; 
+            =6 -Total
+        Kh (float): Horizontal undulator parameter K. If -1, taken from the SYNED file. Default is -1.
+        Kh_phase (float): Initial phase of the horizontal magnetic field [rad]. Default is 0.
+        Kh_symmetry (int): Symmetry of the horizontal magnetic field vs longitudinal position.
+            1 for symmetric (B ~ cos(2*Pi*n*z/per + ph)),
+           -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)). Default is 1.
+        Kv (float): Vertical undulator parameter K. If -1, taken from the SYNED file. Default is -1.
+        Kv_phase (float): Initial phase of the vertical magnetic field [rad]. Default is 0.
+        Kv_symmetry (int): Symmetry of the vertical magnetic field vs longitudinal position.
+            1 for symmetric (B ~ cos(2*Pi*n*z/per + ph)),
+           -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)). Default is 1.
+        magnetic_measurement (Optional[str]): Path to the file containing magnetic measurement data.
+            Overrides SYNED undulator data. Default is None.
+        tabulated_undulator_mthd (int): Method to tabulate the undulator field
+            0: uses the provided magnetic field, 
+            1: fits the magnetic field using srwl.UtiUndFromMagFldTab). Default is 0.
+        electron_trajectory (bool): Whether to calculate and save electron trajectory. Default is False.
+        filament_beam (bool): Whether to use a filament electron beam. Default is False.
+        energy_spread (bool): Whether to include energy spread. Default is True.
+        number_macro_electrons (int): Number of macro electrons. Default is 1000.
+        parallel (bool): Whether to use parallel computation. Default is False.
+        num_cores (int, optional): Number of CPU cores to use for parallel computation. If not specified, 
+                                        it defaults to the number of available CPU cores.
+
+    Returns:
+        Dict: A dictionary containing arrays of photon energy and flux.
+    """
+
+    t0 = time.time()
+
+    function_txt = "Undulator spectrum calculation using SRW:"
+    calc_txt = "> Performing flux through finite aperture (___CALC___ partially-coherent simulation)"
+    print(f"{function_txt} please wait...")
+
+    energy_sampling = kwargs.get('energy_sampling', 0)
+    observation_point = kwargs.get('observation_point', 10.)
+    hor_slit = kwargs.get('hor_slit', 1e-3)
+    ver_slit = kwargs.get('ver_slit', 1e-3)
+    hor_slit_cen = kwargs.get('hor_slit_cen', 0)
+    ver_slit_cen = kwargs.get('ver_slit_cen', 0)
+    radiation_polarisation = kwargs.get('radiation_polarisation', 6)
+    Kh = kwargs.get('Kh', -1)
+    Kh_phase = kwargs.get('Kh_phase', 0)
+    Kh_symmetry = kwargs.get('Kh_symmetry', 1)
+    Kv = kwargs.get('Kv', -1)
+    Kv_phase = kwargs.get('Kv_phase', 0)
+    Kv_symmetry = kwargs.get('Kv_symmetry', 1)
+    magnetic_measurement = kwargs.get('magnetic_measurement', None)
+    tabulated_undulator_mthd = kwargs.get('tabulated_undulator_mthd', 0)
+    electron_trajectory = kwargs.get('electron_trajectory', False)
+    filament_beam = kwargs.get('filament_beam', False)
+    energy_spread = kwargs.get('energy_spread', True)
+    number_macro_electrons = kwargs.get('number_macro_electrons', 1)
+    parallel = kwargs.get('parallel', False)
+    num_cores = kwargs.get('num_cores', None)
+
+    if hor_slit < 1e-6 and ver_slit < 1e-6:
+        calculation = 0
+        hor_slit = 0
+        ver_slit = 0
+    else:
+        if magnetic_measurement is None and number_macro_electrons == 1:
+            calculation = 1
+        if magnetic_measurement is not None or number_macro_electrons > 1:
+            calculation = 2
+
+    bl = syned_dictionary(json_file, magnetic_measurement, observation_point, 
+                          hor_slit, ver_slit, hor_slit_cen, ver_slit_cen, 
+                          Kh=Kh, Kh_phase=Kh_phase, Kh_symmetry=Kh_symmetry, 
+                          Kv=Kv, Kv_phase=Kv_phase, Kv_symmetry=Kv_symmetry)
+
+   
+    eBeam, magFldCnt, eTraj = set_light_source(file_name, bl, filament_beam, 
+                                               energy_spread, electron_trajectory, 'u',
+                                               magnetic_measurement=magnetic_measurement,
+                                               tabulated_undulator_mthd=tabulated_undulator_mthd)
+
+    # ----------------------------------------------------------------------------------
+    # spectrum calculations
+    # ----------------------------------------------------------------------------------
+    resonant_energy = get_emission_energy(bl['PeriodID'], 
+                                        np.sqrt(bl['Kv']**2 + bl['Kh']**2),
+                                        bl['ElectronEnergy'])
+    if energy_sampling == 0: 
+        energy = np.linspace(photon_energy_min, photon_energy_max, photon_energy_points)
+    else:
+        stepsize = np.log(photon_energy_max/resonant_energy)
+        energy = generate_logarithmic_energy_values(photon_energy_min,
+                                                    photon_energy_max,
+                                                    resonant_energy,
+                                                    stepsize)
+    # ---------------------------------------------------------
+    # On-Axis Spectrum from Filament Electron Beam
+    if calculation == 0:
+        if parallel:
+            print('> Performing on-axis spectrum from filament electron beam in parallel ... ')
+        else:
+            print('> Performing on-axis spectrum from filament electron beam ... ', end='')
+
+        flux, h_axis, v_axis = srwlibCalcElecFieldSR(bl, 
+                                                     eBeam, 
+                                                     magFldCnt,
+                                                     energy,
+                                                     h_slit_points=1,
+                                                     v_slit_points=1,
+                                                     radiation_characteristic=0, 
+                                                     radiation_dependence=0,
+                                                     radiation_polarisation=radiation_polarisation,
+                                                     id_type='u',
+                                                     parallel=parallel,
+                                                     num_cores=num_cores)
+        flux = flux.reshape((photon_energy_points))
+        print('completed')
+
+    # -----------------------------------------
+    # Flux through Finite Aperture 
+
+    # simplified partially-coherent simulation
+    if calculation == 1:
+        calc_txt = calc_txt.replace("___CALC___", "simplified")
+        if parallel:
+            print(f'{calc_txt} in parallel... ')
+        else:
+            print(f'{calc_txt} ... ', end='')
+
+        flux = srwlibCalcStokesUR(bl, 
+                                  eBeam, 
+                                  magFldCnt, 
+                                  energy, 
+                                  resonant_energy,
+                                  radiation_polarisation,
+                                  parallel,
+                                  num_cores)
+
+        print('completed')
+
+    # accurate partially-coherent simulation
+    if calculation == 2:
+        calc_txt = calc_txt.replace("___CALC___", "accurate")
+        if parallel:
+            print(f'{calc_txt} in parallel... ')
+        else:
+            print(f'{calc_txt} ... ', end='')
+
+        flux, h_axis, v_axis = srwlibsrwl_wfr_emit_prop_multi_e(bl, 
+                                                                eBeam,
+                                                                magFldCnt,
+                                                                energy,
+                                                                h_slit_points=1,
+                                                                v_slit_points=1,
+                                                                radiation_polarisation=radiation_polarisation,
+                                                                id_type='u',
+                                                                number_macro_electrons=number_macro_electrons,
+                                                                aux_file_name=file_name,
+                                                                parallel=parallel,
+                                                                num_cores=num_cores)       
+        print('completed')
+
+    write_spectrum(file_name, flux, energy)
+
+    print(f"{function_txt} finished.")
+    print_elapsed_time(t0)
+
+    return {'energy':energy, 'flux':flux}
+
 #***********************************************************************************
 # Magnetic field functions
 #***********************************************************************************

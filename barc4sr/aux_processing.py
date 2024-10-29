@@ -868,6 +868,103 @@ def animate_energy_scan(URdict: Dict, file_name: str, **kwargs: Any) -> None:
 
             print(f"GIF created successfully: {file_name.split('/')[-1]+'_CumSum'}")
 
+#***********************************************************************************
+# Tuning curves
+#***********************************************************************************
+
+def write_tuning_curve(file_name: str, flux: np.array, energy: np.array) -> None:
+    """
+    Writes spectrum data to an HDF5 file.
+
+    This function writes the provided energy and flux data to an HDF5 file. The data is stored 
+    in the 'XOPPY_SPECTRUM' group within the file, with a subgroup for 'Spectrum'.
+
+    Parameters:
+        file_name (str): Base file path for saving the spectrum data. The file will be saved 
+                         with the suffix '_spectrum.h5'.
+        flux (np.array): 1D numpy array containing the flux data.
+        energy (np.array): 1D numpy array containing the energy data.
+
+    """
+    with h5.File('%s_spectrum.h5'%file_name, 'w') as f:
+        group = f.create_group('XOPPY_SPECTRUM')
+        intensity_group = group.create_group('Spectrum')
+        intensity_group.create_dataset('energy', data=energy)
+        intensity_group.create_dataset('flux', data=flux) 
+
+
+def read_tuning_curve(file_list: List[str]) -> Dict:
+    """
+    Reads and processes spectrum data from files.
+
+    This function reads spectrum data from files specified in 'file_list' and processes 
+    it to compute spectral power, cumulated power, and integrated power.
+
+    Parameters:
+        file_list (List[str]): A list of file paths containing spectrum data.
+
+    Returns:
+        Dict: A dictionary containing processed spectrum data with the following keys:
+            - 'spectrum': A dictionary containing various properties of the spectrum including:
+                - 'energy': Array containing energy values.
+                - 'flux': Array containing spectral flux data.
+                - 'spectral_power': Array containing computed spectral power.
+                - 'cumulated_power': Cumulated power computed using cumulative trapezoid integration.
+                - 'integrated_power': Integrated power computed using trapezoid integration.
+    """
+    energy = []
+    flux = []
+
+    if isinstance(file_list, List) is False:
+        file_list = [file_list]
+
+    # new and official barc4sr format
+    if file_list[0].endswith("h5") or file_list[0].endswith("hdf5"):
+        for sim in file_list:
+            print(sim)
+            f = h5.File(sim, "r")
+            energy = np.concatenate((energy, f["XOPPY_SPECTRUM"]["Spectrum"]["energy"][()]))
+            flux = np.concatenate((flux, f["XOPPY_SPECTRUM"]["Spectrum"]["flux"][()]))
+
+    # backwards compatibility - old barc4sr format
+    elif file_list[0].endswith("pickle"):
+        for sim in file_list:
+            print(sim)
+            f = open(sim, "rb")
+            data = np.asarray(pickle.load(f))
+            f.close()
+
+            energy = np.concatenate((energy, data[0, :]))
+            flux = np.concatenate((flux, data[1, :]))
+
+    # SPECTRA format
+    elif file_list[0].endswith("json"):
+        for jsonfile in file_list:
+            f = open(jsonfile)
+            data = json.load(f)
+            f.close()
+
+            energy = np.concatenate((energy, data['Output']['data'][0]))
+            flux = np.concatenate((flux, data['Output']['data'][1]))
+    else:
+        raise ValueError("Invalid file extension.")
+
+    spectral_power = flux*CHARGE*1E3
+
+    cumulated_power = integrate.cumulative_trapezoid(spectral_power, energy, initial=0)
+    integrated_power = integrate.trapezoid(spectral_power, energy)
+
+    spectrumSRdict = {
+        "spectrum":{
+            "energy":energy,
+            "flux": flux,
+            "spectral_power": spectral_power,
+            "cumulated_power": cumulated_power,
+            "integrated_power": integrated_power
+        }
+    }
+
+    return spectrumSRdict
 
 #***********************************************************************************
 # Wavevfront
