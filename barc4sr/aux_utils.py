@@ -197,10 +197,6 @@ class ElectronBeam(object):
         self.e_xp = np.sqrt(self.moment_xpxp)
         self.e_yp = np.sqrt(self.moment_ypyp)
 
-    def get_gamma(self) -> float:
-        """Calculate the Lorentz factor (γ) based on the energy of electrons in GeV."""
-        return get_gamma(self.energy_in_GeV)
-    
     def print_rms(self) -> None:
         """
         Prints electron beam rms sizes and divergences 
@@ -208,7 +204,11 @@ class ElectronBeam(object):
         print(f"electron beam:\n\
             >> x/xp = {self.e_x*1e6:0.2f} um vs. {self.e_xp*1e6:0.2f} urad\n\
             >> y/yp = {self.e_y*1e6:0.2f} um vs. {self.e_yp*1e6:0.2f} urad")
-        
+            
+    def get_gamma(self) -> float:
+        """Calculate the Lorentz factor (γ) based on the energy of electrons in GeV."""
+        return get_gamma(self.energy_in_GeV)
+
     def print_attributes(self) -> None:
         """
         Prints all attribute of object
@@ -291,14 +291,11 @@ class MagneticStructure(object):
 
             if "v" in direction:
                 self.K_vertical = K
-
             elif "h" in direction:
                 self.K_horizontal = K
             else:
                 self.K_vertical = np.sqrt(K/2)
                 self.K_horizontal = np.sqrt(K/2)
-
-            self.set_magnetic_field_from_K(self.K_vertical, self.K_horizontal)
 
     def print_resonant_energy(self,  K: float, harmonic: int, eBeamEnergy: float) -> None:
         """
@@ -321,48 +318,21 @@ class MagneticStructure(object):
     # -------------------------------------        
     # undulator/wiggler auxiliary functions
     # -------------------------------------        
-    def set_K_from_magnetic_field(self, B_horizontal: float=None, B_vertical: float=None) -> None:
+    def set_magnetic_field(self, B_horizontal: float=None, B_vertical: float=None) -> None:
         """
         Sets the K-value based on the magnetic field strength.
 
         Args:
-            B_horizontal (float): Magnetic field strength in the horizontal direction.
-            B_vertical (float): Magnetic field strength in the vertical direction.
+            Bx (float): Magnetic field strength in the horizontal direction.
+            By (float): Magnetic field strength in the vertical direction.
         """
         if self.CLASS_NAME.startswith('B'):
             raise ValueError("invalid operation for bending magnet")
         else:
             if B_horizontal is not None:
-                self.K_horizontal = CHARGE * B_horizontal * self.period_length / (2 * PI * MASS * LIGHT)
-                self.B_horizontal = B_horizontal
+                self.Kx = CHARGE * B_horizontal * self.period_length / (2 * PI * MASS * LIGHT)
             if B_vertical is not None:
-                self.K_vertical = CHARGE * B_vertical * self.period_length / (2 * PI * MASS * LIGHT)
-                self.B_vertical = B_vertical
-
-    def set_magnetic_field_from_K(self, K_horizontal: float=None, K_vertical: float=None) -> None:
-        """
-        Sets the magnetic field strength based on the K-value.
-
-        Args:
-            K_horizontal (float): K-value in the horizontal direction.
-            K_vertical (float): K-value in the vertical direction.
-        """
-        if self.CLASS_NAME.startswith('B'):
-            raise ValueError("invalid operation for bending magnet")
-        else:
-            if K_horizontal is not None:
-                if self.K_horizontal is None:
-                    self.B_horizontal = K_horizontal * 2 * PI * MASS * LIGHT / (CHARGE * self.period_length)
-                    self.K_horizontal = K_horizontal
-                else:
-                    self.B_horizontal = self.K_horizontal * 2 * PI * MASS * LIGHT / (CHARGE * self.period_length)
-            if K_vertical is not None:
-                if self.K_vertical is None:
-                    self.B_vertical = K_vertical * 2 * PI * MASS * LIGHT / (CHARGE * self.period_length)
-                    self.K_vertical = K_vertical
-                else:
-                    self.B_vertical = self.K_vertical * 2 * PI * MASS * LIGHT / (CHARGE * self.period_length)
-
+                self.Kx = CHARGE * B_vertical * self.period_length / (2 * PI * MASS * LIGHT)
     # -------------------------------------        
     # bending magnet auxiliary functions
     # -------------------------------------        
@@ -414,7 +384,7 @@ class MagneticStructure(object):
     # -------------------------------------        
     # auxiliary functions
     # ------------------------------------- 
-    def print_attributes(self) -> None:
+    def get_attributes(self) -> None:
         """
         Prints all attribute of object
         """
