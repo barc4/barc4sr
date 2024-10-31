@@ -36,6 +36,7 @@ from barc4sr.aux_utils import (
     get_gamma,
     print_elapsed_time,
     set_light_source,
+    set_magnetic_structure,
     srwlibCalcElecFieldSR,
     srwlibCalcStokesUR,
     srwlibsrwl_wfr_emit_prop_multi_e,
@@ -129,24 +130,33 @@ def spectrum(file_name: str,
     print(f"{function_txt} please wait...")
 
     energy_sampling = kwargs.get('energy_sampling', 0)
+
     observation_point = kwargs.get('observation_point', 10.)
+
     hor_slit = kwargs.get('hor_slit', 1e-3)
     ver_slit = kwargs.get('ver_slit', 1e-3)
     hor_slit_cen = kwargs.get('hor_slit_cen', 0)
     ver_slit_cen = kwargs.get('ver_slit_cen', 0)
+
     radiation_polarisation = kwargs.get('radiation_polarisation', 6)
+
     Kh = kwargs.get('Kh', -1)
     Kh_phase = kwargs.get('Kh_phase', 0)
     Kh_symmetry = kwargs.get('Kh_symmetry', 1)
+
     Kv = kwargs.get('Kv', -1)
     Kv_phase = kwargs.get('Kv_phase', 0)
     Kv_symmetry = kwargs.get('Kv_symmetry', 1)
+
     magnetic_measurement = kwargs.get('magnetic_measurement', None)
     tabulated_undulator_mthd = kwargs.get('tabulated_undulator_mthd', 0)
     electron_trajectory = kwargs.get('electron_trajectory', False)
+
     filament_beam = kwargs.get('filament_beam', False)
     energy_spread = kwargs.get('energy_spread', True)
+
     number_macro_electrons = kwargs.get('number_macro_electrons', 1)
+
     parallel = kwargs.get('parallel', False)
     num_cores = kwargs.get('num_cores', None)
 
@@ -318,18 +328,24 @@ def power_density(file_name: str,
     print("Undulator power density spatial distribution using SRW. Please wait...")
 
     observation_point = kwargs.get('observation_point', 10.)
+
     hor_slit_cen = kwargs.get('hor_slit_cen', 0)
     ver_slit_cen = kwargs.get('ver_slit_cen', 0)
+
     radiation_polarisation = kwargs.get('radiation_polarisation', 6)
+
     Kh = kwargs.get('Kh', -1)
     Kh_phase = kwargs.get('Kh_phase', 0)
     Kh_symmetry = kwargs.get('Kh_symmetry', 1)
+
     Kv = kwargs.get('Kv', -1)
     Kv_phase = kwargs.get('Kv_phase', 0)
     Kv_symmetry = kwargs.get('Kv_symmetry', 1)
+
     magnetic_measurement = kwargs.get('magnetic_measurement', None)
     tabulated_undulator_mthd = kwargs.get('tabulated_undulator_mthd', 0)
     electron_trajectory = kwargs.get('electron_trajectory', False)
+
     filament_beam = kwargs.get('filament_beam', False)
     energy_spread = kwargs.get('energy_spread', True)
 
@@ -451,22 +467,31 @@ def emitted_radiation(file_name: str,
     print(f"{function_txt} please wait...")
 
     energy_sampling = kwargs.get('energy_sampling', 0)
+
     observation_point = kwargs.get('observation_point', 10.)
+
     hor_slit_cen = kwargs.get('hor_slit_cen', 0)
     ver_slit_cen = kwargs.get('ver_slit_cen', 0)
+
     radiation_polarisation = kwargs.get('radiation_polarisation', 6)
+
     Kh = kwargs.get('Kh', -1)
     Kh_phase = kwargs.get('Kh_phase', 0)
     Kh_symmetry = kwargs.get('Kh_symmetry', 1)
+
     Kv = kwargs.get('Kv', -1)
     Kv_phase = kwargs.get('Kv_phase', 0)
     Kv_symmetry = kwargs.get('Kv_symmetry', 1)
+
     magnetic_measurement = kwargs.get('magnetic_measurement', None)
     tabulated_undulator_mthd = kwargs.get('tabulated_undulator_mthd', 0)
     electron_trajectory = kwargs.get('electron_trajectory', False)
+
     filament_beam = kwargs.get('filament_beam', False)
     energy_spread = kwargs.get('energy_spread', True)
+
     number_macro_electrons = kwargs.get('number_macro_electrons', -1)
+
     parallel = kwargs.get('parallel', False)
     num_cores = kwargs.get('num_cores', None)
 
@@ -610,21 +635,29 @@ def emitted_wavefront(file_name: str,
     print(f"{function_txt} please wait...")
 
     observation_point = kwargs.get('observation_point', 10.)
+
     hor_slit_cen = kwargs.get('hor_slit_cen', 0)
     ver_slit_cen = kwargs.get('ver_slit_cen', 0)
+
     radiation_polarisation = kwargs.get('radiation_polarisation', 6)
+
     Kh = kwargs.get('Kh', -1)
     Kh_phase = kwargs.get('Kh_phase', 0)
     Kh_symmetry = kwargs.get('Kh_symmetry', 1)
+
     Kv = kwargs.get('Kv', -1)
     Kv_phase = kwargs.get('Kv_phase', 0)
     Kv_symmetry = kwargs.get('Kv_symmetry', 1)
+
     magnetic_measurement = kwargs.get('magnetic_measurement', None)
     tabulated_undulator_mthd = kwargs.get('tabulated_undulator_mthd', 0)
     electron_trajectory = kwargs.get('electron_trajectory', False)
+
     filament_beam = kwargs.get('filament_beam', False)
     energy_spread = kwargs.get('energy_spread', True)
+
     number_macro_electrons = kwargs.get('number_macro_electrons', -1)
+
     parallel = kwargs.get('parallel', False)
     num_cores = kwargs.get('num_cores', None)
 
@@ -715,14 +748,15 @@ def emitted_wavefront(file_name: str,
 def coherent_modes():
     pass
 
-def tuning_cureve(file_name: str,
+def tuning_curve(file_name: str,
              json_file: str,
              photon_energy_min: float,
              photon_energy_max: float,
              photon_energy_points: int, 
+             nHarmMax: int,
              **kwargs) -> Dict:
     """
-    Calculate 1D undulator spectrum using SRW.
+    Calculate undulator tuning curve using SRW.
 
     Args:
         file_name (str): The name of the output file.
@@ -730,7 +764,7 @@ def tuning_cureve(file_name: str,
         photon_energy_min (float): Minimum photon energy [eV].
         photon_energy_max (float): Maximum photon energy [eV].
         photon_energy_points (int): Number of photon energy points.
-
+        nHarmMax (int): number of the highest harmonic to be takent into account.
     Optional Args (kwargs):
         energy_sampling (int): Energy sampling method (0: linear, 1: logarithmic). Default is 0.
         observation_point (float): Distance to the observation point. Default is 10 [m].
@@ -746,6 +780,7 @@ def tuning_cureve(file_name: str,
             =4 -Circular Right; 
             =5 -Circular Left; 
             =6 -Total
+        Kmin (float): Minimum K-value (cutt off for highest harmonic energy). Default is -1.
         Kh (float): Horizontal undulator parameter K. If -1, taken from the SYNED file. Default is -1.
         Kh_phase (float): Initial phase of the horizontal magnetic field [rad]. Default is 0.
         Kh_symmetry (int): Symmetry of the horizontal magnetic field vs longitudinal position.
@@ -775,29 +810,42 @@ def tuning_cureve(file_name: str,
 
     t0 = time.time()
 
-    function_txt = "Undulator spectrum calculation using SRW:"
+    function_txt = "Undulator K-tuning curve calculation using SRW:"
     calc_txt = "> Performing flux through finite aperture (___CALC___ partially-coherent simulation)"
     print(f"{function_txt} please wait...")
 
     energy_sampling = kwargs.get('energy_sampling', 0)
+
     observation_point = kwargs.get('observation_point', 10.)
+
+    even_harmonics = kwargs.get('even_harmonics', False)
+
     hor_slit = kwargs.get('hor_slit', 1e-3)
     ver_slit = kwargs.get('ver_slit', 1e-3)
     hor_slit_cen = kwargs.get('hor_slit_cen', 0)
     ver_slit_cen = kwargs.get('ver_slit_cen', 0)
+
     radiation_polarisation = kwargs.get('radiation_polarisation', 6)
+
+    Kmin = kwargs.get('Kmin', 1E-3)
+
     Kh = kwargs.get('Kh', -1)
     Kh_phase = kwargs.get('Kh_phase', 0)
     Kh_symmetry = kwargs.get('Kh_symmetry', 1)
+
     Kv = kwargs.get('Kv', -1)
     Kv_phase = kwargs.get('Kv_phase', 0)
     Kv_symmetry = kwargs.get('Kv_symmetry', 1)
+
     magnetic_measurement = kwargs.get('magnetic_measurement', None)
     tabulated_undulator_mthd = kwargs.get('tabulated_undulator_mthd', 0)
     electron_trajectory = kwargs.get('electron_trajectory', False)
+
     filament_beam = kwargs.get('filament_beam', False)
     energy_spread = kwargs.get('energy_spread', True)
+
     number_macro_electrons = kwargs.get('number_macro_electrons', 1)
+
     parallel = kwargs.get('parallel', False)
     num_cores = kwargs.get('num_cores', None)
 
@@ -815,7 +863,6 @@ def tuning_cureve(file_name: str,
                           hor_slit, ver_slit, hor_slit_cen, ver_slit_cen, 
                           Kh=Kh, Kh_phase=Kh_phase, Kh_symmetry=Kh_symmetry, 
                           Kv=Kv, Kv_phase=Kv_phase, Kv_symmetry=Kv_symmetry)
-
    
     eBeam, magFldCnt, eTraj = set_light_source(file_name, bl, filament_beam, 
                                                energy_spread, electron_trajectory, 'u',
@@ -823,42 +870,77 @@ def tuning_cureve(file_name: str,
                                                tabulated_undulator_mthd=tabulated_undulator_mthd)
 
     # ----------------------------------------------------------------------------------
-    # spectrum calculations
+    # tuning curve calculations
     # ----------------------------------------------------------------------------------
-    resonant_energy = get_emission_energy(bl['PeriodID'], 
-                                        np.sqrt(bl['Kv']**2 + bl['Kh']**2),
-                                        bl['ElectronEnergy'])
+
+    if nHarmMax > np.floor(photon_energy_max/photon_energy_min):
+        nHarmMax = int(np.floor(photon_energy_max/photon_energy_min))
+
     if energy_sampling == 0: 
         energy = np.linspace(photon_energy_min, photon_energy_max, photon_energy_points)
     else:
+
+        if np.sqrt(bl['Kv']**2 + bl['Kh']**2) == 0:
+            resonant_energy = photon_energy_min
+        else:
+            resonant_energy = get_emission_energy(bl['PeriodID'], 
+                                                np.sqrt(bl['Kv']**2 + bl['Kh']**2),
+                                                bl['ElectronEnergy'])
+
         stepsize = np.log(photon_energy_max/resonant_energy)
         energy = generate_logarithmic_energy_values(photon_energy_min,
                                                     photon_energy_max,
                                                     resonant_energy,
                                                     stepsize)
+
+    tc = np.zeros((len(energy), nHarmMax))
+    Kmap = np.zeros((len(energy)))-1
+    Emap = np.zeros((len(energy), nHarmMax))-1
+
+    for i, eng in enumerate(energy):
+        harm, K = find_emission_harmonic_and_K(eng, bl['PeriodID'],
+                                                  bl['ElectronEnergy'], 
+                                                  Kmin)         
+        if harm == 1:
+            Kmap[i] = K
+
+    for i in range(nHarmMax):
+        if even_harmonics and (i+1)%2 == 0:
+            Emap[:,i] = i*energy[0]+energy
+        elif (i+1)%2 != 0:
+            Emap[:,i] = i*energy[0]+energy
+
+    Emap[Emap>photon_energy_max] = -1
+
     # ---------------------------------------------------------
-    # On-Axis Spectrum from Filament Electron Beam
+    # On-Axis Tuning curve from Filament Electron Beam
     if calculation == 0:
         if parallel:
-            print('> Performing on-axis spectrum from filament electron beam in parallel ... ')
+            print('> Performing on-axis tuning curve from filament electron beam in parallel ... ')
         else:
-            print('> Performing on-axis spectrum from filament electron beam ... ', end='')
-
-        flux, h_axis, v_axis = srwlibCalcElecFieldSR(bl, 
-                                                     eBeam, 
-                                                     magFldCnt,
-                                                     energy,
-                                                     h_slit_points=1,
-                                                     v_slit_points=1,
-                                                     radiation_characteristic=0, 
-                                                     radiation_dependence=0,
-                                                     radiation_polarisation=radiation_polarisation,
-                                                     id_type='u',
-                                                     parallel=parallel,
-                                                     num_cores=num_cores)
-        flux = flux.reshape((photon_energy_points))
+            print('> Performing on-axis tuning curve from filament electron beam ... ', end='')
+        count = 0
+        for count, K in enumerate(Kmap):
+            if K>0:
+                bl['Kv'] = K
+                magFldCnt = set_magnetic_structure(bl, id_type='u',
+                                        magnetic_measurement = magnetic_measurement, 
+                                        tabulated_undulator_mthd = tabulated_undulator_mthd)
+                for nharm in range(nHarmMax):
+                    if Emap[count, nharm]>0:
+                        tc[count, nharm], h_axis, v_axis = srwlibCalcElecFieldSR(bl, 
+                                                                    eBeam, 
+                                                                    magFldCnt,
+                                                                    Emap[count, nharm],
+                                                                    h_slit_points=1,
+                                                                    v_slit_points=1,
+                                                                    radiation_characteristic=0, 
+                                                                    radiation_dependence=0,
+                                                                    radiation_polarisation=radiation_polarisation,
+                                                                    id_type='u',
+                                                                    parallel=parallel,
+                                                                    num_cores=num_cores)
         print('completed')
-
     # -----------------------------------------
     # Flux through Finite Aperture 
 
@@ -881,34 +963,34 @@ def tuning_cureve(file_name: str,
 
         print('completed')
 
-    # accurate partially-coherent simulation
-    if calculation == 2:
-        calc_txt = calc_txt.replace("___CALC___", "accurate")
-        if parallel:
-            print(f'{calc_txt} in parallel... ')
-        else:
-            print(f'{calc_txt} ... ', end='')
+    # # accurate partially-coherent simulation
+    # if calculation == 2:
+    #     calc_txt = calc_txt.replace("___CALC___", "accurate")
+    #     if parallel:
+    #         print(f'{calc_txt} in parallel... ')
+    #     else:
+    #         print(f'{calc_txt} ... ', end='')
 
-        flux, h_axis, v_axis = srwlibsrwl_wfr_emit_prop_multi_e(bl, 
-                                                                eBeam,
-                                                                magFldCnt,
-                                                                energy,
-                                                                h_slit_points=1,
-                                                                v_slit_points=1,
-                                                                radiation_polarisation=radiation_polarisation,
-                                                                id_type='u',
-                                                                number_macro_electrons=number_macro_electrons,
-                                                                aux_file_name=file_name,
-                                                                parallel=parallel,
-                                                                num_cores=num_cores)       
-        print('completed')
+    #     flux, h_axis, v_axis = srwlibsrwl_wfr_emit_prop_multi_e(bl, 
+    #                                                             eBeam,
+    #                                                             magFldCnt,
+    #                                                             energy,
+    #                                                             h_slit_points=1,
+    #                                                             v_slit_points=1,
+    #                                                             radiation_polarisation=radiation_polarisation,
+    #                                                             id_type='u',
+    #                                                             number_macro_electrons=number_macro_electrons,
+    #                                                             aux_file_name=file_name,
+    #                                                             parallel=parallel,
+    #                                                             num_cores=num_cores)       
+    #     print('completed')
 
-    write_spectrum(file_name, flux, energy)
+    # write_tuning_curve(file_name, flux, energy)
 
-    print(f"{function_txt} finished.")
-    print_elapsed_time(t0)
+    # print(f"{function_txt} finished.")
+    # print_elapsed_time(t0)
 
-    return {'energy':energy, 'flux':flux}
+    # return {'energy':energy, 'flux':flux}
 
 #***********************************************************************************
 # Magnetic field functions
@@ -1218,7 +1300,8 @@ def get_emission_energy(und_per: float, K: float, ring_e: float, n: int = 1, the
     return energy_wavelength(emission_wavelength, "m")
 
 
-def find_emission_harmonic_and_K(energy: float, und_per: float, ring_e: float, Kmin: float = 0.1, theta: float = 0) -> Tuple[int, float]:
+def find_emission_harmonic_and_K(energy: float, und_per: float, ring_e: float, Kmin: float = 0.1, theta: float = 0,
+                                 starting_harmonic: int = 1) -> Tuple[int, float]:
     """
     Find the emission harmonic number and undulator parameter K for a given energy in a storage ring.
 
@@ -1235,16 +1318,24 @@ def find_emission_harmonic_and_K(energy: float, und_per: float, ring_e: float, K
     Raises:
         ValueError: If no valid harmonic is found.
     """
-    count = 0
+    count = np.floor((starting_harmonic-1)/2)
     harm = 0
     gamma = get_gamma(ring_e)
     wavelength = energy_wavelength(energy, 'eV')
 
     while harm == 0:
         n = 2 * count + 1
-        K = np.sqrt(2 * ((2 * n * wavelength * gamma ** 2) / und_per - 1 - (gamma * theta) ** 2))
-        if K >= Kmin:
-            harm = int(n)
+        try:
+            arg_sqrt = 2 * ((2 * n * wavelength * gamma ** 2) / und_per - 1 - (gamma * theta) ** 2)
+            if arg_sqrt>=0:
+                K = np.sqrt(arg_sqrt)
+            else:
+                K=-1
+            if K >= Kmin:
+                harm = int(n)
+        except ValueError:
+            K = None
+
         count += 1
         # Break loop if no valid harmonic is found
         if count > 21:

@@ -221,7 +221,7 @@ class MagneticStructure(object):
     """
     Class for entering the magnetic structure parameters, which can represent an undulator, wiggler, or a bending magnet.
     """
-    def __init__(self, K_vertical: float = None, K_horizontal: float = None, 
+    def __init__(self, K_vertical: float = 0, K_horizontal: float = 0, 
                  B_horizontal: float = None, B_vertical: float = None, 
                  period_length: float = None, number_of_periods: int = None, 
                  radius: float = None, length: float = None, length_edge: float = 0, 
