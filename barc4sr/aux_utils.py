@@ -10,7 +10,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '15/MAR/2024'
-__changed__ = '01/AUG/2024'
+__changed__ = '31/OCT/2024'
 
 import array
 import copy
@@ -1807,7 +1807,8 @@ def get_undulator_max_harmonic_number(resonant_energy: float, photonEnergyMax: f
         int: The maximum harmonic number.
     """
     srw_max_harmonic_number = int(photonEnergyMax / resonant_energy * 2.5)
-
+    if srw_max_harmonic_number < 5:
+        srw_max_harmonic_number = 5
     return srw_max_harmonic_number
 
 #***********************************************************************************

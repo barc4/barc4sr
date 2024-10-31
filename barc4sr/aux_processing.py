@@ -874,43 +874,40 @@ def animate_energy_scan(URdict: Dict, file_name: str, **kwargs: Any) -> None:
 
 def write_tuning_curve(file_name: str, flux: np.array, energy: np.array) -> None:
     """
-    Writes spectrum data to an HDF5 file.
+    Writes tuning curve data to an HDF5 file.
 
     This function writes the provided energy and flux data to an HDF5 file. The data is stored 
-    in the 'XOPPY_SPECTRUM' group within the file, with a subgroup for 'Spectrum'.
+    in the 'XOPPY_SPECTRUM' group within the file, with a subgroup for 'TC'.
 
     Parameters:
-        file_name (str): Base file path for saving the spectrum data. The file will be saved 
-                         with the suffix '_spectrum.h5'.
+        file_name (str): Base file path for saving the tuning curve data. The file will be saved 
+                         with the suffix '_tc.h5'.
         flux (np.array): 1D numpy array containing the flux data.
         energy (np.array): 1D numpy array containing the energy data.
 
     """
-    with h5.File('%s_spectrum.h5'%file_name, 'w') as f:
+    with h5.File('%s_tc.h5'%file_name, 'w') as f:
         group = f.create_group('XOPPY_SPECTRUM')
-        intensity_group = group.create_group('Spectrum')
+        intensity_group = group.create_group('TC')
         intensity_group.create_dataset('energy', data=energy)
         intensity_group.create_dataset('flux', data=flux) 
 
 
 def read_tuning_curve(file_list: List[str]) -> Dict:
     """
-    Reads and processes spectrum data from files.
+    Reads and processes tuning curve data from files.
 
-    This function reads spectrum data from files specified in 'file_list' and processes 
+    This function reads tuning curve data from files specified in 'file_list' and processes 
     it to compute spectral power, cumulated power, and integrated power.
 
     Parameters:
-        file_list (List[str]): A list of file paths containing spectrum data.
+        file_list (List[str]): A list of file paths containing tuning curve data.
 
     Returns:
-        Dict: A dictionary containing processed spectrum data with the following keys:
-            - 'spectrum': A dictionary containing various properties of the spectrum including:
+        Dict: A dictionary containing processed tuning curve data with the following keys:
+            - 'TC': A dictionary containing various properties of the tuning curve including:
                 - 'energy': Array containing energy values.
-                - 'flux': Array containing spectral flux data.
-                - 'spectral_power': Array containing computed spectral power.
-                - 'cumulated_power': Cumulated power computed using cumulative trapezoid integration.
-                - 'integrated_power': Integrated power computed using trapezoid integration.
+                - 'flux': Array containing spectral flux data..
     """
     energy = []
     flux = []
@@ -923,19 +920,8 @@ def read_tuning_curve(file_list: List[str]) -> Dict:
         for sim in file_list:
             print(sim)
             f = h5.File(sim, "r")
-            energy = np.concatenate((energy, f["XOPPY_SPECTRUM"]["Spectrum"]["energy"][()]))
-            flux = np.concatenate((flux, f["XOPPY_SPECTRUM"]["Spectrum"]["flux"][()]))
-
-    # backwards compatibility - old barc4sr format
-    elif file_list[0].endswith("pickle"):
-        for sim in file_list:
-            print(sim)
-            f = open(sim, "rb")
-            data = np.asarray(pickle.load(f))
-            f.close()
-
-            energy = np.concatenate((energy, data[0, :]))
-            flux = np.concatenate((flux, data[1, :]))
+            energy = np.concatenate((energy, f["XOPPY_SPECTRUM"]["TC"]["energy"][()]))
+            flux = np.concatenate((flux, f["XOPPY_SPECTRUM"]["TC"]["flux"][()]))
 
     # SPECTRA format
     elif file_list[0].endswith("json"):
@@ -949,22 +935,14 @@ def read_tuning_curve(file_list: List[str]) -> Dict:
     else:
         raise ValueError("Invalid file extension.")
 
-    spectral_power = flux*CHARGE*1E3
-
-    cumulated_power = integrate.cumulative_trapezoid(spectral_power, energy, initial=0)
-    integrated_power = integrate.trapezoid(spectral_power, energy)
-
-    spectrumSRdict = {
-        "spectrum":{
+    tcSRdict = {
+        "TC":{
             "energy":energy,
             "flux": flux,
-            "spectral_power": spectral_power,
-            "cumulated_power": cumulated_power,
-            "integrated_power": integrated_power
         }
     }
 
-    return spectrumSRdict
+    return tcSRdict
 
 #***********************************************************************************
 # Wavevfront
