@@ -784,6 +784,7 @@ def tuning_curve(file_name: str,
             =5 -Circular Left; 
             =6 -Total
         Kmin (float): Minimum K-value (cutt off for highest harmonic energy). Default is -1.
+        Kmax (float): Maximum K-value (cutt off for lowest harmonic energy). Default is -1.
         Kh (float): Horizontal undulator parameter K. If -1, taken from the SYNED file. Default is -1.
         Kh_phase (float): Initial phase of the horizontal magnetic field [rad]. Default is 0.
         Kh_symmetry (int): Symmetry of the horizontal magnetic field vs longitudinal position.
@@ -831,6 +832,7 @@ def tuning_curve(file_name: str,
     radiation_polarisation = kwargs.get('radiation_polarisation', 6)
 
     Kmin = kwargs.get('Kmin', 1E-3)
+    Kmax = kwargs.get('Kmax', None)
 
     Kh = kwargs.get('Kh', -1)
     Kh_phase = kwargs.get('Kh_phase', 0)
@@ -857,11 +859,6 @@ def tuning_curve(file_name: str,
 
     chunk_size = 20
 
-    # # TODO: add parallel calculation 
-    # if parallel is True:
-    #     parallel = False
-    #     warnings.warn("Parallel execution is not implemented yet", UserWarning)
-
     if hor_slit < 1e-6 and ver_slit < 1e-6:
         calculation = 0
         hor_slit = 0
@@ -869,8 +866,6 @@ def tuning_curve(file_name: str,
     else:
         if magnetic_measurement is None and number_macro_electrons == 1:
             calculation = 1
-        if magnetic_measurement is None and number_macro_electrons == -1:
-            calculation = 2
         if magnetic_measurement is not None or number_macro_electrons > 1:
             calculation = 3
 
@@ -917,7 +912,9 @@ def tuning_curve(file_name: str,
                 if harm == nharm+1:
                     K[i, nharm] = deflection_parameter
 
-    Kmax = K[0, 0]
+    if Kmax is None:
+        Kmax = K[0, 0]
+    
     K[K>Kmax] = 0
     K[K<Kmin] = 0
 
@@ -1025,54 +1022,7 @@ def tuning_curve(file_name: str,
                             tc[i, nharm+1] = (np.sum(flux)*(h_axis[1]-h_axis[0])*(v_axis[1]-v_axis[0]))*1E6           
         print('completed')
 
-    # TODO:RC-2024.11.04 - to be removed
     if calculation == 2:
-        warnings.warn("Depricated: will be removed upon next release", UserWarning)
-        calc_txt = calc_txt.replace("___CALC___", "simplified / CalcStokesUR")
-        if parallel:
-            print(f'{calc_txt} in parallel... ')
-            n_slices = len(energy)
-            chunks = [(energy[i:i + chunk_size],
-                        K[i:i + chunk_size, :],
-                        nHarmMax, 
-                        photon_energy_min,
-                        DE,
-                        even_harmonics,
-                        bl,
-                        eBeam,
-                        magnetic_measurement,
-                        tabulated_undulator_mthd,
-                        radiation_polarisation
-                    ) for i in range(0, n_slices, chunk_size)]
-            
-            with mp.Pool() as pool:
-                results = pool.map(tc_through_slit_srwlibCalcStokesUR, chunks)
-            tc = np.concatenate(results, axis=0)
-        else:
-            print(f'{calc_txt} ... ', end='')
-            for nharm in range(nHarmMax):
-                if even_harmonics or (nharm + 1) % 2 != 0:
-                    for i, dE in enumerate(energy):
-                        deflec_param = K[i, nharm]
-                        if deflec_param>0:
-                            bl['Kv'] = deflec_param
-                            reduced_energy_range = np.linspace(dE-DE, dE+DE, 15)
-                            magFldCnt = set_magnetic_structure(bl, id_type='u',
-                                                    magnetic_measurement = magnetic_measurement, 
-                                                    tabulated_undulator_mthd = tabulated_undulator_mthd)
-                            flux = srwlibCalcStokesUR(bl, 
-                                                      eBeam, 
-                                                      magFldCnt, 
-                                                      reduced_energy_range, 
-                                                      photon_energy_min,
-                                                      radiation_polarisation,
-                                                      False,
-                                                      1)
-                            tc[i, nharm+1] = np.amax(flux)            
-        print('completed')
-
-    # accurate partially-coherent simulation
-    if calculation == 3:
         warnings.warn("Very slow calculation - consider setting the number of macro electrons to 1.", UserWarning)
 
         calc_txt = calc_txt.replace("___CALC___", "accurate")
@@ -1125,13 +1075,14 @@ def tuning_curve(file_name: str,
                                                                 )  
 
     tc[:,0] = np.max(tc,axis=1)
+    K = np.insert(K, 0, 0, axis=1)
 
-    write_tuning_curve(file_name, tc, energy)
+    write_tuning_curve(file_name, tc, K, energy)
 
     print(f"{function_txt} finished.")
     print_elapsed_time(t0)
 
-    return {'energy':energy, 'flux':tc}
+    return {'energy':energy, 'flux':tc, 'K': K}
 
 
 def tc_on_axis_srwlibCalcElecFieldSR(args):
@@ -1201,33 +1152,6 @@ def tc_through_slit_srwlibCalcElecFieldSR(args):
                     htc[i, nharm+1] = (np.sum(flux)*(h_axis[1]-h_axis[0])*(v_axis[1]-v_axis[0]))*1E6    
     return htc
 
-def tc_through_slit_srwlibCalcStokesUR(args):
-
-    energy, photon_energy_min, DE, K, nHarmMax, even_harmonics, bl, eBeam, magnetic_measurement, \
-        tabulated_undulator_mthd, radiation_polarisation = args
-    
-    htc = np.zeros((len(energy), nHarmMax+1))
-
-    for nharm in range(nHarmMax):
-        if even_harmonics or (nharm + 1) % 2 != 0:
-            for i, dE in enumerate(energy):
-                deflec_param = K[i, nharm]
-                if deflec_param>0:
-                    bl['Kv'] = deflec_param
-                    reduced_energy_range = np.linspace(dE-DE, dE+DE, 15)
-                    magFldCnt = set_magnetic_structure(bl, id_type='u',
-                                            magnetic_measurement = magnetic_measurement, 
-                                            tabulated_undulator_mthd = tabulated_undulator_mthd)
-                    flux = srwlibCalcStokesUR(bl, 
-                                              eBeam, 
-                                              magFldCnt, 
-                                              reduced_energy_range, 
-                                              photon_energy_min,
-                                              radiation_polarisation,
-                                              False,
-                                              1)
-                    htc[i, nharm+1] = np.amax(flux)       
-    return htc
 
 def tc_through_slit_srwlibsrwl_wfr_emit_prop_multi_e(args):
 

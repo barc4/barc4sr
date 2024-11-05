@@ -872,7 +872,7 @@ def animate_energy_scan(URdict: Dict, file_name: str, **kwargs: Any) -> None:
 # Tuning curves
 #***********************************************************************************
 
-def write_tuning_curve(file_name: str, flux: np.array, energy: np.array) -> None:
+def write_tuning_curve(file_name: str, flux: np.array, K: np.array, energy: np.array) -> None:
     """
     Writes tuning curve data to an HDF5 file.
 
@@ -891,6 +891,7 @@ def write_tuning_curve(file_name: str, flux: np.array, energy: np.array) -> None
         intensity_group = group.create_group('TC')
         intensity_group.create_dataset('energy', data=energy)
         intensity_group.create_dataset('flux', data=flux) 
+        intensity_group.create_dataset('K', data=K) 
 
 
 def read_tuning_curve(file_list: List[str]) -> Dict:
@@ -922,6 +923,7 @@ def read_tuning_curve(file_list: List[str]) -> Dict:
             f = h5.File(sim, "r")
             energy = np.concatenate((energy, f["XOPPY_SPECTRUM"]["TC"]["energy"][()]))
             flux = np.concatenate((flux, f["XOPPY_SPECTRUM"]["TC"]["flux"][()]))
+            K = np.concatenate((flux, f["XOPPY_SPECTRUM"]["TC"]["K"][()]))
 
     # SPECTRA format
     elif file_list[0].endswith("json"):
@@ -939,6 +941,7 @@ def read_tuning_curve(file_list: List[str]) -> Dict:
         "TC":{
             "energy":energy,
             "flux": flux,
+            "K": K
         }
     }
 
