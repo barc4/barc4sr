@@ -918,10 +918,6 @@ def tuning_curve(file_name: str,
     K[K>Kmax] = 0
     K[K<Kmin] = 0
 
-    l1 = energy_wavelength(photon_energy_min,'eV')
-    ls = l1 + 0.5*bl['PeriodID']*(np.amax([hor_slit,ver_slit])/observation_point)**2
-    DE = (energy_wavelength(l1,'m') - energy_wavelength(ls,'m'))*2
-
     # ---------------------------------------------------------
     # On-Axis Tuning curve from Filament Electron Beam
     if calculation == 0:    # TODO: implement analytical equation

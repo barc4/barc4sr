@@ -894,55 +894,33 @@ def write_tuning_curve(file_name: str, flux: np.array, K: np.array, energy: np.a
         intensity_group.create_dataset('K', data=K) 
 
 
-def read_tuning_curve(file_list: List[str]) -> Dict:
+def read_tuning_curve(file_name: str) -> Dict:
     """
     Reads and processes tuning curve data from files.
 
-    This function reads tuning curve data from files specified in 'file_list' and processes 
-    it to compute spectral power, cumulated power, and integrated power.
-
     Parameters:
-        file_list (List[str]): A list of file paths containing tuning curve data.
+        file_name (str): A file path containing tuning curve data.
 
     Returns:
         Dict: A dictionary containing processed tuning curve data with the following keys:
             - 'TC': A dictionary containing various properties of the tuning curve including:
                 - 'energy': Array containing energy values.
-                - 'flux': Array containing spectral flux data..
+                - 'flux': Array containing spectral flux data.
     """
-    energy = []
-    flux = []
 
-    if isinstance(file_list, List) is False:
-        file_list = [file_list]
+    # Process files in the list
+    if file_name.endswith("h5") or file_name.endswith("hdf5"):
+        print(file_name)
+        with h5.File(file_name, "r") as f:
+            energy =  f["XOPPY_SPECTRUM"]["TC"]["energy"][()]
+            flux = f["XOPPY_SPECTRUM"]["TC"]["flux"][()]
+            K = f["XOPPY_SPECTRUM"]["TC"]["K"][()]
 
-    # new and official barc4sr format
-    if file_list[0].endswith("h5") or file_list[0].endswith("hdf5"):
-        for sim in file_list:
-            print(sim)
-            f = h5.File(sim, "r")
-            energy = np.concatenate((energy, f["XOPPY_SPECTRUM"]["TC"]["energy"][()]))
-            flux = np.concatenate((flux, f["XOPPY_SPECTRUM"]["TC"]["flux"][()]))
-            K = np.concatenate((flux, f["XOPPY_SPECTRUM"]["TC"]["K"][()]))
-
-    # SPECTRA format
-    elif file_list[0].endswith("json"):
-        for jsonfile in file_list:
-            f = open(jsonfile)
-            data = json.load(f)
-            f.close()
-
-            energy = np.concatenate((energy, data['Output']['data'][0]))
-            flux = np.concatenate((flux, data['Output']['data'][1]))
-    else:
-        raise ValueError("Invalid file extension.")
-
+    # Dictionary to store results
     tcSRdict = {
-        "TC":{
-            "energy":energy,
+            "energy": energy,
             "flux": flux,
             "K": K
-        }
     }
 
     return tcSRdict
