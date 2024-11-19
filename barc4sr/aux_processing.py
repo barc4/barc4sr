@@ -868,6 +868,62 @@ def animate_energy_scan(URdict: Dict, file_name: str, **kwargs: Any) -> None:
 
             print(f"GIF created successfully: {file_name.split('/')[-1]+'_CumSum'}")
 
+#***********************************************************************************
+# Tuning curves
+#***********************************************************************************
+
+def write_tuning_curve(file_name: str, flux: np.array, K: np.array, energy: np.array) -> None:
+    """
+    Writes tuning curve data to an HDF5 file.
+
+    This function writes the provided energy and flux data to an HDF5 file. The data is stored 
+    in the 'XOPPY_SPECTRUM' group within the file, with a subgroup for 'TC'.
+
+    Parameters:
+        file_name (str): Base file path for saving the tuning curve data. The file will be saved 
+                         with the suffix '_tc.h5'.
+        flux (np.array): 1D numpy array containing the flux data.
+        energy (np.array): 1D numpy array containing the energy data.
+
+    """
+    with h5.File('%s_tc.h5'%file_name, 'w') as f:
+        group = f.create_group('XOPPY_SPECTRUM')
+        intensity_group = group.create_group('TC')
+        intensity_group.create_dataset('energy', data=energy)
+        intensity_group.create_dataset('flux', data=flux) 
+        intensity_group.create_dataset('K', data=K) 
+
+
+def read_tuning_curve(file_name: str) -> Dict:
+    """
+    Reads and processes tuning curve data from files.
+
+    Parameters:
+        file_name (str): A file path containing tuning curve data.
+
+    Returns:
+        Dict: A dictionary containing processed tuning curve data with the following keys:
+            - 'TC': A dictionary containing various properties of the tuning curve including:
+                - 'energy': Array containing energy values.
+                - 'flux': Array containing spectral flux data.
+    """
+
+    # Process files in the list
+    if file_name.endswith("h5") or file_name.endswith("hdf5"):
+        print(file_name)
+        with h5.File(file_name, "r") as f:
+            energy =  f["XOPPY_SPECTRUM"]["TC"]["energy"][()]
+            flux = f["XOPPY_SPECTRUM"]["TC"]["flux"][()]
+            K = f["XOPPY_SPECTRUM"]["TC"]["K"][()]
+
+    # Dictionary to store results
+    tcSRdict = {
+            "energy": energy,
+            "flux": flux,
+            "K": K
+    }
+
+    return tcSRdict
 
 #***********************************************************************************
 # Wavevfront

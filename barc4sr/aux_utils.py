@@ -10,7 +10,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '15/MAR/2024'
-__changed__ = '01/AUG/2024'
+__changed__ = '31/OCT/2024'
 
 import array
 import copy
@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 from joblib import Parallel, delayed
 from scipy.constants import physical_constants
+from scipy.special import erf
 from skimage.restoration import unwrap_phase
 
 try:
@@ -203,7 +204,11 @@ class ElectronBeam(object):
         print(f"electron beam:\n\
             >> x/xp = {self.e_x*1e6:0.2f} um vs. {self.e_xp*1e6:0.2f} urad\n\
             >> y/yp = {self.e_y*1e6:0.2f} um vs. {self.e_yp*1e6:0.2f} urad")
-        
+            
+    def get_gamma(self) -> float:
+        """Calculate the Lorentz factor (γ) based on the energy of electrons in GeV."""
+        return get_gamma(self.energy_in_GeV)
+
     def print_attributes(self) -> None:
         """
         Prints all attribute of object
@@ -216,7 +221,7 @@ class MagneticStructure(object):
     """
     Class for entering the magnetic structure parameters, which can represent an undulator, wiggler, or a bending magnet.
     """
-    def __init__(self, K_vertical: float = None, K_horizontal: float = None, 
+    def __init__(self, K_vertical: float = 0, K_horizontal: float = 0, 
                  B_horizontal: float = None, B_vertical: float = None, 
                  period_length: float = None, number_of_periods: int = None, 
                  radius: float = None, length: float = None, length_edge: float = 0, 
@@ -309,6 +314,7 @@ class MagneticStructure(object):
             energy = energy_wavelength(wavelength, 'm')
 
             print(f">> resonant energy {energy:.2f} eV")
+
     # -------------------------------------        
     # undulator/wiggler auxiliary functions
     # -------------------------------------        
@@ -1801,7 +1807,8 @@ def get_undulator_max_harmonic_number(resonant_energy: float, photonEnergyMax: f
         int: The maximum harmonic number.
     """
     srw_max_harmonic_number = int(photonEnergyMax / resonant_energy * 2.5)
-
+    if srw_max_harmonic_number < 5:
+        srw_max_harmonic_number = 5
     return srw_max_harmonic_number
 
 #***********************************************************************************
