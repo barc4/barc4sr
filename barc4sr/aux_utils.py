@@ -48,41 +48,43 @@ RMS = np.sqrt(2)/2
 
 class ElectronBeam(object):
     """
-    Class for entering the electron beam parameters - this is based on SRWLPartBeam class
+    Class for entering the electron beam parameters - this is based on the SRWLPartBeam class.
     """
-    def __init__(self, energy: float = None, energy_spread: float = None, current: float = None,
-                 number_of_bunches: int = 1, moment_xx: float = None, moment_xxp: float = None,
-                 moment_xpxp: float = None, moment_yy: float = None, moment_yyp: float = None,
-                 moment_ypyp: float = None) -> None:
+    def __init__(self, **kwargs) -> None:
         """
         Initializes an instance of the ElectronBeam class.
 
         Args:
-            energy (float): Energy of the electron beam in GeV. 
-            energy_spread (float): RMS energy spread of the electron beam. 
-            current (float): Average current of the electron beam in Amperes. 
-            number_of_bunches (int): Number of bunches in the electron beam. 
-            moment_xx (float): Second order moment: <(x-<x>)^2>. 
-            moment_xxp (float): Second order moment: <(x-<x>)(x'-<x'>)>. 
-            moment_xpxp (float): Second order moment: <(x'-<x'>)^2>. 
-            moment_yy (float): Second order moment: <(y-<y>)^2>. 
-            moment_yyp (float): Second order moment: <(y-<y>)(y'-<y'>)>. 
-            moment_ypyp (float): Second order moment: <(y'-<y'>)^2>. 
-        """  
+            **kwargs: Parameters for the electron beam:
+                - energy (float): Energy of the electron beam in GeV.
+                - energy_spread (float): RMS energy spread of the electron beam.
+                - current (float): Average current of the electron beam in Amperes.
+                - number_of_bunches (int): Number of bunches in the electron beam (default: 1).
+                - moment_xx (float): Second order moment: <(x-<x>)^2>.
+                - moment_xxp (float): Second order moment: <(x-<x>)(x'-<x'>)>.
+                - moment_xpxp (float): Second order moment: <(x'-<x'>)^2>.
+                - moment_yy (float): Second order moment: <(y-<y>)^2>.
+                - moment_yyp (float): Second order moment: <(y-<y>)(y'-<y'>)>.
+                - moment_ypyp (float): Second order moment: <(y'-<y'>)^2>.
+        """
         self.CLASS_NAME = "ElectronBeam"
-        self.energy_in_GeV = energy
-        self.energy_spread = energy_spread
-        self.current = current
-        self.number_of_bunches = number_of_bunches
-        self.moment_xx = moment_xx
-        self.moment_xxp = moment_xxp
-        self.moment_xpxp = moment_xpxp
-        self.moment_yy = moment_yy
-        self.moment_yyp = moment_yyp
-        self.moment_ypyp = moment_ypyp
-                
-        moments_list = [moment_xx, moment_xxp, moment_xpxp, moment_yy, moment_yyp, moment_ypyp]
-        if any(moment is None for moment in moments_list) is False:
+        self.energy_in_GeV = kwargs.get("energy", None)
+        self.energy_spread = kwargs.get("energy_spread", None)
+        self.current = kwargs.get("current", None)
+        self.number_of_bunches = kwargs.get("number_of_bunches", 1)
+
+        self.moment_xx = kwargs.get("moment_xx", None)
+        self.moment_xxp = kwargs.get("moment_xxp", None)
+        self.moment_xpxp = kwargs.get("moment_xpxp", None)
+        self.moment_yy = kwargs.get("moment_yy", None)
+        self.moment_yyp = kwargs.get("moment_yyp", None)
+        self.moment_ypyp = kwargs.get("moment_ypyp", None)
+
+        moments_list = [
+            self.moment_xx, self.moment_xxp, self.moment_xpxp,
+            self.moment_yy, self.moment_yyp, self.moment_ypyp,
+        ]
+        if all(moment is not None for moment in moments_list):
             self.to_rms()
 
     def from_twiss(self, energy: float, energy_spread: float, current: float, 
@@ -213,7 +215,6 @@ class ElectronBeam(object):
         """
         Prints all attribute of object
         """
-
         for i in (vars(self)):
             print("{0:10}: {1}".format(i, vars(self)[i]))
 
@@ -239,11 +240,11 @@ class MagneticStructure(object):
             **kwargs: Additional optional parameters based on the magnetic structure type:
                 For undulators and wigglers:
                     - K_vertical (float): Vertical deflection parameter (K-value).
-                    - K_vertical_phase (float): Phase offset for the vertical deflection parameter in radians. Defaults to 0.
+                    - B_vertical_phase (float): Phase offset for the vertical magnetic field in radians. Defaults to 0.
+                    - B_horizontal_symmetry (int): Symmetry type for the vertical deflection parameter. Defaults to 1.
                     - K_horizontal (float): Horizontal deflection parameter (K-value).
-                    - K_horizontal_phase (float): Phase offset for the horizontal deflection parameter in radians. Defaults to 0.
-                    - Kv_symmetry (int): Symmetry type for the vertical deflection parameter. Defaults to 1.
-                    - Kh_symmetry (int): Symmetry type for the horizontal deflection parameter. Defaults to 1.
+                    - B_horizontal_phase (float): Phase offset for the horizontal magnetic field in radians. Defaults to 0.
+                    - B_vertical_symmetry (int): Symmetry type for the horizontal deflection parameter. Defaults to 1.
                     - harmonic (int): Harmonic number. Defaults to 1.
                     - period_length (float): Length of one period (in meters).
                     - number_of_periods (int): Number of periods.
@@ -271,11 +272,11 @@ class MagneticStructure(object):
 
         if mag_structure in und + wig:
             self.K_vertical = kwargs.get("K_vertical", None)
-            self.K_vertical_phase = kwargs.get("K_vertical_phase", 0)
-            self.K_vertical_symmetry = kwargs.get("Kv_symmetry", 1)
+            self.B_vertical_phase = kwargs.get("B_vertical_phase", 0)
+            self.B_vertical_symmetry = kwargs.get("B_vertical_symmetry", 1)
             self.K_horizontal = kwargs.get("K_horizontal", None)
-            self.K_horizontal_phase = kwargs.get("K_horizontal_phase", 0)
-            self.K_horizontal_symmetry = kwargs.get("Kh_symmetry", 1)
+            self.B_horizontal_phase = kwargs.get("B_horizontal_phase", 0)
+            self.B_horizontal_symmetry = kwargs.get("B_horizontal_symmetry", 1)
             self.harmonic = kwargs.get("harmonic", 1)
             self.period_length = kwargs.get("period_length", None)
             self.number_of_periods = kwargs.get("number_of_periods", None)
@@ -442,7 +443,6 @@ class MagneticStructure(object):
         """
         Prints all attribute of object
         """
-
         for i in (vars(self)):
             print("{0:10}: {1}".format(i, vars(self)[i]))
 
@@ -481,7 +481,6 @@ class SynchrotronSource(object):
         else:
             raise AttributeError(f"'SynchrotronSource' object has no attribute '{name}'")
         
-        
     def write_syned_config(self, json_file: str, light_source_name: str=None):
         """
         Writes a SYNED JSON configuration file.
@@ -517,54 +516,6 @@ class UndulatorSource(SynchrotronSource):
         self.sigma_up = None
 
         super().__init__(**kwargs)
-
-    # def __getattr__(self, name):
-    #     """
-    #     Provides attribute access to the attributes of electron_beam and magnetic_structure 
-    #     if they are not directly found in the instance of UndulatorSource.
-
-    #     Args:
-    #         name (str): The name of the attribute to access.
-
-    #     Returns:
-    #         The value of the attribute from either electron_beam or magnetic_structure.
-
-    #     Raises:
-    #         AttributeError: If the attribute is not found in either the instance, electron_beam, 
-    #         or magnetic_structure.
-    #     """
-    #     if name in self.__dict__:
-    #         return self.__dict__[name]
-    #     elif hasattr(self.electron_beam, name):
-    #         return getattr(self.electron_beam, name)
-    #     elif hasattr(self.magnetic_structure, name):
-    #         return getattr(self.magnetic_structure, name)
-    #     else:
-    #         raise AttributeError(f"'UndulatorSource' object has no attribute '{name}'")
-        
-    # def write_syned_config(self, json_file: str, light_source_name: str=None):
-    #     """
-    #     Writes a SYNED JSON configuration file.
-
-    #     Parameters:
-    #         json_file (str): The path to the JSON file where the dictionary will be written.
-    #         light_source_name (str): The name of the light source.
-    #     """
-    #     if json_file.endswith('.json') is False:
-    #         json_file += '.json'
-
-    #     if light_source_name is None:
-    #         light_source_name = json_file.split('/')[-1].replace('.json','')
-
-    #     write_syned_file(json_file, light_source_name, self.electron_beam, self.magnetic_structure)
-
-    # def print_attributes(self) -> None:
-    #     """
-    #     Prints all attribute of the object
-    #     """
-
-    #     for i in (vars(self)):
-    #         print("{0:10}: {1}".format(i, vars(self)[i]))
 
     def set_undulator(self, wavelength, **kwargs) -> None:
         """
@@ -742,8 +693,6 @@ class UndulatorSource(SynchrotronSource):
 
 def set_light_source(file_name: str,
                      bl: dict,
-                     filament_beam: bool,
-                     energy_spread: bool,
                      electron_trajectory: bool,
                      id_type: str,
                      **kwargs) -> Tuple[srwlib.SRWLPartBeam, srwlib.SRWLMagFldC, srwlib.SRWLPrtTrj]:
@@ -753,8 +702,6 @@ def set_light_source(file_name: str,
     Args:
         file_name (str): The name of the output file.
         bl (dict): Beamline parameters dictionary containing essential information for setup.
-        filament_beam (bool): Flag indicating whether to set the beam emittance to zero.
-        energy_spread (bool): Flag indicating whether to set the beam energy spread to zero.
         electron_trajectory (bool): Whether to calculate and save electron trajectory.
         id_type (str): Type of magnetic structure, can be undulator (u), wiggler (w), or bending magnet (bm).
 
@@ -779,8 +726,6 @@ def set_light_source(file_name: str,
     # ----------------------------------------------------------------------------------
     print('> Generating the electron beam ... ', end='')
     eBeam = set_electron_beam(bl,
-                              filament_beam,
-                              energy_spread,
                               id_type,
                               initial_position=ebeam_initial_position)
     print('completed')
@@ -810,8 +755,6 @@ def set_light_source(file_name: str,
 
 
 def set_electron_beam(bl: dict, 
-                      filament_beam: bool, 
-                      energy_spread: bool, 
                       id_type: str, 
                       **kwargs) -> srwlib.SRWLPartBeam:
     """
@@ -819,8 +762,6 @@ def set_electron_beam(bl: dict,
 
     Parameters:
         bl (dict): Dictionary containing beamline parameters.
-        filament_beam (bool): Flag indicating whether to set the beam emittance to zero.
-        energy_spread (bool): Flag indicating whether to set the beam energy spread to zero.
         id_type (str): Type of magnetic structure, can be undulator (u), wiggler (w), or bending magnet (bm).
 
     Optional Args (kwargs):
@@ -843,24 +784,12 @@ def set_electron_beam(bl: dict,
     eBeam.partStatMom1.xp = 0  # initial relative transverse divergence [rad]
     eBeam.partStatMom1.yp = 0
     eBeam.partStatMom1.gamma = get_gamma(bl['ElectronEnergy'])
-    if filament_beam:
-        sigX = 1e-25
-        sigXp = 1e-25
-        sigY = 1e-25
-        sigYp = 1e-25
-        if energy_spread:
-            sigEperE = bl['ElectronEnergySpread']
-        else:
-            sigEperE = 1e-25    
-    else:
-        sigX = bl['ElectronBeamSizeH']  # horizontal RMS size of e-beam [m]
-        sigXp = bl['ElectronBeamDivergenceH']  # horizontal RMS angular divergence [rad]
-        sigY = bl['ElectronBeamSizeV']  # vertical RMS size of e-beam [m]
-        sigYp = bl['ElectronBeamDivergenceV']  # vertical RMS angular divergence [rad]
-        if energy_spread:
-            sigEperE = bl['ElectronEnergySpread']
-        else:
-            sigEperE = 1e-25    
+
+    sigX = bl['ElectronBeamSizeH']  # horizontal RMS size of e-beam [m]
+    sigXp = bl['ElectronBeamDivergenceH']  # horizontal RMS angular divergence [rad]
+    sigY = bl['ElectronBeamSizeV']  # vertical RMS size of e-beam [m]
+    sigYp = bl['ElectronBeamDivergenceV']  # vertical RMS angular divergence [rad]
+    sigEperE = bl['ElectronEnergySpread']  
 
     # 2nd order stat. moments:
     eBeam.arStatMom2[0] = sigX * sigX  # <(x-<x>)^2>
@@ -904,8 +833,8 @@ def set_magnetic_structure(bl: dict,
                         _len=bl['PeriodID']*bl['NPeriods'], 
                         _bx=bl['Kh']*2*PI*MASS*LIGHT/(CHARGE*bl["PeriodID"]), 
                         _by=bl['Kv']*2*PI*MASS*LIGHT/(CHARGE*bl["PeriodID"]), 
-                        _phx=bl['KhPhase'], 
-                        _phy=bl['KvPhase'], 
+                        _phx=bl['MagFieldPhaseH'], 
+                        _phy=bl['MagFieldPhaseV'], 
                         _sx=bl['MagFieldSymmetryH'], 
                         _sy=bl['MagFieldSymmetryV'])
 
@@ -1872,7 +1801,7 @@ def get_undulator_max_harmonic_number(resonant_energy: float, photonEnergyMax: f
 #***********************************************************************************
 
 def syned_dictionary(json_file: str, magnetic_measurement: Union[str, None], observation_point: float, 
-                     hor_slit: float, ver_slit: float, hor_slit_cen: float, ver_slit_cen: float, **kwargs) -> dict:
+                     hor_slit: float, ver_slit: float, hor_slit_cen: float, ver_slit_cen: float) -> dict:
     """
     Generate beamline parameters based on a SYNED JSON configuration file and additional input parameters.
 
@@ -1885,17 +1814,6 @@ def syned_dictionary(json_file: str, magnetic_measurement: Union[str, None], obs
         ver_slit (float): Vertical slit size in meters.
         hor_slit_cen (float): Horizontal slit center position in meters.
         ver_slit_cen (float): Vertical slit center position in meters.
-        **kwargs: Additional keyword arguments for undulator parameters:
-            Kh (float): Horizontal undulator parameter K. If -1, it's taken from the SYNED file.
-            Kh_phase (float): Initial phase of the horizontal magnetic field in radians.
-            Kh_symmetry (int): Symmetry of the horizontal magnetic field vs longitudinal position.
-                1 for symmetric (B ~ cos(2*π*n*z/per + φ)),
-               -1 for anti-symmetric (B ~ sin(2*π*n*z/per + φ)).
-            Kv (float): Vertical undulator parameter K. If -1, it's taken from the SYNED file.
-            Kv_phase (float): Initial phase of the vertical magnetic field in radians.
-            Kv_symmetry (int): Symmetry of the vertical magnetic field vs longitudinal position.
-                1 for symmetric (B ~ cos(2*π*n*z/per + φ)),
-               -1 for anti-symmetric (B ~ sin(2*π*n*z/per + φ)).
 
     Returns:
         dict: A dictionary containing beamline parameters, including electron beam characteristics,
@@ -1918,25 +1836,16 @@ def syned_dictionary(json_file: str, magnetic_measurement: Union[str, None], obs
     beamline['magnetic_measurement'] = magnetic_measurement
     # undulator        
     if data["magnetic_structure"]["CLASS_NAME"].startswith("U"):
-        Kh = kwargs.get('Kh', None)
-        Kh_phase = kwargs.get('Kh_phase', 0)
-        Kh_symmetry = kwargs.get('Kh_symmetry', 1)
-        Kv = kwargs.get('Kv', None)
-        Kv_phase = kwargs.get('Kv_phase', 0)
-        Kv_symmetry = kwargs.get('Kv_symmetry', 1)
-        if magnetic_measurement is None:
-            if Kh == -1:
-                Kh =  data["magnetic_structure"]["K_horizontal"]
-            if Kv == -1:
-                Kv =  data["magnetic_structure"]["K_vertical"]
         beamline['NPeriods'] = data["magnetic_structure"]["number_of_periods"]
         beamline['PeriodID'] = data["magnetic_structure"]["period_length"]
-        beamline['Kh'] = Kh
-        beamline['KhPhase'] = Kh_phase
-        beamline['MagFieldSymmetryH'] = Kh_symmetry
-        beamline['Kv'] = Kv
-        beamline['KvPhase'] = Kv_phase
-        beamline['MagFieldSymmetryV'] = Kv_symmetry
+
+        beamline['Kh'] = data["magnetic_structure"]["K_horizontal"]
+        beamline['MagFieldPhaseH'] = data["magnetic_structure"]["B_horizontal_phase"]
+        beamline['MagFieldSymmetryH'] = data["magnetic_structure"]["B_horizontal_symmetry"]
+
+        beamline['Kv'] = data["magnetic_structure"]["K_vertical"]
+        beamline['MagFieldPhaseV'] = data["magnetic_structure"]["B_vertical_phase"]
+        beamline['MagFieldSymmetryV'] = data["magnetic_structure"]["B_vertical_symmetry"]
     # bending magnet        
     if data["magnetic_structure"]["CLASS_NAME"].startswith("B"):
         beamline['Bh'] = data["magnetic_structure"]["B_horizontal"]
@@ -1954,8 +1863,66 @@ def syned_dictionary(json_file: str, magnetic_measurement: Union[str, None], obs
     return beamline
 
 
-def from_barc4sr_2_syned():
-    pass
+def barc4sr_dictionary(light_source: SynchrotronSource, magnetic_measurement: Union[str, None], 
+                       observation_point: float, hor_slit: float, ver_slit: float, 
+                       hor_slit_cen: float, ver_slit_cen: float) -> dict:
+    """
+    Generate beamline parameters based on a SYNED JSON configuration file and additional input parameters.
+
+    Args:
+        light_source (SynchrotronSource): Instance of SynchrotronSource or any object that inherits from it.
+        magnetic_measurement (Union[str, None]): Path to the file containing magnetic measurement data.
+            Overrides SYNED undulator data if provided.
+        observation_point (float): Distance to the observation point in meters.
+        hor_slit (float): Horizontal slit size in meters.
+        ver_slit (float): Vertical slit size in meters.
+        hor_slit_cen (float): Horizontal slit center position in meters.
+        ver_slit_cen (float): Vertical slit center position in meters.
+
+    Returns:
+        dict: A dictionary containing beamline parameters, including electron beam characteristics,
+              magnetic structure details, and radiation observation settings.
+    """
+
+    beamline = {}
+    # accelerator
+    beamline['ElectronEnergy'] = light_source.ElectronBeam.energy_in_GeV
+    beamline['ElectronCurrent'] = light_source.ElectronBeam.current
+    beamline['ElectronEnergySpread'] = light_source.ElectronBeam.energy_spread
+    # electron beam
+    beamline['ElectronBeamSizeH'] = np.sqrt(light_source.ElectronBeam.moment_xx)
+    beamline['ElectronBeamSizeV'] = np.sqrt(light_source.ElectronBeam.moment_yy)
+    beamline['ElectronBeamDivergenceH'] = np.sqrt(light_source.ElectronBeam.moment_xpxp)
+    beamline['ElectronBeamDivergenceV'] = np.sqrt(light_source.ElectronBeam.moment_ypyp)
+    # magnetic structure
+    beamline['magnetic_measurement'] = magnetic_measurement
+    # undulator        
+    if light_source.MagneticStructure.CLASS_NAME.startswith("U"):
+        beamline['NPeriods'] = light_source.MagneticStructure.number_of_periods
+        beamline['PeriodID'] = light_source.MagneticStructure.period_length
+
+        beamline['Kh'] = light_source.MagneticStructure.K_horizontal
+        beamline['MagFieldPhaseH'] = light_source.MagneticStructure.B_horizontal_phase
+        beamline['MagFieldSymmetryH'] = light_source.MagneticStructure.B_horizontal_symmetry
+
+        beamline['Kv'] = light_source.MagneticStructure.K_vertical
+        beamline['MagFieldPhaseV'] = light_source.MagneticStructure.B_vertical_phase
+        beamline['MagFieldSymmetryV'] = light_source.MagneticStructure.B_vertical_symmetry
+    # bending magnet        
+    if light_source.MagneticStructure.CLASS_NAME.startswith("B"):
+        beamline['Bh'] = light_source.MagneticStructure.B_horizontal
+        beamline['Bv'] = light_source.MagneticStructure.B_vertical
+        beamline['R'] = light_source.MagneticStructure.radius
+        beamline['Leff'] = light_source.MagneticStructure.length
+        beamline['Ledge'] = light_source.MagneticStructure.length_edge
+    # radiation observation
+    beamline['distance'] = observation_point
+    beamline['slitH'] = hor_slit
+    beamline['slitV'] = ver_slit
+    beamline['slitHcenter'] = hor_slit_cen
+    beamline['slitVcenter'] = ver_slit_cen
+  
+    return beamline
 
 def generate_logarithmic_energy_values(emin: float, emax: float, resonant_energy: float, stepsize: float) -> np.ndarray:
     """
