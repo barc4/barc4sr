@@ -1647,13 +1647,15 @@ def power_through_slit(hor_slit: float, ver_slit: float, observation_point: floa
     dphi = np.arctan(dx/observation_point)
     dpsi = np.arctan(dy/observation_point)
 
-    integral_dphi = np.trapz(full_quadrant, x=dphi, axis=0)
-    integral_dphi_dpsi = np.trapz(integral_dphi, x=dpsi)
+    dphi_step = np.diff(dphi, prepend=dphi[0])  
+    dpsi_step = np.diff(dpsi, prepend=dpsi[0])  
 
-    d2P_d2phi = d2P_d2phi_0*integral_dphi_dpsi/dx_step/dy_step
+    weights = np.outer(dphi_step, dpsi_step)
+
+    d2P_d2phi = d2P_d2phi_0*full_quadrant*weights/dx_step/dy_step
 
     CumPow = d2P_d2phi.sum()*dx_step*dy_step
-    
+
     if verbose:
         print(f"Power emitted by the undulator throgh a {hor_slit_in_rad*1E3} x {ver_slit_in_rad*1E3} mrad² slit: {CumPow*1E-3:.3f} kW")
 
