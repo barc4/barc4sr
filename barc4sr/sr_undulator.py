@@ -1549,7 +1549,7 @@ def total_power(ring_e: float, ring_curr: float, und_per: float, und_n_per: int,
               B: Optional[float] = None, K: Optional[float] = None,
               verbose: bool = False) -> float:
     """ 
-    Calculate the total power emitted by a planar undulator in kilowatts (kW) based on Eq. 56 
+    Calculate the total power emitted by a planar undulator in watts (W) based on Eq. 56 
     from K. J. Kim, "Optical and power characteristics of synchrotron radiation sources"
     [also Erratum 34(4)1243(Apr1995)], Opt. Eng 34(2), 342 (1995). 
 
@@ -1561,7 +1561,7 @@ def total_power(ring_e: float, ring_curr: float, und_per: float, und_n_per: int,
     :param K: Deflection parameter. Required if B is not provided.
     :param verbose: Whether to print results. Defaults to False.
     
-    :return: Total power emitted by the undulator in kilowatts (kW).
+    :return: Total power emitted by the undulator in watts (W).
     """
 
     if B is None:
@@ -1575,7 +1575,7 @@ def total_power(ring_e: float, ring_curr: float, und_per: float, und_n_per: int,
     gamma = get_gamma(ring_e)
     tot_pow = (und_n_per*Z0*ring_curr*CHARGE*2*PI*LIGHT*gamma**2*K**2)/(6*und_per)*1E-3
     if verbose:
-        print(f"Total power emitted by the undulator {tot_pow:.3f} kW")
+        print(f"Total power emitted by the undulator: {tot_pow:.3f} kW")
 
     return tot_pow
 
@@ -1583,7 +1583,7 @@ def power_through_slit(hor_slit: float, ver_slit: float, observation_point: floa
                        B: Optional[float] = None, K: Optional[float] = None,
                        verbose: bool = False, **kwargs) -> float:
     """ 
-    Calculate the power passing through a slit in kilowatts (kW), based on Eq. 50 
+    Calculate the power passing through a slit in watts (W), based on Eq. 50 
     from K. J. Kim, "Optical and power characteristics of synchrotron radiation sources"
     [also Erratum 34(4)1243(Apr1995)], Opt. Eng 34(2), 342 (1995).
 
@@ -1604,7 +1604,7 @@ def power_through_slit(hor_slit: float, ver_slit: float, observation_point: floa
     :param kwargs: Additional keyword arguments:
                    - npix: Number of pixels in the grid for integration. Defaults to 501.
 
-    :return: Power passing through the slit in kilowatts (kW).
+    :return: Power passing through the slit in watts (W).
     """
 
     npix = kwargs.get('npix', 501)
@@ -1618,42 +1618,49 @@ def power_through_slit(hor_slit: float, ver_slit: float, observation_point: floa
     else:
         K  = get_K_from_B(B, und_per)
 
+    hor_slit_in_rad = np.arctan(hor_slit/2/observation_point)*2
+    ver_slit_in_rad = np.arctan(ver_slit/2/observation_point)*2
+
+    # positive quadrant
+    dphi = np.arctan(np.linspace(0, hor_slit/2, npix)/observation_point)
+    dpsi = np.arctan(np.linspace(0, ver_slit/2, npix)/observation_point)
+
     gk = G_K(K)
 
     d2P_d2phi_0 = total_power(ring_e, ring_curr, und_per, und_n_per, K=K, 
                               verbose=False)*1E3*(gk*21*gamma**2)/(16*PI*K)
 
-    dx_in_rad = np.arctan(hor_slit/2/observation_point)*2
-    dy_in_rad = np.arctan(ver_slit/2/observation_point)*2
+    pos_quadrant = compute_f_K_numba(dphi, dpsi, K, gamma, gk)
 
-    dphi = np.linspace(0, dx_in_rad / 2, npix)
-    dpsi = np.linspace(0, dy_in_rad / 2, npix)
+    full_quadrant = np.block([
+        [np.flip(np.flip(pos_quadrant[1:, 1:], axis=0), axis=1),
+         np.flip(pos_quadrant[1:, :], axis=0)],
+        [np.flip(pos_quadrant[:, 1:], axis=1), 
+          pos_quadrant]])
 
-    angular_function_f_K = compute_f_K_numba(dphi, dpsi, K, gamma, gk)
+    dx = np.linspace(-hor_slit / 2, hor_slit / 2, full_quadrant.shape[1])
+    dy = np.linspace(-ver_slit / 2, ver_slit / 2, full_quadrant.shape[0])
 
-    full_array = np.block([
-        [np.flip(np.flip(angular_function_f_K[1:, 1:], axis=0), axis=1),
-         np.flip(angular_function_f_K[1:, :], axis=0)],
-        [np.flip(angular_function_f_K[:, 1:], axis=1), 
-          angular_function_f_K]
-    ])
+    dx_step = (dx[1]-dx[0])*1E3
+    dy_step = (dy[1]-dy[0])*1E3
 
-    dphi_step = (dphi[1] - dphi[0])
-    dpsi_step = (dpsi[1] - dpsi[0])
+    dphi = np.arctan(dx/observation_point)
+    dpsi = np.arctan(dy/observation_point)
 
-    dx_step = np.tan(dphi_step)*observation_point*1E3
-    dy_step = np.tan(dpsi_step)*observation_point*1E3
+    integral_dphi = np.trapz(full_quadrant, x=dphi, axis=0)
+    integral_dphi_dpsi = np.trapz(integral_dphi, x=dpsi)
 
-    d2P_d2phi = d2P_d2phi_0*full_array*dphi_step*dpsi_step/dx_step/dy_step
+    d2P_d2phi = d2P_d2phi_0*integral_dphi_dpsi/dx_step/dy_step
+
     CumPow = d2P_d2phi.sum()*dx_step*dy_step
     
     if verbose:
-        print(f"Power emitted by the undulator throgh a {dx_in_rad*1E3} x {dy_in_rad*1E3} mrad² slit: {CumPow*1E-3:.3f} kW")
+        print(f"Power emitted by the undulator throgh a {hor_slit_in_rad*1E3} x {ver_slit_in_rad*1E3} mrad² slit: {CumPow*1E-3:.3f} kW")
 
     PowDenSRdict = {
         "axis": {
-            "x": np.linspace(-hor_slit / 2, hor_slit / 2, full_array.shape[1]),
-            "y": np.linspace(-ver_slit / 2, ver_slit / 2, full_array.shape[0]),
+            "x": dx,
+            "y": dy,
             },
         "power_density": {
             "map":d2P_d2phi,
