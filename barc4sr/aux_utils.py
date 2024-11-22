@@ -965,11 +965,11 @@ def srwlibCalcElecFieldSR(bl: dict,
     """
     
     arPrecPar = [0]*7
-    if id_type.startswith('bm'):
+    if id_type.startswith('bm') or id_type.startswith('w'):
         arPrecPar[0] = 2      # SR calculation method: 0- "manual", 1- "auto-undulator", 2- "auto-wiggler"
     else:
         arPrecPar[0] = 1
-    arPrecPar[1] = 0.01  
+    arPrecPar[1] = 0.001  
     arPrecPar[2] = 0     # longitudinal position to start integration (effective if < zEndInteg)
     arPrecPar[3] = 0     # longitudinal position to finish integration (effective if > zStartInteg)
     arPrecPar[4] = 50000 # Number of points for trajectory calculation
@@ -1251,7 +1251,7 @@ def srwlibsrwl_wfr_emit_prop_multi_e(bl: dict,
     """
     nMacroElecAvgPerProc = 10   # number of macro-electrons / wavefront to average on worker processes
     nMacroElecSavePer = 100     # intermediate data saving periodicity (in macro-electrons)
-    if id_type.startswith('bm'):
+    if id_type.startswith('bm') or id_type.startswith('w'):
         srCalcMeth = 2          # SR calculation method: 0- "manual", 1- "auto-undulator", 2- "auto-wiggler"
     else:
         srCalcMeth = 1

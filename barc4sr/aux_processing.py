@@ -112,9 +112,11 @@ def read_spectrum(file_list: List[str]) -> Dict:
             f = open(jsonfile)
             data = json.load(f)
             f.close()
-
             energy = np.concatenate((energy, data['Output']['data'][0]))
             flux = np.concatenate((flux, data['Output']['data'][1]))
+            if 'Angular Flux Density' in data["Input"]["Configurations"]["Type"]:
+                dist = data["Input"]["Configurations"]["Distance from the Source (m)"]
+                flux /= (np.tan(0.5E-3)*dist*2*1E3)**2
     else:
         raise ValueError("Invalid file extension.")
 
@@ -194,7 +196,7 @@ def read_power_density(file_name: str) -> Dict:
 
         PowDenSR = np.reshape(data['Output']['data'][2],
                             (len(data['Output']['data'][1]), 
-                            len(data['Output']['data'][0])))
+                             len(data['Output']['data'][0])))
 
         if "mrad" in data['Output']['units'][2]:
             dist = data["Input"]["Configurations"]["Distance from the Source (m)"]

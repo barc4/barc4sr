@@ -22,6 +22,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import h5py as h5
 import numpy as np
 import scipy.integrate as integrate
+from joblib import Parallel, delayed
+from numba import njit, prange
 from scipy.constants import physical_constants
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
@@ -62,8 +64,10 @@ PLANCK = physical_constants["Planck constant"][0]
 LIGHT = physical_constants["speed of light in vacuum"][0]
 CHARGE = physical_constants["atomic unit of charge"][0]
 MASS = physical_constants["electron mass"][0]
+Z0 = physical_constants["characteristic impedance of vacuum"][0]
+EPSILON_0 = physical_constants["vacuum electric permittivity"][0] 
 PI = np.pi
-RMS = np.sqrt(2)/2
+
 
 #***********************************************************************************
 # undulator radiation
@@ -100,6 +104,7 @@ def spectrum(file_name: str,
             =4 -Circular Right; 
             =5 -Circular Left; 
             =6 -Total
+        wiggler_approximation (bool): To enable a simplified calculation for energy ranges several times over the 1st harmonic
         magnetic_measurement (Optional[str]): Path to the file containing magnetic measurement data.
             Overrides SYNED undulator data. Default is None.
         tabulated_undulator_mthd (int): Method to tabulate the undulator field
@@ -139,12 +144,11 @@ def spectrum(file_name: str,
 
     radiation_polarisation = kwargs.get('radiation_polarisation', 6)
 
+    wiggler_approximation = kwargs.get('wiggler_approximation', False)
+
     magnetic_measurement = kwargs.get('magnetic_measurement', None)
     tabulated_undulator_mthd = kwargs.get('tabulated_undulator_mthd', 0)
 
-    # filament_beam = kwargs.get('filament_beam', False)
-    # energy_spread = kwargs.get('energy_spread', True)
-    # electron_trajectory
     number_macro_electrons = kwargs.get('number_macro_electrons', 1)
 
     parallel = kwargs.get('parallel', False)
@@ -203,7 +207,7 @@ def spectrum(file_name: str,
                                                      radiation_characteristic=0, 
                                                      radiation_dependence=0,
                                                      radiation_polarisation=radiation_polarisation,
-                                                     id_type='u',
+                                                     id_type='w' if wiggler_approximation else 'u',
                                                      parallel=parallel,
                                                      num_cores=num_cores)
         flux = flux.reshape((photon_energy_points))
@@ -220,6 +224,9 @@ def spectrum(file_name: str,
         else:
             print(f'{calc_txt} ... ', end='')
 
+        if wiggler_approximation:
+            warnings.warn("Wiggler approximation not applicable for this calculation", UserWarning)
+            
         flux = srwlibCalcStokesUR(bl, 
                                   eBeam, 
                                   magFldCnt, 
@@ -246,7 +253,7 @@ def spectrum(file_name: str,
                                                                 h_slit_points=1,
                                                                 v_slit_points=1,
                                                                 radiation_polarisation=radiation_polarisation,
-                                                                id_type='u',
+                                                                id_type='w' if wiggler_approximation else 'u',
                                                                 number_macro_electrons=number_macro_electrons,
                                                                 aux_file_name=file_name,
                                                                 parallel=parallel,
@@ -278,18 +285,14 @@ def spectrum(file_name: str,
 
 
 def power_density(file_name: str, 
-                  json_file: str, 
-                  hor_slit: float, 
-                  hor_slit_n: int,
+                  hor_slit: float,
                   ver_slit: float,
-                  ver_slit_n: int,
                   **kwargs) -> Dict:
     """
     Calculate undulator power density spatial distribution using SRW.
 
     Args:
         file_name (str): The name of the output file.
-        json_file (str): The path to the SYNED JSON configuration file.
         hor_slit (float): Horizontal slit size [m].
         hor_slit_n (int): Number of horizontal slit points.
         ver_slit (float): Vertical slit size [m].
@@ -307,24 +310,12 @@ def power_density(file_name: str,
             =4 -Circular Right; 
             =5 -Circular Left; 
             =6 -Total
-        Kh (float): Horizontal undulator parameter K. If -1, taken from the SYNED file. Default is -1.
-        Kh_phase (float): Initial phase of the horizontal magnetic field [rad]. Default is 0.
-        Kh_symmetry (int): Symmetry of the horizontal magnetic field vs longitudinal position.
-            1 for symmetric (B ~ cos(2*Pi*n*z/per + ph)),
-           -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)). Default is 1.
-        Kv (float): Vertical undulator parameter K. If -1, taken from the SYNED file. Default is -1.
-        Kv_phase (float): Initial phase of the vertical magnetic field [rad]. Default is 0.
-        Kv_symmetry (int): Symmetry of the vertical magnetic field vs longitudinal position.
-            1 for symmetric (B ~ cos(2*Pi*n*z/per + ph)),
-           -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)). Default is 1.
+
         magnetic_measurement (Optional[str]): Path to the file containing magnetic measurement data.
             Overrides SYNED undulator data. Default is None.
         tabulated_undulator_mthd (int): Method to tabulate the undulator field
             0: uses the provided magnetic field, 
             1: fits the magnetic field using srwl.UtiUndFromMagFldTab). Default is 0.
-        electron_trajectory (bool): Whether to calculate and save electron trajectory. Default is False.
-        filament_beam (bool): Whether to use a filament electron beam. Default is False.
-        energy_spread (bool): Whether to include energy spread. Default is True.
 
     Returns:
         Dict: A dictionary containing power density, horizontal axis, and vertical axis.
@@ -334,36 +325,34 @@ def power_density(file_name: str,
 
     print("Undulator power density spatial distribution using SRW. Please wait...")
 
+    json_file = kwargs.get('json_file', None)
+    light_source = kwargs.get('light_source', None)
+
+    if json_file is None and light_source is None:
+        raise ValueError("Please, provide either json_file or light_source (see function docstring)")
+    if json_file is not None and light_source is not None:
+        raise ValueError("Please, provide either json_file or light_source - not both (see function docstring)")
+
     observation_point = kwargs.get('observation_point', 10.)
 
+    hor_slit_n = kwargs.get('hor_slit_n', 501)
+    ver_slit_n= kwargs.get('ver_slit_n', 501)
     hor_slit_cen = kwargs.get('hor_slit_cen', 0)
     ver_slit_cen = kwargs.get('ver_slit_cen', 0)
 
     radiation_polarisation = kwargs.get('radiation_polarisation', 6)
 
-    Kh = kwargs.get('Kh', -1)
-    Kh_phase = kwargs.get('Kh_phase', 0)
-    Kh_symmetry = kwargs.get('Kh_symmetry', 1)
-
-    Kv = kwargs.get('Kv', -1)
-    Kv_phase = kwargs.get('Kv_phase', 0)
-    Kv_symmetry = kwargs.get('Kv_symmetry', 1)
-
     magnetic_measurement = kwargs.get('magnetic_measurement', None)
     tabulated_undulator_mthd = kwargs.get('tabulated_undulator_mthd', 0)
-    electron_trajectory = kwargs.get('electron_trajectory', False)
 
-    filament_beam = kwargs.get('filament_beam', False)
-    energy_spread = kwargs.get('energy_spread', True)
+    if json_file is not None:
+        bl = syned_dictionary(json_file, magnetic_measurement, observation_point, 
+                            hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
+    if light_source is not None:
+        bl = barc4sr_dictionary(light_source, magnetic_measurement, observation_point, 
+                            hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
 
-    bl = syned_dictionary(json_file, magnetic_measurement, observation_point, 
-                          hor_slit, ver_slit, hor_slit_cen, ver_slit_cen, 
-                          Kh=Kh, Kh_phase=Kh_phase, Kh_symmetry=Kh_symmetry, 
-                          Kv=Kv, Kv_phase=Kv_phase, Kv_symmetry=Kv_symmetry)
-
-   
-    eBeam, magFldCnt, eTraj = set_light_source(file_name, bl, filament_beam, 
-                                               energy_spread, electron_trajectory, 'u',
+    eBeam, magFldCnt, eTraj = set_light_source(file_name, bl, False, 'u',
                                                magnetic_measurement=magnetic_measurement,
                                                tabulated_undulator_mthd=tabulated_undulator_mthd)
     
@@ -391,16 +380,31 @@ def power_density(file_name: str,
     srwlib.srwl.CalcPowDenSR(stk, eBeam, 0, magFldCnt, arPrecPar)
     print('completed')
 
-    power_density = np.reshape(stk.to_int(radiation_polarisation), (stk.mesh.ny, stk.mesh.nx))
+    PowDen = np.reshape(stk.to_int(radiation_polarisation), (stk.mesh.ny, stk.mesh.nx))
     h_axis = np.linspace(-bl['slitH'] / 2, bl['slitH'] / 2, hor_slit_n)
     v_axis = np.linspace(-bl['slitV'] / 2, bl['slitV'] / 2, ver_slit_n)
 
-    write_power_density(file_name, power_density, h_axis, v_axis)
+    dh = (h_axis[1]-h_axis[0])*1E3
+    dv = (v_axis[1]-v_axis[0])*1E3
+
+    write_power_density(file_name, PowDen, h_axis, v_axis)
 
     print("Undulator power density spatial distribution using SRW: finished")
     print_elapsed_time(t0)
 
-    return {'power_density':power_density, 'axis': {'x': h_axis, 'y': v_axis}}
+    PowDenSRdict = {
+        "axis": {
+            "x": h_axis,
+            "y": v_axis,
+            },
+        "power_density": {
+            "map":PowDen,
+            "CumPow": PowDen.sum()*dh*dv,
+            "PowDenSRmax": PowDen.max()
+            }
+        }
+    
+    return PowDenSRdict
 
 
 def emitted_radiation(file_name: str, 
@@ -1225,15 +1229,15 @@ def generate_magnetic_measurement(und_per: float, B: float, num_und_per: int,
     
     if und_per_disp != 0 or B_disp != 0 or initial_phase_disp != 0:
         print("Adding phase errors")
-        Bd = B + B_disp * np.sin(2 * np.pi * axis / (und_per * np.random.uniform(7.5, 12.5)) + np.random.normal(0, 1))
+        Bd = B + B_disp * np.sin(2 * PI * axis / (und_per * np.random.uniform(7.5, 12.5)) + np.random.normal(0, 1))
         magnetic_field = np.zeros((num_samples, len(axis)))
         dund_per = np.random.normal(loc=und_per, scale=und_per_disp, size=num_samples)
-        dphase = np.random.normal(loc=0, scale=initial_phase_disp * np.pi / 180, size=num_samples)
+        dphase = np.random.normal(loc=0, scale=initial_phase_disp * PI / 180, size=num_samples)
         for i in range(num_samples):
-            magnetic_field[i,:] = np.sin(2 * np.pi * axis / dund_per[i] + dphase[i])
+            magnetic_field[i,:] = np.sin(2 * PI * axis / dund_per[i] + dphase[i])
         magnetic_field = Bd*np.mean(magnetic_field, axis=0)
     else:
-        magnetic_field = B * np.sin(2 * np.pi * axis / und_per)
+        magnetic_field = B * np.sin(2 * PI * axis / und_per)
 
     if add_terminations:
         magnetic_field[axis < -(num_und_per) * und_per / 2] *= 3/4
@@ -1555,7 +1559,7 @@ def total_power(ring_e: float, ring_curr: float, und_per: float, und_n_per: int,
     :param und_n_per: Number of periods.
     :param B: Magnetic field in tesla (T). If not provided, it will be calculated based on K.
     :param K: Deflection parameter. Required if B is not provided.
-    :param verbose: Whether to print intermediate calculation results. Defaults to False.
+    :param verbose: Whether to print results. Defaults to False.
     
     :return: Total power emitted by the undulator in kilowatts (kW).
     """
@@ -1565,10 +1569,187 @@ def total_power(ring_e: float, ring_curr: float, und_per: float, und_n_per: int,
             raise TypeError("Please, provide either B or K for the undulator")
         else:
             B = get_B_from_K(K, und_per)
-            if verbose:
-                print(">>> B = %.5f [T]"%B)
+    else:
+        K  = get_K_from_B(B, und_per)
 
-    return 0.63*(ring_e**2)*(B**2)*ring_curr*und_per*und_n_per
+    gamma = get_gamma(ring_e)
+    tot_pow = (und_n_per*Z0*ring_curr*CHARGE*2*PI*LIGHT*gamma**2*K**2)/(6*und_per)*1E-3
+    if verbose:
+        print(f"Total power emitted by the undulator {tot_pow:.3f} kW")
+
+    return tot_pow
+
+def power_through_slit(hor_slit: float, ver_slit: float, observation_point: float, ring_e: float, ring_curr: float, und_per: float, und_n_per: int,
+                       B: Optional[float] = None, K: Optional[float] = None,
+                       verbose: bool = False, **kwargs) -> float:
+    """ 
+    Calculate the power passing through a slit in kilowatts (kW), based on Eq. 50 
+    from K. J. Kim, "Optical and power characteristics of synchrotron radiation sources"
+    [also Erratum 34(4)1243(Apr1995)], Opt. Eng 34(2), 342 (1995).
+
+    The integration is performed only over one quadrant (positive phi and psi) for 
+    computational efficiency, and the result is scaled by 4, leveraging symmetry 
+    about zero in both directions.
+
+    :param hor_slit (float): Horizontal slit size [m].
+    :param ver_slit (float): Vertical slit size [m].
+    :patam observation_point (float): Distance from source to slits [m].
+    :param ring_e: Ring energy in gigaelectronvolts (GeV).
+    :param ring_curr: Ring current in amperes (A).
+    :param und_per: Undulator period in meters (m).
+    :param und_n_per: Number of periods.
+    :param B: Magnetic field in tesla (T). If not provided, it will be calculated based on K.
+    :param K: Deflection parameter. Required if B is not provided.
+    :param verbose: Whether to print results. Defaults to False.
+    :param kwargs: Additional keyword arguments:
+                   - npix: Number of pixels in the grid for integration. Defaults to 501.
+
+    :return: Power passing through the slit in kilowatts (kW).
+    """
+
+    npix = kwargs.get('npix', 501)
+    gamma = get_gamma(ring_e)
+
+    if B is None:
+        if K is None:
+            raise TypeError("Please, provide either B or K for the undulator")
+        else:
+            B = get_B_from_K(K, und_per)
+    else:
+        K  = get_K_from_B(B, und_per)
+
+    gk = G_K(K)
+
+    d2P_d2phi_0 = total_power(ring_e, ring_curr, und_per, und_n_per, K=K, 
+                              verbose=False)*1E3*(gk*21*gamma**2)/(16*PI*K)
+
+    dx_in_rad = np.arctan(hor_slit/2/observation_point)*2
+    dy_in_rad = np.arctan(ver_slit/2/observation_point)*2
+
+    dphi = np.linspace(0, dx_in_rad / 2, npix)
+    dpsi = np.linspace(0, dy_in_rad / 2, npix)
+
+    angular_function_f_K = compute_f_K_numba(dphi, dpsi, K, gamma, gk)
+
+    full_array = np.block([
+        [np.flip(np.flip(angular_function_f_K[1:, 1:], axis=0), axis=1),
+         np.flip(angular_function_f_K[1:, :], axis=0)],
+        [np.flip(angular_function_f_K[:, 1:], axis=1), 
+          angular_function_f_K]
+    ])
+
+    dphi_step = (dphi[1] - dphi[0])
+    dpsi_step = (dpsi[1] - dpsi[0])
+
+    dx_step = np.tan(dphi_step)*observation_point*1E3
+    dy_step = np.tan(dpsi_step)*observation_point*1E3
+
+    d2P_d2phi = d2P_d2phi_0*full_array*dphi_step*dpsi_step/dx_step/dy_step
+    CumPow = d2P_d2phi.sum()*dx_step*dy_step
+    
+    if verbose:
+        print(f"Power emitted by the undulator throgh a {dx_in_rad*1E3} x {dy_in_rad*1E3} mrad² slit: {CumPow*1E-3:.3f} kW")
+
+    PowDenSRdict = {
+        "axis": {
+            "x": np.linspace(-hor_slit / 2, hor_slit / 2, full_array.shape[1]),
+            "y": np.linspace(-ver_slit / 2, ver_slit / 2, full_array.shape[0]),
+            },
+        "power_density": {
+            "map":d2P_d2phi,
+            "CumPow": CumPow,
+            "PowDenSRmax": d2P_d2phi.max()
+            }
+        }
+    
+    return PowDenSRdict
+
+def G_K(K):
+    """ Angular function f_k, based on Eq. 52 from K. J. Kim, "Optical and power 
+    characteristics of synchrotron radiation sources" [also Erratum 34(4)1243(Apr1995)],
+    Opt. Eng 34(2), 342 (1995).
+    """
+    numerator = K*(K**6 + 24/7 * K**4 + 4*K**2 + 16/7)
+    denominator = (1+K**2)**(7/2)
+
+    return numerator/denominator
+
+@njit
+def f_K_numba(phi, psi, K, gamma):
+    """ Angular function f_k, based on Eq. 53 from K. J. Kim, "Optical and power 
+    characteristics of synchrotron radiation sources" [also Erratum 34(4)1243(Apr1995)],
+    Opt. Eng 34(2), 342 (1995).
+    """
+    n_points = int(2*np.pi*1001)  # Number of integration points
+    return integrate_trapezoidal_numba(f_K_integrand_numba, -np.pi, np.pi, n_points, phi, psi, K, gamma)
+
+@njit
+def f_K_integrand_numba(csi, phi, psi, K, gamma):
+    """ Angular function f_k, based on Eq. 53 from K. J. Kim, "Optical and power 
+    characteristics of synchrotron radiation sources" [also Erratum 34(4)1243(Apr1995)],
+    Opt. Eng 34(2), 342 (1995).
+    """
+    X = gamma * psi
+    Y = K * np.cos(csi) - gamma * phi
+    D = 1 + X**2 + Y**2
+    return (np.sin(csi)**2) * ((1 + X**2 - Y**2)**2 + 4 * (X * Y)**2) / (D**5)
+
+@njit(parallel=True)
+def compute_f_K_numba(dphi, dpsi, K, gamma, gk):
+    npix = len(dphi)
+    angular_function_f_K = np.zeros((npix, npix))
+    for j in prange(npix):
+        for i in range(npix):
+            angular_function_f_K[i, j] = f_K_numba(dphi[j], dpsi[i], K, gamma)
+    return angular_function_f_K*16*K/(7*np.pi*gk)
+
+@njit
+def integrate_trapezoidal_numba(func, a, b, n, *args):
+    """Custom trapezoidal integration."""
+    h = (b - a) / n
+    s = 0.5 * (func(a, *args) + func(b, *args))
+    for i in range(1, n):
+        s += func(a + i * h, *args)
+    return s * h
+
+def f_K_joblib(phi, psi, K, gamma):
+    """ Angular function f_k, based on Eq. 53 from K. J. Kim, "Optical and power 
+    characteristics of synchrotron radiation sources" [also Erratum 34(4)1243(Apr1995)],
+    Opt. Eng 34(2), 342 (1995).
+    """
+
+    result, error = integrate.quad(f_K_integrand_joblib, -np.pi, np.pi, args=(phi, psi, K, gamma))
+    return result
+
+def f_K_integrand_joblib(csi, phi, psi, K, gamma):
+    """ Angular function f_k, based on Eq. 53 from K. J. Kim, "Optical and power 
+    characteristics of synchrotron radiation sources" [also Erratum 34(4)1243(Apr1995)],
+    Opt. Eng 34(2), 342 (1995).
+    """
+    X = gamma * psi
+    Y = K * np.cos(csi) - gamma * phi
+    D = 1 + X**2 + Y**2
+    return (np.sin(csi)**2) * ((1 + X**2 - Y**2)**2 + 4 * (X * Y)**2) / (D**5)
+
+def compute_f_K_joblib(dphi, dpsi, K, gamma, n_jobs=10):
+
+    npix = len(dphi)
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(compute_value)(i, j, phi, psi, K, gamma)
+        for j, phi in enumerate(dphi)
+        for i, psi in enumerate(dpsi)
+    )
+
+    angular_function_f_K = np.zeros((npix, npix))
+    for i, j, value in results:
+        angular_function_f_K[i, j] = value
+
+    return angular_function_f_K*16*K/(7*PI*G_K(K))
+
+def compute_value(i, j, phi, psi, K, gamma):
+    return i, j, f_K_joblib(phi, psi, K, gamma)
+
+
 
 if __name__ == '__main__':
 
@@ -1576,3 +1757,5 @@ if __name__ == '__main__':
 
     print(f"This is the barc4sr.{file_name} module!")
     print("This module provides functions for interfacing SRW when calculating wavefronts, synchrotron radiation, power density, and spectra.")
+
+
