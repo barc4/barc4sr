@@ -220,9 +220,13 @@ class MagneticStructure(object):
                     - K_vertical (float): Vertical deflection parameter (K-value).
                     - B_vertical_phase (float): Phase offset for the vertical magnetic field in radians. Defaults to 0.
                     - B_horizontal_symmetry (int): Symmetry type for the vertical deflection parameter. Defaults to 1.
+                            1 for symmetric      (B ~ cos(2*Pi*n*z/per + ph)),
+                           -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)).
                     - K_horizontal (float): Horizontal deflection parameter (K-value).
                     - B_horizontal_phase (float): Phase offset for the horizontal magnetic field in radians. Defaults to 0.
                     - B_vertical_symmetry (int): Symmetry type for the horizontal deflection parameter. Defaults to 1.
+                            1 for symmetric      (B ~ cos(2*Pi*n*z/per + ph)),
+                           -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)).
                     - harmonic (int): Harmonic number. Defaults to 1.
                     - period_length (float): Length of one period (in meters).
                     - number_of_periods (int): Number of periods.
@@ -302,8 +306,8 @@ class MagneticStructure(object):
                 self.K_vertical = 0
                 self.K_horizontal = K
             elif 'b' in direction:
-                self.K_vertical = np.sqrt(K/2)
-                self.K_horizontal = np.sqrt(K/2)
+                self.K_vertical = K*np.sqrt(1/2)
+                self.K_horizontal = K*np.sqrt(1/2)
             else:
                 raise ValueError("invalid value: direction should be in ['v','h','b']")
     

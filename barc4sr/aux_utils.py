@@ -335,14 +335,17 @@ def srwlibCalcElecFieldSR(bl: dict,
     if num_cores is None:
         num_cores = mp.cpu_count()
 
+    print(num_cores)
     if parallel:
         dE = np.diff(energy_array)    
         dE1 = np.min(dE)
         dE2 = np.max(dE)
 
-        wiggler_regime = bool(energy_array[-1]>200*energy_array[0])
+        wiggler_regime = bool(energy_array[-1]>51*energy_array[0])
 
-        if np.allclose(dE1, dE2) and wiggler_regime:
+        # if np.allclose(dE1, dE2) and wiggler_regime:
+        if wiggler_regime:
+            1/0
             chunk_size = 20
             n_slices = len(energy_array)
 
