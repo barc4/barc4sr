@@ -64,11 +64,29 @@ def write_spectrum(file_name: str, flux: np.array, energy: np.array) -> None:
         energy (np.array): 1D numpy array containing the energy data.
 
     """
-    with h5.File('%s_spectrum.h5'%file_name, 'w') as f:
-        group = f.create_group('XOPPY_SPECTRUM')
-        intensity_group = group.create_group('Spectrum')
-        intensity_group.create_dataset('energy', data=energy)
-        intensity_group.create_dataset('flux', data=flux) 
+    if file_name is not None:
+        with h5.File('%s_spectrum.h5'%file_name, 'w') as f:
+            group = f.create_group('XOPPY_SPECTRUM')
+            intensity_group = group.create_group('Spectrum')
+            intensity_group.create_dataset('energy', data=energy)
+            intensity_group.create_dataset('flux', data=flux) 
+
+    spectral_power = flux*CHARGE*1E3
+
+    cumulated_power = integrate.cumulative_trapezoid(spectral_power, energy, initial=0)
+    integrated_power = integrate.trapezoid(spectral_power, energy)
+
+    spectrumSRdict = {
+        "spectrum":{
+            "energy":energy,
+            "flux": flux,
+            "spectral_power": spectral_power,
+            "cumulated_power": cumulated_power,
+            "integrated_power": integrated_power
+        }
+    }
+
+    return spectrumSRdict
 
 
 def read_spectrum(file_list: List[str]) -> Dict:
@@ -166,13 +184,35 @@ def write_power_density(file_name: str, power_density: np.array, h_axis: np.arra
         v_axis (np.array): 1D numpy array containing the vertical axis data.
 
     """
-    with h5.File('%s_power_density.h5' % file_name, 'w') as f:
-        group = f.create_group('XOPPY_POWERDENSITY')
-        sub_group = group.create_group('PowerDensity')
-        sub_group.create_dataset('image_data', data=power_density)
-        sub_group.create_dataset('axis_x', data=h_axis * 1e3)  # axis in [mm]
-        sub_group.create_dataset('axis_y', data=v_axis * 1e3)
+    if file_name is not None:
+        with h5.File('%s_power_density.h5' % file_name, 'w') as f:
+            group = f.create_group('XOPPY_POWERDENSITY')
+            sub_group = group.create_group('PowerDensity')
+            sub_group.create_dataset('image_data', data=power_density)
+            sub_group.create_dataset('axis_x', data=h_axis * 1e3)  # axis in [mm]
+            sub_group.create_dataset('axis_y', data=v_axis * 1e3)
 
+    dx = (h_axis[1]-h_axis[0])*1E3
+    dy = (v_axis[1]-v_axis[0])*1E3
+
+    CumPow = power_density.sum()*dx*dy
+
+    print(f"Total received power: {CumPow:.3f} W")
+    print(f"Peak power density: {power_density.max():.3f} W/mm^2")
+
+    powDenSRdict = {
+        "axis": {
+            "x": h_axis,
+            "y": v_axis,
+            },
+        "power_density": {
+            "map":power_density,
+            "CumPow": CumPow,
+            "PowDenSRmax": power_density.max()
+            }
+        }
+    
+    return powDenSRdict
 
 def read_power_density(file_name: str) -> Dict:
     """
@@ -231,7 +271,7 @@ def read_power_density(file_name: str) -> Dict:
     print(f"Total received power: {CumPow:.3f} W")
     print(f"Peak power density: {PowDenSR.max():.3f} W/mm^2")
 
-    PowDenSRdict = {
+    powDenSRdict = {
         "axis": {
             "x": x,
             "y": y,
@@ -243,10 +283,10 @@ def read_power_density(file_name: str) -> Dict:
             }
         }
     
-    return PowDenSRdict
+    return powDenSRdict
 
 
-def trim_and_resample_power_density(PowDenSRdict: Dict, **kwargs: Union[float, bool]) -> Dict:
+def trim_and_resample_power_density(powDenSRdict: Dict, **kwargs: Union[float, bool]) -> Dict:
     """
     Trims and optionally resamples the power density data map.
 
@@ -255,7 +295,7 @@ def trim_and_resample_power_density(PowDenSRdict: Dict, **kwargs: Union[float, b
     along with cumulative power and maximum power density.
 
     Parameters:
-        - PowDenSRdict (Dict): A dictionary containing power density data with the following keys:
+        - powDenSRdict (Dict): A dictionary containing power density data with the following keys:
             - 'axis': A dictionary containing 'x' and 'y' axes arrays.
             - 'power_density': A dictionary containing the power density map.
         - **kwargs (Union[float, bool]): Additional keyword arguments for optional trimming and resampling:
@@ -274,9 +314,9 @@ def trim_and_resample_power_density(PowDenSRdict: Dict, **kwargs: Union[float, b
 
     """
 
-    PowDenSR = PowDenSRdict["power_density"]["map"]
+    PowDenSR = powDenSRdict["power_density"]["map"]
 
-    x, y = PowDenSRdict["axis"]["x"], PowDenSRdict["axis"]["y"]
+    x, y = powDenSRdict["axis"]["x"], powDenSRdict["axis"]["y"]
     xc, yc = 0, 0
     dx = x[-1] - x[0]
     dy = y[-1] - y[0]
@@ -325,7 +365,8 @@ def trim_and_resample_power_density(PowDenSRdict: Dict, **kwargs: Union[float, b
 # Spatial-spectral distribution
 #***********************************************************************************
 
-def write_emitted_radiation(file_name: str, intensity: np.array, energy: np.array, h_axis: np.array, v_axis: np.array) -> None:
+def write_emitted_radiation(file_name: str, intensity: np.array, energy: np.array, 
+                            h_axis: np.array, v_axis: np.array, parallel_processing: bool = False) -> None:
     """
     Writes synchrotron radiation (I vs x vs y vs E) data to an HDF5 file.
 
@@ -340,15 +381,22 @@ def write_emitted_radiation(file_name: str, intensity: np.array, energy: np.arra
         energy (np.array): 1D numpy array containing the energy axis data.
         h_axis (np.array): 1D numpy array containing the horizontal axis data.
         v_axis (np.array): 1D numpy array containing the vertical axis data.
+        parallel_processing (bool, optional): Whether to use parallel processing. Defaults to False.
 
     """
-    with h5.File('%s_undulator_radiation.h5' % file_name, 'w') as f:
-        group = f.create_group('XOPPY_RADIATION')
-        radiation_group = group.create_group('Radiation')
-        radiation_group.create_dataset('stack_data', data=intensity)
-        radiation_group.create_dataset('axis0', data=energy)
-        radiation_group.create_dataset('axis1', data=h_axis * 1e3)
-        radiation_group.create_dataset('axis2', data=v_axis * 1e3)
+    if file_name is not None:
+        with h5.File('%s_undulator_radiation.h5' % file_name, 'w') as f:
+            group = f.create_group('XOPPY_RADIATION')
+            radiation_group = group.create_group('Radiation')
+            radiation_group.create_dataset('stack_data', data=intensity)
+            radiation_group.create_dataset('axis0', data=energy)
+            radiation_group.create_dataset('axis1', data=h_axis * 1e3)
+            radiation_group.create_dataset('axis2', data=v_axis * 1e3)
+
+    if parallel_processing:
+        return proc_spatial_spectral_dist_parallel(intensity, energy, h_axis, v_axis)
+    else:
+        return proc_spatial_spectral_dist(intensity, energy, h_axis, v_axis)
 
 
 def read_emitted_radiation(file_list: List[str], parallel_processing: bool = False) -> Dict:
@@ -958,17 +1006,30 @@ def write_wavefront(file_name: str, intensity:np.array, phase:np.array, h_axis:n
         v_axis (np.array): 1D numpy array containing the vertical axis data.
 
     """
-    with h5.File('%s_undulator_wft.h5'%file_name, 'w') as f:
-        group = f.create_group('XOPPY_WAVEFRONT')
-        intensity_group = group.create_group('Intensity')
-        intensity_group.create_dataset('image_data', data=intensity)
-        intensity_group.create_dataset('axis_x', data=h_axis*1e3) 
-        intensity_group.create_dataset('axis_y', data=v_axis*1e3)
-        intensity_group = group.create_group('Phase')
-        intensity_group.create_dataset('image_data', data=phase)
-        intensity_group.create_dataset('axis_x', data=h_axis*1e3) 
-        intensity_group.create_dataset('axis_y', data=v_axis*1e3)
+    if file_name is not None:
+        with h5.File('%s_undulator_wft.h5'%file_name, 'w') as f:
+            group = f.create_group('XOPPY_WAVEFRONT')
+            intensity_group = group.create_group('Intensity')
+            intensity_group.create_dataset('image_data', data=intensity)
+            intensity_group.create_dataset('axis_x', data=h_axis*1e3) 
+            intensity_group.create_dataset('axis_y', data=v_axis*1e3)
+            intensity_group = group.create_group('Phase')
+            intensity_group.create_dataset('image_data', data=phase)
+            intensity_group.create_dataset('axis_x', data=h_axis*1e3) 
+            intensity_group.create_dataset('axis_y', data=v_axis*1e3)
 
+    wftDict = {
+        "axis": {
+            "x": h_axis,
+            "y": v_axis,
+            },
+        "wavefront": {
+            "intensity":intensity,
+            "phase": phase,
+            }
+        }
+    
+    return wftDict
 
 def read_wavefront(file_name: str) -> Dict:
     """
@@ -1061,35 +1122,35 @@ def write_electron_trajectory(file_name:str, eTraj: srwlib.SRWLPrtTrj):
     if hasattr(eTraj, 'arBz'):
         eTrajDict["eTraj"]["Bz"] = []
 
+    if file_name is not None:
+        with h5.File(f"{file_name}_eTraj.h5", "w") as f:
+            group = f.create_group("XOPPY_ETRAJ")
+            intensity_group = group.create_group("eTraj")
+            
+            intensity_group.create_dataset("ct", data=np.zeros(eTraj.np))
+            intensity_group.create_dataset("X", data=eTraj.arX)
+            intensity_group.create_dataset("BetaX", data=eTraj.arXp)
+            intensity_group.create_dataset("Y", data=eTraj.arY)
+            intensity_group.create_dataset("BetaY", data=eTraj.arYp)
+            intensity_group.create_dataset("Z", data=eTraj.arZ)
+            intensity_group.create_dataset("BetaZ", data=eTraj.arZp)
+            if hasattr(eTraj, 'arBx'):
+                intensity_group.create_dataset("Bx", data=eTraj.arBx)
+            if hasattr(eTraj, 'arBy'):
+                intensity_group.create_dataset("By", data=eTraj.arBy)
+            if hasattr(eTraj, 'arBz'):
+                intensity_group.create_dataset("Bz", data=eTraj.arBz)
 
-    with h5.File(f"{file_name}_eTraj.h5", "w") as f:
-        group = f.create_group("XOPPY_ETRAJ")
-        intensity_group = group.create_group("eTraj")
-        
-        intensity_group.create_dataset("ct", data=np.zeros(eTraj.np))
-        intensity_group.create_dataset("X", data=eTraj.arX)
-        intensity_group.create_dataset("BetaX", data=eTraj.arXp)
-        intensity_group.create_dataset("Y", data=eTraj.arY)
-        intensity_group.create_dataset("BetaY", data=eTraj.arYp)
-        intensity_group.create_dataset("Z", data=eTraj.arZ)
-        intensity_group.create_dataset("BetaZ", data=eTraj.arZp)
-        if hasattr(eTraj, 'arBx'):
-            intensity_group.create_dataset("Bx", data=eTraj.arBx)
-        if hasattr(eTraj, 'arBy'):
-            intensity_group.create_dataset("By", data=eTraj.arBy)
-        if hasattr(eTraj, 'arBz'):
-            intensity_group.create_dataset("Bz", data=eTraj.arBz)
-
-        eTrajDict["eTraj"]["ct"] = np.zeros(eTraj.np)
-        eTrajDict["eTraj"]["X"] = np.asarray(eTraj.arX)
-        eTrajDict["eTraj"]["BetaX"] = np.asarray(eTraj.arXp)
-        eTrajDict["eTraj"]["Y"] = np.asarray(eTraj.arY)
-        eTrajDict["eTraj"]["BetaY"] = np.asarray(eTraj.arY)
-        eTrajDict["eTraj"]["Z"] = np.asarray(eTraj.arZ)
-        eTrajDict["eTraj"]["BetaZ"] = np.asarray(eTraj.arZ)
-        eTrajDict["eTraj"]["Bx"] = np.asarray(eTraj.arBx)
-        eTrajDict["eTraj"]["By"] = np.asarray(eTraj.arBy)
-        eTrajDict["eTraj"]["Bz"] = np.asarray(eTraj.arBz)
+    eTrajDict["eTraj"]["ct"] = np.zeros(eTraj.np)
+    eTrajDict["eTraj"]["X"] = np.asarray(eTraj.arX)
+    eTrajDict["eTraj"]["BetaX"] = np.asarray(eTraj.arXp)
+    eTrajDict["eTraj"]["Y"] = np.asarray(eTraj.arY)
+    eTrajDict["eTraj"]["BetaY"] = np.asarray(eTraj.arY)
+    eTrajDict["eTraj"]["Z"] = np.asarray(eTraj.arZ)
+    eTrajDict["eTraj"]["BetaZ"] = np.asarray(eTraj.arZ)
+    eTrajDict["eTraj"]["Bx"] = np.asarray(eTraj.arBx)
+    eTrajDict["eTraj"]["By"] = np.asarray(eTraj.arBy)
+    eTrajDict["eTraj"]["Bz"] = np.asarray(eTraj.arBz)
 
     return eTrajDict
     
