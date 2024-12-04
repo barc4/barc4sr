@@ -931,7 +931,7 @@ def animate_energy_scan(URdict: Dict, file_name: str, **kwargs: Any) -> None:
 # Tuning curves
 #***********************************************************************************
 
-def write_tuning_curve(file_name: str, flux: np.array, K: np.array, energy: np.array) -> None:
+def write_tuning_curve(file_name: str, flux: np.array, Kh: np.array, Kv: np.array, energy: np.array) -> None:
     """
     Writes tuning curve data to an HDF5 file.
 
@@ -945,13 +945,23 @@ def write_tuning_curve(file_name: str, flux: np.array, K: np.array, energy: np.a
         energy (np.array): 1D numpy array containing the energy data.
 
     """
-    with h5.File('%s_tc.h5'%file_name, 'w') as f:
-        group = f.create_group('XOPPY_SPECTRUM')
-        intensity_group = group.create_group('TC')
-        intensity_group.create_dataset('energy', data=energy)
-        intensity_group.create_dataset('flux', data=flux) 
-        intensity_group.create_dataset('K', data=K) 
+    if file_name is not None:
+        with h5.File('%s_tc.h5'%file_name, 'w') as f:
+            group = f.create_group('XOPPY_SPECTRUM')
+            intensity_group = group.create_group('TC')
+            intensity_group.create_dataset('energy', data=energy)
+            intensity_group.create_dataset('flux', data=flux) 
+            intensity_group.create_dataset('Kh', data=Kh) 
+            intensity_group.create_dataset('Kv', data=Kv) 
 
+    tcSRdict = {
+            "energy": energy,
+            "flux": flux,
+            "Kh": Kh,
+            "Kv": Kv
+    }
+
+    return tcSRdict
 
 def read_tuning_curve(file_name: str) -> Dict:
     """
@@ -967,19 +977,19 @@ def read_tuning_curve(file_name: str) -> Dict:
                 - 'flux': Array containing spectral flux data.
     """
 
-    # Process files in the list
     if file_name.endswith("h5") or file_name.endswith("hdf5"):
         print(file_name)
         with h5.File(file_name, "r") as f:
             energy =  f["XOPPY_SPECTRUM"]["TC"]["energy"][()]
             flux = f["XOPPY_SPECTRUM"]["TC"]["flux"][()]
-            K = f["XOPPY_SPECTRUM"]["TC"]["K"][()]
+            Kh = f["XOPPY_SPECTRUM"]["TC"]["Kh"][()]
+            Kv = f["XOPPY_SPECTRUM"]["TC"]["Kv"][()]
 
-    # Dictionary to store results
     tcSRdict = {
             "energy": energy,
             "flux": flux,
-            "K": K
+            "Kh": Kh,
+            "Kv": Kv
     }
 
     return tcSRdict

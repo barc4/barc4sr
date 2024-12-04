@@ -10,7 +10,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '15/MAR/2024'
-__changed__ = '25/NOV/2024'
+__changed__ = '04/DEC/2024'
 
 import array
 import copy
@@ -335,7 +335,6 @@ def srwlibCalcElecFieldSR(bl: dict,
     if num_cores is None:
         num_cores = mp.cpu_count()
 
-    print(num_cores)
     if parallel:
         dE = np.diff(energy_array)    
         dE1 = np.min(dE)
@@ -345,7 +344,6 @@ def srwlibCalcElecFieldSR(bl: dict,
 
         # if np.allclose(dE1, dE2) and wiggler_regime:
         if wiggler_regime:
-            1/0
             chunk_size = 20
             n_slices = len(energy_array)
 
@@ -633,9 +631,10 @@ def srwlibsrwl_wfr_emit_prop_multi_e(bl: dict,
         dE1 = np.min(dE)
         dE2 = np.max(dE)
 
-        wiggler_regime = bool(energy_array[-1]>200*energy_array[0])
+        wiggler_regime = bool(energy_array[-1]>51*energy_array[0])
 
-        if np.allclose(dE1, dE2) and wiggler_regime:
+        # if np.allclose(dE1, dE2) and wiggler_regime:
+        if wiggler_regime:
             chunk_size = 20
             n_slices = len(energy_array)
 
@@ -828,6 +827,8 @@ def srwlibCalcStokesUR(bl: dict,
                        magFldCnt: srwlib.SRWLMagFldC, 
                        energy_array: np.ndarray, 
                        resonant_energy: float, 
+                       h_slit_points: int, 
+                       v_slit_points: int, 
                        radiation_polarisation: int,
                        parallel: bool,
                        num_cores: int=None) -> np.ndarray:
@@ -840,6 +841,8 @@ def srwlibCalcStokesUR(bl: dict,
         magFldCnt (srwlib.SRWLMagFldC): Magnetic field container.
         energy_array (np.ndarray): Array of photon energies [eV].
         resonant_energy (float): Resonant energy [eV].
+        h_slit_points (int): Number of horizontal slit points.
+        v_slit_points (int): Number of vertical slit points.
         radiation_polarisation (int): Polarisation component to be extracted.
                =0 -Linear Horizontal; 
                =1 -Linear Vertical; 
@@ -867,6 +870,8 @@ def srwlibCalcStokesUR(bl: dict,
                                                                     bl,
                                                                     eBeam,
                                                                     magFldCnt,
+                                                                    h_slit_points,
+                                                                    v_slit_points,
                                                                     resonant_energy,
                                                                     radiation_polarisation))
                                              for list_pairs in energy_chunks)
@@ -894,6 +899,8 @@ def srwlibCalcStokesUR(bl: dict,
                                           bl, 
                                           eBeam,
                                           magFldCnt, 
+                                          h_slit_points,
+                                          v_slit_points,
                                           resonant_energy,
                                           radiation_polarisation))
         
@@ -902,10 +909,12 @@ def srwlibCalcStokesUR(bl: dict,
     return intensity
 
 
-def core_srwlibCalcStokesUR(args: Tuple[ np.ndarray, 
+def core_srwlibCalcStokesUR(args: Tuple[np.ndarray, 
                                         dict, 
                                         srwlib.SRWLPartBeam, 
                                         srwlib.SRWLMagFldC, 
+                                        np.ndarray,
+                                        np.ndarray,
                                         float,
                                         int]) -> Tuple[np.ndarray, float]:
     """
@@ -917,6 +926,8 @@ def core_srwlibCalcStokesUR(args: Tuple[ np.ndarray,
             - bl (dict): Dictionary containing beamline parameters.
             - eBeam (srwlib.SRWLPartBeam): Electron beam properties.
             - magFldCnt (srwlib.SRWLMagFldC): Magnetic field container.
+            - h_slit_points (int): Number of horizontal slit points.
+            - v_slit_points (int): Number of vertical slit points.
             - resonant_energy (float): Resonant energy [eV].
             - radiation_polarisation (int): Polarisation component to be extracted.
 
@@ -924,7 +935,7 @@ def core_srwlibCalcStokesUR(args: Tuple[ np.ndarray,
         Tuple[np.ndarray, float]: Tuple containing intensity data and computation time.
     """
 
-    energy_array, bl, eBeam, magFldCnt, resonant_energy, radiation_polarisation = args
+    energy_array, bl, eBeam, magFldCnt, h_slit_points, v_slit_points, resonant_energy, radiation_polarisation = args
 
     tzero = time()
 
@@ -939,7 +950,7 @@ def core_srwlibCalcStokesUR(args: Tuple[ np.ndarray,
 
         npts = len(energy_array)
         stk = srwlib.SRWLStokes() 
-        stk.allocate(npts, 1, 1)     
+        stk.allocate(npts, h_slit_points, v_slit_points)     
         stk.mesh.zStart = bl['distance']
         stk.mesh.eStart = energy_array[0]
         stk.mesh.eFin =   energy_array[-1]
@@ -957,106 +968,383 @@ def core_srwlibCalcStokesUR(args: Tuple[ np.ndarray,
     return intensity, energy_array, time()-tzero
 
 
-def tc_on_axis_srwlibCalcElecFieldSR(args):
-    energy, K, nHarmMax, even_harmonics, bl, eBeam, magnetic_measurement, \
-        tabulated_undulator_mthd, radiation_polarisation = args
+def tc_with_srwlibCalcElecFieldSR(bl: dict, 
+                          eBeam: srwlib.SRWLPartBeam, 
+                          magFldCnt: srwlib.SRWLMagFldC, 
+                          energy_array: np.ndarray,
+                          Kh: np.ndarray,
+                          Kv: np.ndarray,
+                          even_harmonics: bool,
+                          h_slit_points: int, 
+                          v_slit_points: int, 
+                          radiation_characteristic: int, 
+                          radiation_dependence: int, 
+                          radiation_polarisation: int,
+                          parallel: bool,
+                          num_cores: int=None)-> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Calculates the intensity tuning curve using srwlib.CalcElecFieldSR.
+
+    Args:
+        bl (dict): Dictionary containing beamline parameters.
+        eBeam (srwlib.SRWLPartBeam): Electron beam properties.
+        magFldCnt (srwlib.SRWLMagFldC): Magnetic field container.
+        energy_array (np.ndarray): Array of photon energies [eV].
+        Kh (np.ndarray): Array of horizontal deflection parameters for each harmonic.
+        Kv (np.ndarray): Array of vertical deflection parameters for each harmonic.
+        even_harmonics (bool): Whether to include even harmonics in the calculation.
+        h_slit_points (int): Number of horizontal slit points.
+        v_slit_points (int): Number of vertical slit points.
+        radiation_characteristic (int): Radiation characteristic:
+               0 - "Single-Electron" Intensity;
+               1 - "Multi-Electron" Intensity;
+               4 - "Single-Electron" Radiation Phase;
+               5 - Real part of Single-Electron Electric Field;
+               6 - Imaginary part of Single-Electron Electric Field.
+        radiation_dependence (int): Radiation dependence, e.g., 1 for angular distribution.
+               0 - vs e (photon energy or time);
+               1 - vs x (horizontal position or angle);
+               2 - vs y (vertical position or angle);
+               3 - vs x&y (horizontal and vertical positions or angles);
+               4 - vs e&x (photon energy or time and horizontal position or angle);
+               5 - vs e&y (photon energy or time and vertical position or angle);
+               6 - vs e&x&y (photon energy or time, horizontal and vertical positions or angles).
+        radiation_polarisation (int): Polarisation component to be extracted.
+               0 - Linear Horizontal;
+               1 - Linear Vertical;
+               2 - Linear 45 degrees;
+               3 - Linear 135 degrees;
+               4 - Circular Right;
+               5 - Circular Left;
+               6 - Total.
+        parallel (bool): Whether to use parallel computation.
+        num_cores (int, optional): Number of CPU cores to use for parallel computation.
+                                   Defaults to the number of available CPU cores.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, np.ndarray]: Total intensity, horizontal axis, and vertical axis.
+    """
+
+    nHarmMax = Kh.shape[1]
+
+    if num_cores is None:
+        num_cores = mp.cpu_count()
+
+    if parallel:
+        chunk_size = 20
+        n_slices = len(energy_array)
+        chunks = [(energy_array[i:i + chunk_size],
+                   Kh[i:i + chunk_size, :],
+                   Kv[i:i + chunk_size, :],
+                   nHarmMax,
+                   even_harmonics,
+                   bl,
+                   eBeam,
+                   magFldCnt,
+                   h_slit_points,
+                   v_slit_points,
+                   radiation_characteristic,
+                   radiation_dependence,
+                   radiation_polarisation,
+                    ) for i in range(0, n_slices, chunk_size)]
+        
+        with mp.Pool() as pool:
+            results = pool.map(core_tc_with_srwlibCalcElecFieldSR, chunks)
+        tc = np.concatenate(results, axis=0)
+    else:
+        tc = core_tc_with_srwlibCalcElecFieldSR((energy_array,
+                                                 Kh, 
+                                                 Kv, 
+                                                 nHarmMax,
+                                                 even_harmonics,
+                                                 bl,
+                                                 eBeam,
+                                                 magFldCnt,
+                                                 h_slit_points,
+                                                 v_slit_points,
+                                                 radiation_characteristic,
+                                                 radiation_dependence,
+                                                 radiation_polarisation))
+        
+    if h_slit_points == 1 or v_slit_points == 1:
+        h_axis = np.asarray([0])
+        v_axis = np.asarray([0])
+    else:
+        h_axis = np.linspace(-bl['slitH']/2-bl['slitHcenter'], bl['slitH']/2-bl['slitHcenter'], h_slit_points)
+        v_axis = np.linspace(-bl['slitV']/2-bl['slitVcenter'], bl['slitV']/2-bl['slitVcenter'], v_slit_points)
+        
+    return tc, h_axis, v_axis
+
+
+def core_tc_with_srwlibCalcElecFieldSR(args):
+    """
+    Core function to calculate the intensity tuning curve using srwlib.CalcElecFieldSR.
+
+    Args:
+        args (tuple): Tuple containing:
+            - energy_array (np.ndarray): Array of photon energies [eV].
+            - Kh (np.ndarray): Horizontal deflection parameters for each harmonic.
+            - Kv (np.ndarray): Vertical deflection parameters for each harmonic.
+            - nHarmMax (int): Maximum number of harmonics.
+            - even_harmonics (bool): Whether to include even harmonics.
+            - bl (dict): Dictionary containing beamline parameters.
+            - eBeam (srwlib.SRWPartBeam): Electron beam properties.
+            - magFldCnt (srwlib.SRWLMagFldC): Magnetic field container.
+            - h_slit_points (int): Number of horizontal slit points.
+            - v_slit_points (int): Number of vertical slit points.
+            - radiation_characteristic (int): Radiation characteristic.
+            - radiation_dependence (int): Radiation dependence.
+            - radiation_polarisation (int): Polarisation component.
+
+    Returns:
+        np.ndarray: Array containing the calculated intensity or flux.
+    """
+
+    energy, Kh, Kv, nHarmMax, even_harmonics, bl, eBeam, magFldCnt, \
+        h_slit_points, v_slit_points, radiation_characteristic, radiation_dependence, \
+            radiation_polarisation = args
 
     htc = np.zeros((len(energy), nHarmMax+1))
 
     for nharm in range(nHarmMax):
-        if even_harmonics or (nharm + 1) % 2 != 0:
+        if (nharm + 1) % 2 == 0 and even_harmonics or (nharm + 1) % 2 != 0:
             for i, dE in enumerate(energy):
-                deflec_param = K[i, nharm]
+                deflec_param = np.sqrt(Kh[i, nharm]**2 + Kv[i, nharm]**2)
                 if deflec_param>0:
-                    bl['Kv'] = deflec_param
-
-                    magFldCnt = set_magnetic_structure(bl, id_type='u',
-                                            magnetic_measurement = magnetic_measurement, 
-                                            tabulated_undulator_mthd = tabulated_undulator_mthd)
+                    bl['Kv'] = Kv[i, nharm]
+                    bl['Kh'] = Kh[i, nharm]                   
+                    magFldCnt = set_magnetic_structure(bl, id_type='u')
                     htc[i, nharm+1], h_axis, v_axis = srwlibCalcElecFieldSR(
                                                 bl, 
                                                 eBeam, 
                                                 magFldCnt,
                                                 dE,
-                                                h_slit_points=1,
-                                                v_slit_points=1,
-                                                radiation_characteristic=0, 
-                                                radiation_dependence=0,
+                                                h_slit_points=h_slit_points,
+                                                v_slit_points=v_slit_points,
+                                                radiation_characteristic=radiation_characteristic, 
+                                                radiation_dependence=radiation_dependence,
                                                 radiation_polarisation=radiation_polarisation,
                                                 id_type='u',
                                                 parallel=False,
                                                 num_cores=1
                                                 )
+                    # htc[i, nharm+1] = (np.sum(flux)*(h_axis[1]-h_axis[0])*(v_axis[1]-v_axis[0]))*1E6   
     return htc
 
 
-def tc_through_slit_srwlibCalcElecFieldSR(args):
+def tc_with_srwlibCalcStokesUR(bl: dict, 
+                          eBeam: srwlib.SRWLPartBeam, 
+                          magFldCnt: srwlib.SRWLMagFldC, 
+                          energy_array: np.ndarray,
+                          Kh: np.ndarray,
+                          Kv: np.ndarray,
+                          even_harmonics: bool,
+                          h_slit_points: int, 
+                          v_slit_points: int, 
+                          radiation_characteristic: int, 
+                          radiation_dependence: int, 
+                          radiation_polarisation: int,
+                          parallel: bool,
+                          num_cores: int=None)-> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Calculates the intensity tuning curve using srwlib.CalcStokesUR.
 
-    energy, K, nHarmMax, even_harmonics, bl, eBeam, magnetic_measurement, \
-        tabulated_undulator_mthd, radiation_polarisation = args
+    Args:
+        bl (dict): Dictionary containing beamline parameters.
+        eBeam (srwlib.SRWLPartBeam): Electron beam properties.
+        magFldCnt (srwlib.SRWLMagFldC): Magnetic field container.
+        energy_array (np.ndarray): Array of photon energies [eV].
+        Kh (np.ndarray): Array of horizontal deflection parameters for each harmonic.
+        Kv (np.ndarray): Array of vertical deflection parameters for each harmonic.
+        even_harmonics (bool): Whether to include even harmonics in the calculation.
+        h_slit_points (int): Number of horizontal slit points.
+        v_slit_points (int): Number of vertical slit points.
+        radiation_characteristic (int): Radiation characteristic:
+               0 - "Single-Electron" Intensity;
+               1 - "Multi-Electron" Intensity;
+               4 - "Single-Electron" Radiation Phase;
+               5 - Real part of Single-Electron Electric Field;
+               6 - Imaginary part of Single-Electron Electric Field.
+        radiation_dependence (int): Radiation dependence, e.g., 1 for angular distribution.
+               0 - vs e (photon energy or time);
+               1 - vs x (horizontal position or angle);
+               2 - vs y (vertical position or angle);
+               3 - vs x&y (horizontal and vertical positions or angles);
+               4 - vs e&x (photon energy or time and horizontal position or angle);
+               5 - vs e&y (photon energy or time and vertical position or angle);
+               6 - vs e&x&y (photon energy or time, horizontal and vertical positions or angles).
+        radiation_polarisation (int): Polarisation component to be extracted.
+               0 - Linear Horizontal;
+               1 - Linear Vertical;
+               2 - Linear 45 degrees;
+               3 - Linear 135 degrees;
+               4 - Circular Right;
+               5 - Circular Left;
+               6 - Total.
+        parallel (bool): Whether to use parallel computation.
+        num_cores (int, optional): Number of CPU cores to use for parallel computation.
+                                   Defaults to the number of available CPU cores.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, np.ndarray]: Total intensity, horizontal axis, and vertical axis.
+    """
+
+    nHarmMax = Kh.shape[1]
+
+    K = np.sqrt(Kh[:, 0]**2 + Kv[:, 0]**2)
+
+    CalcStrokesEnergy = energy_array[K != 0]
+    CalcStrokesEnergy /= CalcStrokesEnergy[0]*np.sqrt(2)
+    CalcStrokesEnergy /= CalcStrokesEnergy[np.argmin(np.abs(CalcStrokesEnergy - 1))]
+
+    if num_cores is None:
+        num_cores = mp.cpu_count()
+
+    if parallel:
+        chunk_size = 20
+        n_slices = len(energy_array)
+        chunks = [(energy_array[i:i + chunk_size],
+                   Kh[i:i + chunk_size, :],
+                   Kv[i:i + chunk_size, :],
+                   CalcStrokesEnergy,
+                   nHarmMax,
+                   even_harmonics,
+                   bl,
+                   eBeam,
+                   magFldCnt,
+                   h_slit_points,
+                   v_slit_points,
+                   radiation_characteristic,
+                   radiation_dependence,
+                   radiation_polarisation,
+                    ) for i in range(0, n_slices, chunk_size)]
+        
+        with mp.Pool() as pool:
+            results = pool.map(core_tc_with_srwlibCalcStokesUR, chunks)
+        tc = np.concatenate(results, axis=0)
+    else:
+        tc = core_tc_with_srwlibCalcStokesUR((energy_array,
+                                              Kh, 
+                                              Kv, 
+                                              CalcStrokesEnergy,
+                                              nHarmMax,
+                                              even_harmonics,
+                                              bl,
+                                              eBeam,
+                                              magFldCnt,
+                                              h_slit_points,
+                                              v_slit_points,
+                                              radiation_characteristic,
+                                              radiation_dependence,
+                                              radiation_polarisation))
+               
+    return tc
+
+def core_tc_with_srwlibCalcStokesUR(args):
+    """
+    Core function to calculate the intensity tuning curve using srwlib.CalcStokesUR.
+
+    Args:
+        args (tuple): Tuple containing:
+            - energy_array (np.ndarray): Array of photon energies [eV].
+            - Kh (np.ndarray): Horizontal deflection parameters for each harmonic.
+            - Kv (np.ndarray): Vertical deflection parameters for each harmonic.
+            - nHarmMax (int): Maximum number of harmonics.
+            - even_harmonics (bool): Whether to include even harmonics.
+            - bl (dict): Dictionary containing beamline parameters.
+            - eBeam (srwlib.SRWPartBeam): Electron beam properties.
+            - magFldCnt (srwlib.SRWLMagFldC): Magnetic field container.
+            - h_slit_points (int): Number of horizontal slit points.
+            - v_slit_points (int): Number of vertical slit points.
+            - radiation_characteristic (int): Radiation characteristic.
+            - radiation_dependence (int): Radiation dependence.
+            - radiation_polarisation (int): Polarisation component.
+
+    Returns:
+        np.ndarray: Array containing the calculated intensity or flux.
+    """
+
+    energy, Kh, Kv, CalcStrokesEnergy, nHarmMax, even_harmonics, bl, eBeam, magFldCnt, \
+        h_slit_points, v_slit_points, radiation_characteristic, radiation_dependence, \
+            radiation_polarisation = args
 
     htc = np.zeros((len(energy), nHarmMax+1))
 
     for nharm in range(nHarmMax):
-        if even_harmonics or (nharm + 1) % 2 != 0:
+        if (nharm + 1) % 2 == 0 and even_harmonics or (nharm + 1) % 2 != 0:
             for i, dE in enumerate(energy):
-                deflec_param = K[i, nharm]
+                deflec_param = np.sqrt(Kh[i, nharm]**2 + Kv[i, nharm]**2)
                 if deflec_param>0:
-                    bl['Kv'] = deflec_param
+                    bl['Kv'] = Kv[i, nharm]
+                    bl['Kh'] = Kh[i, nharm]                   
+                    magFldCnt = set_magnetic_structure(bl, id_type='u')
+                    e_array = CalcStrokesEnergy*dE
+                    flux = srwlibCalcStokesUR(
+                                              bl, 
+                                              eBeam, 
+                                              magFldCnt,
+                                              e_array,
+                                              dE,
+                                              h_slit_points=h_slit_points,
+                                              v_slit_points=v_slit_points,
+                                              radiation_polarisation=radiation_polarisation,
+                                              parallel=False,
+                                              num_cores=1
+                                              )
+                    # # RC 2024/12/04 - quick debug
+                    # import matplotlib.pyplot as plt
+                    # plt.plot(e_array, flux)
+                    # plt.plot(dE, flux[np.where(e_array == dE)][0], "o")
+                    # plt.show()
+                    htc[i, nharm+1] = flux[np.where(e_array == dE)][0]  
 
-                    magFldCnt = set_magnetic_structure(bl, id_type='u',
-                                            magnetic_measurement = magnetic_measurement, 
-                                            tabulated_undulator_mthd = tabulated_undulator_mthd)
-                    flux, h_axis, v_axis = srwlibCalcElecFieldSR(
-                                                bl, 
-                                                eBeam, 
-                                                magFldCnt,
-                                                dE,
-                                                h_slit_points=101,
-                                                v_slit_points=101,
-                                                radiation_characteristic=1, 
-                                                radiation_dependence=3,
-                                                radiation_polarisation=radiation_polarisation,
-                                                id_type='u',
-                                                parallel=False,
-                                                num_cores=1
-                                                )
-                    htc[i, nharm+1] = (np.sum(flux)*(h_axis[1]-h_axis[0])*(v_axis[1]-v_axis[0]))*1E6    
     return htc
 
 
-def tc_through_slit_srwlibsrwl_wfr_emit_prop_multi_e(args):
 
-    energy, K, nHarmMax, even_harmonics, bl, eBeam, magnetic_measurement, \
-        tabulated_undulator_mthd, radiation_polarisation, number_macro_electrons,\
-             file_name = args
 
-    htc = np.zeros((len(energy), nHarmMax+1))
+def tc_with_srwlibsrwl_wfr_emit_prop_multi_e():
+    pass
 
-    for nharm in range(nHarmMax):
-        if even_harmonics or (nharm + 1) % 2 != 0:
-            for i, dE in enumerate(energy):
-                deflec_param = K[i, nharm]
-                if deflec_param>0:
-                    bl['Kv'] = deflec_param
-                    magFldCnt = set_magnetic_structure(bl, id_type='u',
-                                            magnetic_measurement = magnetic_measurement, 
-                                            tabulated_undulator_mthd = tabulated_undulator_mthd)
+
+def core_tc_with_srwlibsrwl_wfr_emit_prop_multi_e():
+    pass
+
+
+
+
+# def tc_through_slit_srwlibsrwl_wfr_emit_prop_multi_e(args):
+
+#     energy, K, nHarmMax, even_harmonics, bl, eBeam, magnetic_measurement, \
+#         tabulated_undulator_mthd, radiation_polarisation, number_macro_electrons,\
+#              file_name = args
+
+#     htc = np.zeros((len(energy), nHarmMax+1))
+
+#     for nharm in range(nHarmMax):
+#         if even_harmonics or (nharm + 1) % 2 != 0:
+#             for i, dE in enumerate(energy):
+#                 deflec_param = K[i, nharm]
+#                 if deflec_param>0:
+#                     bl['Kv'] = deflec_param
+#                     magFldCnt = set_magnetic_structure(bl, id_type='u',
+#                                             magnetic_measurement = magnetic_measurement, 
+#                                             tabulated_undulator_mthd = tabulated_undulator_mthd)
                     
-                    htc[i, nharm+1], h_axis, v_axis = srwlibsrwl_wfr_emit_prop_multi_e(
-                                                            bl, 
-                                                            eBeam,
-                                                            magFldCnt,
-                                                            dE,
-                                                            h_slit_points=1,
-                                                            v_slit_points=1,
-                                                            radiation_polarisation=radiation_polarisation,
-                                                            id_type='u',
-                                                            number_macro_electrons=number_macro_electrons,
-                                                            aux_file_name=file_name,
-                                                            parallel=False,
-                                                            num_cores=1
-                                                            )  
+#                     htc[i, nharm+1], h_axis, v_axis = srwlibsrwl_wfr_emit_prop_multi_e(
+#                                                             bl, 
+#                                                             eBeam,
+#                                                             magFldCnt,
+#                                                             dE,
+#                                                             h_slit_points=1,
+#                                                             v_slit_points=1,
+#                                                             radiation_polarisation=radiation_polarisation,
+#                                                             id_type='u',
+#                                                             number_macro_electrons=number_macro_electrons,
+#                                                             aux_file_name=file_name,
+#                                                             parallel=False,
+#                                                             num_cores=1
+#                                                             )  
 
 #***********************************************************************************
 # auxiliary functions accelerator functions
@@ -1074,8 +1362,8 @@ def get_undulator_max_harmonic_number(resonant_energy: float, photonEnergyMax: f
         int: The maximum harmonic number.
     """
     srw_max_harmonic_number = int(photonEnergyMax / resonant_energy * 2.5)
-    if srw_max_harmonic_number < 5:
-        srw_max_harmonic_number = 5
+    if srw_max_harmonic_number < 15:
+        srw_max_harmonic_number = 15
     return srw_max_harmonic_number
 
 
