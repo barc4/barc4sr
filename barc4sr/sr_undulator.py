@@ -585,6 +585,9 @@ def emitted_radiation(file_name: str,
         else:
             print(f'{calc_txt} ... ', end='')
 
+        if file_name is None:
+            aux_file_name = 'emitted_radiation'
+
         intensity, h_axis, v_axis = srwlibsrwl_wfr_emit_prop_multi_e(bl, 
                                                                      eBeam,
                                                                      magFldCnt,
@@ -594,7 +597,7 @@ def emitted_radiation(file_name: str,
                                                                      radiation_polarisation=radiation_polarisation,
                                                                      id_type='u',
                                                                      number_macro_electrons=number_macro_electrons,
-                                                                     aux_file_name=file_name,
+                                                                     aux_file_name=aux_file_name,
                                                                      parallel=parallel,
                                                                      num_cores=num_cores) 
         print('completed')
@@ -741,6 +744,9 @@ def emitted_wavefront(file_name: str,
         else:
             print(f'{calc_txt} ... ', end='')
 
+        if file_name is None:
+            aux_file_name = 'emitted_radiation'
+
         intensity, h_axis, v_axis = srwlibsrwl_wfr_emit_prop_multi_e(bl, 
                                                                      eBeam,
                                                                      magFldCnt,
@@ -750,7 +756,7 @@ def emitted_wavefront(file_name: str,
                                                                      radiation_polarisation=radiation_polarisation,
                                                                      id_type = 'u',
                                                                      number_macro_electrons=number_macro_electrons,
-                                                                     aux_file_name=file_name,
+                                                                     aux_file_name=aux_file_name,
                                                                      parallel=False,
                                                                      num_cores=num_cores,
                                                                      srApprox=1) 
@@ -953,6 +959,11 @@ def tc_spectrum(file_name: str,
                                                      radiation_polarisation=radiation_polarisation,
                                                      parallel=parallel,
                                                      num_cores=num_cores)
+        
+    # -----------------------------------------
+    # Flux through Finite Aperture 
+
+    # simplified partially-coherent simulation
     if calculation == 1:
         calc_txt = calc_txt.replace("___CALC___", "simplified / srwlibCalcStokesUR")
         if parallel:
@@ -975,6 +986,34 @@ def tc_spectrum(file_name: str,
                                         parallel=parallel,
                                         num_cores=num_cores)
         
+    # accurate partially-coherent simulation
+    if calculation == 2:
+        warnings.warn("Very slow calculation - consider setting the number of macro electrons to 1.", UserWarning)
+
+        calc_txt = calc_txt.replace("___CALC___", "accurate")
+        if parallel:
+            print(f'{calc_txt} in parallel... ')
+        else:
+            print(f'{calc_txt} ... ', end='')
+
+        if file_name is None:
+            aux_file_name = 'emitted_radiation'
+
+        tc, h_axis, v_axis = tc_with_srwlibsrwl_wfr_emit_prop_multi_e(bl, 
+                                        eBeam, 
+                                        magFldCnt,
+                                        energy,
+                                        Kh,
+                                        Kv,
+                                        even_harmonics,
+                                        h_slit_points=1,
+                                        v_slit_points=1,
+                                        radiation_polarisation=radiation_polarisation,
+                                        number_macro_electrons=number_macro_electrons,
+                                        aux_file_name=file_name,
+                                        parallel=parallel,
+                                        num_cores=num_cores)
+
     tc[:,0] = np.max(tc,axis=1)
     Kh = np.insert(Kh, 0, 0, axis=1)
     Kv = np.insert(Kv, 0, 0, axis=1)
@@ -990,71 +1029,6 @@ def tc_spectrum(file_name: str,
 def tc_emitted_radiation(nHarmMax: int,
                          **kwargs) -> Dict:
     pass
-
-
-
-
-#     if calculation == 2:
-#         warnings.warn("Very slow calculation - consider setting the number of macro electrons to 1.", UserWarning)
-
-#         calc_txt = calc_txt.replace("___CALC___", "accurate")
-#         if parallel:
-#             print(f'{calc_txt} in parallel... ')
-#             n_slices = len(energy)
-#             chunks = [(energy[i:i + chunk_size],
-#                         K[i:i + chunk_size, :],
-#                         nHarmMax, 
-#                         even_harmonics,
-#                         bl,
-#                         eBeam,
-#                         magnetic_measurement,
-#                         tabulated_undulator_mthd,
-#                         radiation_polarisation,
-#                         number_macro_electrons, 
-#                         file_name
-#                     ) for i in range(0, n_slices, chunk_size)]
-            
-#             with mp.Pool() as pool:
-#                 results = pool.map(tc_through_slit_srwlibsrwl_wfr_emit_prop_multi_e, chunks)
-#             tc = np.concatenate(results, axis=0)
-#         else:
-#             print(f'{calc_txt} ... ', end='')
-
-
-#         for nharm in range(nHarmMax):
-#             if even_harmonics or (nharm + 1) % 2 != 0:
-#                 for i, dE in enumerate(energy):
-#                     deflec_param = K[i, nharm]
-#                     if deflec_param>0:
-#                         bl['Kv'] = deflec_param
-#                         magFldCnt = set_magnetic_structure(bl, id_type='u',
-#                                                 magnetic_measurement = magnetic_measurement, 
-#                                                 tabulated_undulator_mthd = tabulated_undulator_mthd)
-                        
-#                         tc[i, nharm+1], h_axis, v_axis = srwlibsrwl_wfr_emit_prop_multi_e(
-#                                                                 bl, 
-#                                                                 eBeam,
-#                                                                 magFldCnt,
-#                                                                 dE,
-#                                                                 h_slit_points=1,
-#                                                                 v_slit_points=1,
-#                                                                 radiation_polarisation=radiation_polarisation,
-#                                                                 id_type='u',
-#                                                                 number_macro_electrons=number_macro_electrons,
-#                                                                 aux_file_name=file_name,
-#                                                                 parallel=parallel,
-#                                                                 num_cores=num_cores
-#                                                                 )  
-
-#     tc[:,0] = np.max(tc,axis=1)
-#     K = np.insert(K, 0, 0, axis=1)
-
-#     write_tuning_curve(file_name, tc, K, energy)
-
-#     print(f"{function_txt} finished.")
-#     print_elapsed_time(t0)
-
-#     return {'energy':energy, 'flux':tc, 'K': K}
 
 
 #***********************************************************************************
