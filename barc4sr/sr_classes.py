@@ -31,6 +31,7 @@ CHARGE = physical_constants["atomic unit of charge"][0]
 MASS = physical_constants["electron mass"][0]
 PI = np.pi
 
+
 class ElectronBeam(object):
     """
     Class for entering the electron beam parameters - this is based on the SRWLPartBeam class.
@@ -203,6 +204,7 @@ class ElectronBeam(object):
         for i in (vars(self)):
             print("{0:10}: {1}".format(i, vars(self)[i]))
 
+
 class MagneticStructure(object):
     """
     Class for defining magnetic structure parameters, including undulators, wigglers, and bending magnets.
@@ -282,15 +284,13 @@ class MagneticStructure(object):
             self.extraction_angle = kwargs.get("extraction_angle", None)
             self.critical_energy = kwargs.get("critical_energy", None)
 
-    # -------------------------------------        
-    # auxiliary functions
-    # ------------------------------------- 
     def print_attributes(self) -> None:
         """
         Prints all attribute of object
         """
         for i in (vars(self)):
             print("{0:10}: {1}".format(i, vars(self)[i]))
+
 
 class SynchrotronSource(object):
     """
@@ -340,6 +340,7 @@ class SynchrotronSource(object):
 
         write_syned_file(json_file, light_source_name, self.ElectronBeam, self.MagneticStructure)
 
+
 class UndulatorSource(SynchrotronSource):
     """
     Class representing an undulator radiation source, which combines an electron beam and 
@@ -388,8 +389,9 @@ class UndulatorSource(SynchrotronSource):
             raise ValueError("Please, provide either the wavelength [m], the magnetic fields [T] or the deflection parameters Kx and/or Ky.")
 
         if wavelength is not None:
-            self.set_resonant_energy(energy=energy_wavelength(wavelength, unity='m'), harmonic=self.harmonic,
-                                    eBeamEnergy=self.energy_in_GeV, direction=direction, verbose=verbose)
+            self.set_resonant_energy(energy=energy_wavelength(wavelength, unity='m'), 
+                                     harmonic=self.harmonic, direction=direction, 
+                                     verbose=verbose)
             self.wavelength = wavelength
         else:
             if self.B_horizontal is not None or self.B_vertical is not None:
@@ -411,11 +413,11 @@ class UndulatorSource(SynchrotronSource):
         if verbose:
             self.print_rms()
 
-        self.set_filament_emittance(verbose=verbose, wavelength=wavelength, mth=mth_fillament_emittance, L=L)
+        self.set_filament_emittance(verbose=verbose, wavelength=wavelength, mth=mth_fillament_emittance)
         self.set_waist(verbose=verbose,center_undulator=cund, center_straight_section=css)
         self.set_emittance(verbose=verbose, mth=mth_emittance)
 
-    def set_resonant_energy(self, energy: float, harmonic: int, eBeamEnergy: float, direction: str,
+    def set_resonant_energy(self, energy: float, harmonic: int, direction: str,
                             verbose: bool=False) -> None:
         """
         Sets the K-value based on the resonant energy and harmonic.
@@ -423,7 +425,6 @@ class UndulatorSource(SynchrotronSource):
         Args:
             energy (float): Resonant energy in electron volts (eV).
             harmonic (int): Harmonic number.
-            eBeamEnergy (float): Energy of the electron beam in GeV.
             direction (str): Direction of the undulator ('v' for vertical, 'h' for horizontal, 'b' for both).
             verbose (bool): If True, prints additional information. Default is False.
 
@@ -432,7 +433,7 @@ class UndulatorSource(SynchrotronSource):
             raise ValueError("invalid operation for this synchrotron radiation source")
         else:
             self.wavelength = energy_wavelength(energy, 'eV')
-            gamma = get_gamma(eBeamEnergy)
+            gamma = get_gamma(self.energy_in_GeV)
             K = np.sqrt(2)*np.sqrt(((2 * harmonic * self.wavelength * gamma ** 2)/self.period_length)-1)
 
             if "v" in direction:
@@ -448,7 +449,7 @@ class UndulatorSource(SynchrotronSource):
                 raise ValueError("invalid value: direction should be in ['v','h','b']")
     
             if verbose:
-                print(f"ondulator resonant energy set to {energy:.3f} eV (harm. n°: {harmonic}) with:\n\
+                print(f"undulator resonant energy set to {energy:.3f} eV (harm. n°: {harmonic}) with:\n\
             >> Kh: {self.K_horizontal:.6f}\n\
             >> Kv: {self.K_vertical:.6f}")
 
@@ -485,19 +486,18 @@ class UndulatorSource(SynchrotronSource):
             if K_vertical is not None:
                 self.B_vertical = K_vertical * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
 
-    def print_resonant_energy(self, harmonic: int, eBeamEnergy: float) -> None:
+    def print_resonant_energy(self, harmonic: int) -> None:
         """
         Prints the resonant energy based on the provided K-value, harmonic number, and electron beam energy.
 
         Args:
             harmonic (int): The harmonic number.
-            eBeamEnergy (float): Energy of the electron beam in GeV.
         """
         if self.CLASS_NAME.startswith(('B', 'W')):
             raise ValueError("invalid operation for this synchrotron radiation source")
         else:
             K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
-            gamma = get_gamma(eBeamEnergy)
+            gamma = get_gamma(self.energy_in_GeV)
             wavelength = self.period_length/(2 * harmonic * gamma ** 2)*(1+(K**2)/2) 
             energy = energy_wavelength(wavelength, 'm')
 
@@ -548,19 +548,18 @@ class UndulatorSource(SynchrotronSource):
         """
 
         verbose = kwargs.get('verbose', False)
-        wavelength = kwargs.get('wavelength', self.wavelength)
         mth = kwargs.get('mth', 0)
-        L = kwargs.get('L', self.period_length*self.number_of_periods)
+        L = self.period_length*self.number_of_periods
 
         # Elleaume - doi:10.4324/9780203218235 (Chapter 2.5 and 2.6)
         if mth == 0:
-            self.sigma_u =  2.74*np.sqrt(wavelength*L)/(4*PI)
-            self.sigma_up = 0.69*np.sqrt(wavelength/L)
+            self.sigma_u =  2.74*np.sqrt(self.wavelength*L)/(4*PI)
+            self.sigma_up = 0.69*np.sqrt(self.wavelength/L)
 
         # Kim (laser mode approximation) - doi:10.1016/0168-9002(86)90048-3
         elif mth == 1:
-            self.sigma_u = np.sqrt(wavelength*L)/(4*PI)
-            self.sigma_up = np.sqrt(wavelength/L)
+            self.sigma_u = np.sqrt(self.wavelength*L)/(4*PI)
+            self.sigma_up = np.sqrt(self.wavelength/L)
         else:
             raise ValueError("Not a valid method for emittance calculation.")
         
