@@ -11,7 +11,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '12/MAR/2024'
-__changed__ = '25/NOV/2024'
+__changed__ = '07/Jan/2025'
 
 import multiprocessing as mp
 import os
@@ -70,7 +70,6 @@ Z0 = physical_constants["characteristic impedance of vacuum"][0]
 EPSILON_0 = physical_constants["vacuum electric permittivity"][0] 
 PI = np.pi
 
-
 #***********************************************************************************
 # electron trajectory
 #***********************************************************************************
@@ -118,7 +117,6 @@ def electron_trajectory(file_name: str, **kwargs) -> Dict:
     if light_source is not None:
         bl = barc4sr_dictionary(light_source, magnetic_measurement, 10, 1e-3, 1e-3, 0, 0)
 
-   
     eBeam, magFldCnt, eTraj = set_light_source(file_name, bl, True, 'u',
                                                magnetic_measurement=magnetic_measurement,
                                                tabulated_undulator_mthd=tabulated_undulator_mthd)
@@ -702,7 +700,7 @@ def emitted_wavefront(file_name: str,
                                                tabulated_undulator_mthd=tabulated_undulator_mthd)
     
     # -----------------------------------------
-    # Spatial limited monochromatic wavefront (total pol.)
+    # Spatially limited monochromatic wavefront
         
     # simplified partially-coherent simulation    
     if calculation == 0:
@@ -763,7 +761,9 @@ def emitted_wavefront(file_name: str,
         
         phase = np.zeros(intensity.shape)
         print('completed')
-    
+    # dx = (h_axis[1]-h_axis[0])*1E3
+    # dy = (v_axis[1]-v_axis[0])*1E3
+    # intensity *= dx*dy
     wftDict = write_wavefront(file_name, intensity, phase, h_axis, v_axis)
 
     print(f"{function_txt} finished.")
@@ -1010,7 +1010,7 @@ def tc_spectrum(file_name: str,
                                         v_slit_points=1,
                                         radiation_polarisation=radiation_polarisation,
                                         number_macro_electrons=number_macro_electrons,
-                                        aux_file_name=file_name,
+                                        aux_file_name=aux_file_name,
                                         parallel=parallel,
                                         num_cores=num_cores)
 
@@ -1510,7 +1510,7 @@ def power_through_slit(hor_slit: float, ver_slit: float, observation_point: floa
     CumPow = d2P_d2phi.sum()*dx_step*dy_step
 
     if verbose:
-        print(f"Power emitted by the undulator throgh a {hor_slit_in_rad*1E3} x {ver_slit_in_rad*1E3} mrad² slit: {CumPow:.3f} W")
+        print(f"Power emitted by the undulator thrugh a {hor_slit_in_rad*1E3:.3f} x {ver_slit_in_rad*1E3:.3f} mrad² slit: {CumPow:.3f} W")
 
     PowDenSRdict = {
         "axis": {

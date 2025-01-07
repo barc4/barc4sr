@@ -11,33 +11,46 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '12/MAR/2024'
-__changed__ = '19/JUL/2024'
+__changed__ = '06/JAN/2025'
 
+import multiprocessing as mp
 import os
 import time
+import warnings
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import h5py as h5
 import numpy as np
 import scipy.integrate as integrate
+from joblib import Parallel, delayed
+from numba import njit, prange
 from scipy.constants import physical_constants
+from scipy.optimize import curve_fit
+from scipy.signal import find_peaks
 
-from barc4sr.aux_processing import (
-    write_emitted_radiation,
-    write_power_density,
-    write_spectrum,
-    write_wavefront,
-)
-from barc4sr.aux_utils import (
+from barc4sr.aux_energy import (
     energy_wavelength,
     generate_logarithmic_energy_values,
     get_gamma,
-    print_elapsed_time,
+)
+from barc4sr.aux_processing import (
+    write_electron_trajectory,
+    write_emitted_radiation,
+    write_magnetic_field,
+    write_power_density,
+    write_spectrum,
+    write_tuning_curve,
+    write_wavefront,
+)
+from barc4sr.aux_syned import barc4sr_dictionary, syned_dictionary
+from barc4sr.aux_time import print_elapsed_time
+from barc4sr.aux_utils import (
     set_light_source,
     srwlibCalcElecFieldSR,
+    srwlibCalcStokesUR,
     srwlibsrwl_wfr_emit_prop_multi_e,
-    syned_dictionary,
-    unwrap_wft_phase,
+    tc_with_srwlibCalcElecFieldSR,
+    tc_with_srwlibCalcStokesUR,
+    tc_with_srwlibsrwl_wfr_emit_prop_multi_e,
 )
 
 try:
@@ -53,8 +66,10 @@ PLANCK = physical_constants["Planck constant"][0]
 LIGHT = physical_constants["speed of light in vacuum"][0]
 CHARGE = physical_constants["atomic unit of charge"][0]
 MASS = physical_constants["electron mass"][0]
+Z0 = physical_constants["characteristic impedance of vacuum"][0]
+EPSILON_0 = physical_constants["vacuum electric permittivity"][0] 
 PI = np.pi
-RMS = np.sqrt(2)/2
+
 #***********************************************************************************
 # Bending magnet radiation
 #***********************************************************************************

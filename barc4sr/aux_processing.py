@@ -1043,9 +1043,9 @@ def write_wavefront(file_name: str, intensity:np.array, phase:np.array, h_axis:n
 
 def read_wavefront(file_name: str) -> Dict:
     """
-    Reads wavefront data from an HDF5  file and processes it.
+    Reads wavefront data from an HDF5 or JSON (SPECTRA) file and processes it.
 
-    This function reads wavefront data from an HDF5 file (barc4sr) file specified by 
+    This function reads wavefront data from an HDF5 file (barc4sr) or JSON (SPECTRA) file specified by 
     'file_name'. It extracts the intensity and phase maps along with  corresponding x 
     and y axes from the file.
 
@@ -1065,6 +1065,29 @@ def read_wavefront(file_name: str) -> Dict:
 
         x = f["XOPPY_WAVEFRONT"]["Phase"]["axis_x"][()]
         y = f["XOPPY_WAVEFRONT"]["Phase"]["axis_y"][()]
+
+    elif file_name.endswith("json"):
+        f = open(file_name)
+        data = json.load(f)
+        f.close()
+
+        intensity = np.reshape(data['Output']['data'][2],
+                            (len(data['Output']['data'][1]), 
+                             len(data['Output']['data'][0])))
+        x = np.asarray(data['Output']['data'][0])*1e-3
+        y = np.asarray(data['Output']['data'][1])*1e-3
+        if "mr" in data['Output']['units'][2]:
+            dist = data["Input"]["Configurations"]["Distance from the Source (m)"]
+            dx = x[1]-x[0]
+            dy = y[1]-y[0]
+
+            dtx = np.arctan(dx/dist)*1e3    # mrad
+            dty = np.arctan(dy/dist)*1e3
+            intensity *= (dtx*dty)/(dx*dy*1e3*1e3)
+
+        phase = np.zeros(intensity.shape)
+    else:
+        raise ValueError("Invalid file extension.")
         
     wftDict = {
         "axis": {
