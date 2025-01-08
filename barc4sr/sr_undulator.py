@@ -771,6 +771,8 @@ def emitted_wavefront(file_name: str,
 
     return wftDict
 
+def srw_wavefront():
+    pass
 
 def coherent_modes():
     pass
@@ -1313,7 +1315,6 @@ def get_B_from_K(K: float, und_per: float) -> float:
     """
     B = K * 2 * PI * MASS * LIGHT/(CHARGE * und_per)
     return B
-
 
 #***********************************************************************************
 # undulator auxiliary functions - undulator emission

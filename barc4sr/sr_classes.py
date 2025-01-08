@@ -659,7 +659,7 @@ class BendingMagnetSource(SynchrotronSource):
     """
     def __init__(self, **kwargs) -> None:
         """
-        Initializes an instance of the UndulatorSource class.
+        Initializes an instance of the BendingMagnet class.
 
         Args:
             electron_beam (ElectronBeam): An instance of the ElectronBeam class 

@@ -219,7 +219,7 @@ def set_magnetic_structure(bl: dict,
     if id_type.startswith('bm'):
         # RC:2025JAN08 TODO: recheck magfield central position/extraction angle for edge radiation
         bm = srwlib.SRWLMagFldM()
-        bm.G = bl["Bv"]
+        bm.G = bl["B"]
         bm.m = 1         # multipole order: 1 for dipole, 2 for quadrupole, 3 for sextupole, 4 for octupole
         bm.n_or_s = 'n'  # normal ('n') or skew ('s')
         bm.Leff = bl["Leff"]
