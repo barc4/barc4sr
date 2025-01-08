@@ -11,7 +11,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '12/MAR/2024'
-__changed__ = '06/JAN/2025'
+__changed__ = '07/JAN/2025'
 
 import multiprocessing as mp
 import os
@@ -69,6 +69,65 @@ MASS = physical_constants["electron mass"][0]
 Z0 = physical_constants["characteristic impedance of vacuum"][0]
 EPSILON_0 = physical_constants["vacuum electric permittivity"][0] 
 PI = np.pi
+
+#***********************************************************************************
+# electron trajectory
+#***********************************************************************************
+
+def electron_trajectory(file_name: str, **kwargs) -> Dict:
+    """
+    Calculate undulator electron trajectory using SRW.
+
+    Args:
+        file_name (str): The name of the output file.
+
+
+    Optional Args (kwargs):
+        json_file (optional): The path to the SYNED JSON configuration file.
+        light_source (optional): barc4sr.aux_utils.SynchrotronSource or inheriting class
+        magnetic_measurement (Optional[str]): Path to the file containing magnetic measurement data.
+            Overrides SYNED undulator data. Default is None.
+
+
+    Returns:
+        Dict: A dictionary containing arrays of photon energy and flux.
+    """
+
+    t0 = time.time()
+
+    function_txt = "Undulator electron trajectory using SRW:"
+
+    print(f"{function_txt} please wait...")
+
+    json_file = kwargs.get('json_file', None)
+    light_source = kwargs.get('light_source', None)
+
+    if json_file is None and light_source is None:
+        raise ValueError("Please, provide either json_file or light_source (see function docstring)")
+    if json_file is not None and light_source is not None:
+        raise ValueError("Please, provide either json_file or light_source - not both (see function docstring)")
+
+    magfield_central_position = kwargs.get('magfield_central_position', 0)
+    magnetic_measurement = kwargs.get('magnetic_measurement', None)
+    ebeam_initial_position = kwargs.get('ebeam_initial_position', 0)
+
+    if json_file is not None:
+        bl = syned_dictionary(json_file, magnetic_measurement, 10, 1e-3, 1e-3, 0, 0)
+    if light_source is not None:
+        bl = barc4sr_dictionary(light_source, magnetic_measurement, 10, 1e-3, 1e-3, 0, 0)
+
+    eBeam, magFldCnt, eTraj = set_light_source(file_name, bl, True, 'bm',
+                                               magfield_central_position=magfield_central_position,
+                                               magnetic_measurement=magnetic_measurement,
+                                               ebeam_initial_position=ebeam_initial_position
+                                               )
+
+    print('completed')
+    print_elapsed_time(t0)
+
+    eTrajDict = write_electron_trajectory(file_name, eTraj)
+
+    return eTrajDict
 
 #***********************************************************************************
 # Bending magnet radiation

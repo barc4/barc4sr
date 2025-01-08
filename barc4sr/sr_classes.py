@@ -16,7 +16,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
-__changed__ = '07/Jan/2025'
+__changed__ = '07/JAN/2025'
 
 import numpy as np
 from scipy.constants import physical_constants
@@ -619,7 +619,8 @@ class UndulatorSource(SynchrotronSource):
             
             def _qs(es:float) -> float:
                 qs = 2*(_qa(es/4))**(2/3)
-                if qs<2: qs=2
+                if qs<2: 
+                    qs=2
                 return qs
             
             sigma_x = np.sqrt(self.sigma_u**2*_qs(self.energy_spread) + self.e_x**2)
@@ -689,7 +690,7 @@ class BendingMagnetSource(SynchrotronSource):
         if critical_wavelength is not None:
             self.set_bm_B_from_critical_energy(energy=energy_wavelength(critical_wavelength, unity='m'), 
                                                verbose=verbose)
-            self.critical_energy = energy_wavelength(critical_wavelength, unity='m')
+            self.MagneticStructure.critical_energy = energy_wavelength(critical_wavelength, unity='m')
         else:
             if self.magnetic_field is not None:
                 self.set_bm_radius_from_B(magnetic_field=self.magnetic_field, 
@@ -707,9 +708,9 @@ class BendingMagnetSource(SynchrotronSource):
             critical energy (float): critical energy for a bending magnet based (in eV).
             verbose (bool): If True, prints additional information. Default is False.
         """
-        self.critical_energy = energy
+        self.MagneticStructure.critical_energy = energy
         gamma = get_gamma(self.energy_in_GeV)
-        self.magnetic_field = (energy*4*PI*MASS)/(3*PLANCK*gamma**2)
+        self.MagneticStructure.magnetic_field = (energy*4*PI*MASS)/(3*PLANCK*gamma**2)
         self.set_bm_radius_from_B(self.magnetic_field, verbose)
 
         if verbose:
@@ -728,11 +729,11 @@ class BendingMagnetSource(SynchrotronSource):
             verbose (bool): If True, prints additional information. Default is False.
         """
 
-        self.magnetic_field = magnetic_field
+        self.MagneticStructure.magnetic_field = magnetic_field
         gamma = get_gamma(self.energy_in_GeV)
         e_speed = LIGHT * np.sqrt(1-1/gamma)
-        self.radius = gamma * MASS * e_speed /(CHARGE * magnetic_field)
-        self.critical_energy = self.get_critical_energy()
+        self.MagneticStructure.radius = gamma * MASS * e_speed /(CHARGE * magnetic_field)
+        self.MagneticStructure.critical_energy = self.get_critical_energy()
 
         if verbose:
             print(f"Bending magnet critial energy energy set to {self.critical_energy:.3f} eV with:\n\
@@ -749,11 +750,11 @@ class BendingMagnetSource(SynchrotronSource):
             verbose (bool): If True, prints additional information. Default is False.
 
         """
-        self.radius = radius
+        self.MagneticStructure.radius = radius
         gamma = get_gamma(self.energy_in_GeV)
         e_speed = LIGHT * np.sqrt(1-1/gamma)
-        self.magnetic_field = gamma * MASS * e_speed /(CHARGE * radius)
-        self.critical_energy = self.get_critical_energy()
+        self.MagneticStructure.magnetic_field = gamma * MASS * e_speed /(CHARGE * radius)
+        self.MagneticStructure.critical_energy = self.get_critical_energy()
 
         if verbose:
             print(f"Bending magnet critial energy energy set to {self.critical_energy:.3f} eV with:\n\
@@ -776,3 +777,29 @@ class BendingMagnetSource(SynchrotronSource):
 
         energy = self.get_critical_energy()
         print(f">> critical energy {energy:.2f} eV")
+
+    def get_B_central_position(self, **kwargs):
+        """
+        Returns magnetic field central position to be used for the x-ray extraction.
+        Extraction at 0 rad is towards the end of the magnetic field, while the largest
+        angle is given by BM (length/radius) [radians] and defines the beginning of the 
+        magnetic field.
+        Keyword Args:
+            verbose (bool): If True, prints additional information. Default is False.
+            extraction_angle (floar): Extraction angle in radians. If provided, overwrites 
+                self.MagneticStructure.extraction_angle
+        """
+        verbose = kwargs.get('verbose', False)
+
+        self.MagneticStructure.extraction_angle = kwargs.get('extraction_angle',
+                                                              self.MagneticStructure.extraction_angle)
+
+        half_arc = 0.5*self.length/self.radius
+        if self.extraction_angle is None:
+            self.MagneticStructure.extraction_angle = half_arc
+        zpos = (half_arc - self.extraction_angle)*self.radius
+        if verbose:
+            print(f"Arc segment of {2*half_arc:.3f} radians (L={self.length:.3f} m/R={self.radius:.3f} m).")
+            print(f"Extraction at {-zpos:.3f} m from the centre of the bending magnet.")
+            print(f">> {(0.5*self.length - zpos):.3f} m from the BM entrance.")
+        return zpos

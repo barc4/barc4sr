@@ -80,7 +80,7 @@ def set_light_source(file_name: str,
     print('> Generating the electron beam ... ', end='')
     eBeam = set_electron_beam(bl,
                               id_type,
-                              initial_position=ebeam_initial_position)
+                              ebeam_initial_position=ebeam_initial_position)
     print('completed')
     # ----------------------------------------------------------------------------------
     # definition of magnetic structure
@@ -124,7 +124,7 @@ def set_electron_beam(bl: dict,
         srwlib.SRWLPartBeam: Electron beam object initialized with specified parameters.
 
     """
-    initial_position = kwargs.get('initial_position', 0)
+    ebeam_initial_position = kwargs.get('ebeam_initial_position', 0)
 
     eBeam = srwlib.SRWLPartBeam()
     eBeam.Iavg = bl['ElectronCurrent']  # average current [A]
@@ -133,7 +133,7 @@ def set_electron_beam(bl: dict,
     if id_type.startswith('u'):
         eBeam.partStatMom1.z = - bl['PeriodID'] * (bl['NPeriods'] + 4) / 2  # initial longitudinal positions
     else:
-        eBeam.partStatMom1.z = initial_position
+        eBeam.partStatMom1.z = ebeam_initial_position
     eBeam.partStatMom1.xp = 0  # initial relative transverse divergence [rad]
     eBeam.partStatMom1.yp = 0
     eBeam.partStatMom1.gamma = get_gamma(bl['ElectronEnergy'])
@@ -217,7 +217,7 @@ def set_magnetic_structure(bl: dict,
                 return magFldCntHarm
             
     if id_type.startswith('bm'):
-
+        # RC:2025JAN08 TODO: recheck magfield central position/extraction angle for edge radiation
         bm = srwlib.SRWLMagFldM()
         bm.G = bl["Bv"]
         bm.m = 1         # multipole order: 1 for dipole, 2 for quadrupole, 3 for sextupole, 4 for octupole
