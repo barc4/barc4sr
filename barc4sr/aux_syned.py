@@ -108,9 +108,11 @@ def syned_dictionary(json_file: str, magnetic_measurement: Union[str, None], obs
     if data["magnetic_structure"]["CLASS_NAME"].startswith("B"):
         beamline['Bh'] = data["magnetic_structure"]["B_horizontal"]
         beamline['Bv'] = data["magnetic_structure"]["B_vertical"]
+        beamline['B'] = data["magnetic_structure"]["magnetic_field"]
         beamline['R'] = data["magnetic_structure"]["radius"]
         beamline['Leff'] = data["magnetic_structure"]["length"]
         beamline['Ledge'] = data["magnetic_structure"]["length_edge"]
+        beamline['ExtAng'] = data["magnetic_structure"]["extraction_angle"]
     # radiation observation
     beamline['distance'] = observation_point
     beamline['slitH'] = hor_slit
@@ -170,9 +172,12 @@ def barc4sr_dictionary(light_source: object, magnetic_measurement: Union[str, No
     if light_source.MagneticStructure.CLASS_NAME.startswith("B"):
         beamline['Bh'] = light_source.MagneticStructure.B_horizontal
         beamline['Bv'] = light_source.MagneticStructure.B_vertical
+        beamline['B'] = light_source.MagneticStructure.magnetic_field
         beamline['R'] = light_source.MagneticStructure.radius
         beamline['Leff'] = light_source.MagneticStructure.length
         beamline['Ledge'] = light_source.MagneticStructure.length_edge
+        beamline['ExtAng'] = light_source.MagneticStructure.extraction_angle
+
     # radiation observation
     beamline['distance'] = observation_point
     beamline['slitH'] = hor_slit

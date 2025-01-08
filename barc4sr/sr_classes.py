@@ -1,7 +1,14 @@
 #!/bin/python
 
 """
-This module provides the barc4sr classes
+This module provides the barc4sr classes:
+
+- ElectronBeam
+- MagneticStructure
+- SynchrotronSource
+- UndulatorSource(SynchrotronSource)
+- BendingMagnetSource(SynchrotronSource)
+
 """
 
 __author__ = ['Rafael Celestre']
@@ -9,7 +16,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
-__changed__ = '25/NOV/2024'
+__changed__ = '07/JAN/2025'
 
 import numpy as np
 from scipy.constants import physical_constants
@@ -23,6 +30,7 @@ LIGHT = physical_constants["speed of light in vacuum"][0]
 CHARGE = physical_constants["atomic unit of charge"][0]
 MASS = physical_constants["electron mass"][0]
 PI = np.pi
+
 
 class ElectronBeam(object):
     """
@@ -196,6 +204,7 @@ class ElectronBeam(object):
         for i in (vars(self)):
             print("{0:10}: {1}".format(i, vars(self)[i]))
 
+
 class MagneticStructure(object):
     """
     Class for defining magnetic structure parameters, including undulators, wigglers, and bending magnets.
@@ -234,8 +243,10 @@ class MagneticStructure(object):
                     - radius (float): Radius of curvature (in meters). Effective if > 0.
                     - length (float): Effective length of the magnet (in meters). Effective if > 0.
                     - length_edge (float): Soft edge length for field variation (10% to 90%) in meters. 
-                      Defaults to 0. Assumes a fringe field dependence of 
-                      G / (1 + ((z - zc) / d)^2)^2.
+                                           Defaults to 0. Assumes a fringe field dependence of 
+                                           G / (1 + ((z - zc) / d)^2)^2.
+                    - extraction_angle (float):
+                    - critical_energy (float):
 
         Raises:
             ValueError: If an invalid magnetic structure type is provided.
@@ -264,169 +275,22 @@ class MagneticStructure(object):
             self.number_of_periods = kwargs.get("number_of_periods", None)
             self.CLASS_NAME = "Undulator" if mag_structure in und else "Wiggler"
 
-            if self.B_horizontal is not None or self.B_vertical is not None:
-                self.set_K_from_magnetic_field(self.B_horizontal, self.B_vertical)
-
-            if self.K_horizontal is not None or self.K_vertical is not None:
-                self.set_magnetic_field_from_K(self.K_horizontal, self.K_vertical)
-
         if mag_structure in bm:
             self.CLASS_NAME = "BendingMagnet"
             self.magnetic_field = self.B_vertical
             self.radius = kwargs.get("radius", None)
             self.length = kwargs.get("length", None)
             self.length_edge = kwargs.get("length_edge", 0)
+            self.extraction_angle = kwargs.get("extraction_angle", None)
+            self.critical_energy = kwargs.get("critical_energy", None)
 
-    # -------------------------------------        
-    # undulator auxiliary functions
-    # -------------------------------------        
-    def set_resonant_energy(self, energy: float, harmonic: int, eBeamEnergy: float, direction: str,
-                            verbose: bool=False) -> None:
-        """
-        Sets the K-value based on the resonant energy and harmonic.
-
-        Args:
-            energy (float): Resonant energy in electron volts (eV).
-            harmonic (int): Harmonic number.
-            eBeamEnergy (float): Energy of the electron beam in GeV.
-            direction (str): Direction of the undulator ('v' for vertical, 'h' for horizontal, 'b' for both).
-
-        """
-        if self.CLASS_NAME.startswith(('B', 'W')):
-            raise ValueError("invalid operation for this synchrotron radiation source")
-        else:
-            wavelength = energy_wavelength(energy, 'eV')
-            gamma = get_gamma(eBeamEnergy)
-            K = np.sqrt(2)*np.sqrt(((2 * harmonic * wavelength * gamma ** 2)/self.period_length)-1)
-
-            if "v" in direction:
-                self.K_vertical = K
-                self.K_horizontal = 0
-            elif "h" in direction:
-                self.K_vertical = 0
-                self.K_horizontal = K
-            elif 'b' in direction:
-                self.K_vertical = K*np.sqrt(1/2)
-                self.K_horizontal = K*np.sqrt(1/2)
-            else:
-                raise ValueError("invalid value: direction should be in ['v','h','b']")
-    
-            if verbose:
-                print(f"ondulator resonant energy set to {energy:.3f} eV (harm. n°: {harmonic}) with:\n\
-            >> Kh: {self.K_horizontal:.6f}\n\
-            >> Kv: {self.K_vertical:.6f}")
-
-    def print_resonant_energy(self, harmonic: int, eBeamEnergy: float) -> None:
-        """
-        Prints the resonant energy based on the provided K-value, harmonic number, and electron beam energy.
-
-        Args:
-            harmonic (int): The harmonic number.
-            eBeamEnergy (float): Energy of the electron beam in GeV.
-        """
-        if self.CLASS_NAME.startswith(('B', 'W')):
-            raise ValueError("invalid operation for this synchrotron radiation source")
-        else:
-            K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
-            gamma = get_gamma(eBeamEnergy)
-            wavelength = self.period_length/(2 * harmonic * gamma ** 2)*(1+(K**2)/2) 
-            energy = energy_wavelength(wavelength, 'm')
-
-            print(f">> resonant energy {energy:.2f} eV")
-
-    # -------------------------------------        
-    # undulator/wiggler auxiliary functions
-    # -------------------------------------        
-    def set_K_from_magnetic_field(self, B_horizontal: float=None, B_vertical: float=None) -> None:
-        """
-        Sets the K-value based on the magnetic field strength.
-
-        Args:
-            B_horizontal (float): Magnetic field strength in the horizontal direction.
-            B_vertical (float): Magnetic field strength in the vertical direction.
-        """
-        if self.CLASS_NAME.startswith('B'):
-            raise ValueError("invalid operation for bending magnet")
-        else:
-            if B_horizontal is not None:
-                self.K_horizontal = CHARGE * B_horizontal * self.period_length / (2 * PI * MASS * LIGHT)
-            if B_vertical is not None:
-                self.K_vertical = CHARGE * B_vertical * self.period_length / (2 * PI * MASS * LIGHT)
-
-    def set_magnetic_field_from_K(self, K_horizontal: float=None, K_vertical: float=None) -> None:
-        """
-        Sets the magnetic field strength based on the K-value.
-
-         Args:
-            K_horizontal (float): Horizonral deflection parameter.
-            K_vertical (float): Vertical deflection parameter.
-        """
-        if self.CLASS_NAME.startswith('B'):
-            raise ValueError("invalid operation for bending magnet")
-        else:
-
-            if K_horizontal is not None:
-                self.B_horizontal = K_horizontal * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
-            if K_vertical is not None:
-                self.B_vertical = K_vertical * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
-
-    # -------------------------------------        
-    # bending magnet auxiliary functions
-    # -------------------------------------        
-    def set_bending_magnet_radius(self, eBeamEnergy: float) -> None:
-        """
-        Sets the radius of curvature from the magnetic field for a bending magnet based 
-        on the electron beam energy.
-
-        Args:
-            eBeamEnergy (float): Energy of the electron beam in GeV.
-        """
-        if self.CLASS_NAME.startswith('B') is False:
-            raise ValueError("invalid operation for undulator or wiggler sources")
-        else:
-            gamma = get_gamma(eBeamEnergy)
-            e_speed = LIGHT * np.sqrt(1-1/gamma)
-            self.radius = gamma * MASS * e_speed /(CHARGE * self.magnetic_field)
-            print(f">> bending radius {self.radius:.3f} m")
-
-    def set_bending_magnet_field(self, eBeamEnergy: float) -> None:
-        """
-        Sets the magnetic field from the radius of curvature for a bending magnet based 
-        on the electron beam energy.
-
-        Args:
-            eBeamEnergy (float): Energy of the electron beam in GeV.
-        """
-        if self.CLASS_NAME.startswith('B') is False:
-            raise ValueError("invalid operation for undulator or wiggler sources")
-        else:
-            gamma = get_gamma(eBeamEnergy)
-            e_speed = LIGHT * np.sqrt(1-1/gamma)
-            self.magnetic_field = gamma * MASS * e_speed /(CHARGE * self.radius)
-            print(f">> magnetic field {self.magnetic_field:.3f} T")
-
-    def print_critical_energy(self, eBeamEnergy: float) -> None:
-        """
-        Prints the critical energy for a bending magnet based on the electron beam energy
-
-        Args:
-            eBeamEnergy (float): Energy of the electron beam in GeV.
-        """
-        if self.CLASS_NAME.startswith('B') is False:
-            raise ValueError("invalid operation for undulator or wiggler sources")
-        else:
-            gamma = get_gamma(eBeamEnergy)
-            energy = (3*PLANCK*self.magnetic_field*gamma**2)/(4*PI*MASS)
-            print(f">> critical energy {energy:.2f} eV")
-    # -------------------------------------        
-    # auxiliary functions
-    # ------------------------------------- 
     def print_attributes(self) -> None:
         """
         Prints all attribute of object
         """
         for i in (vars(self)):
             print("{0:10}: {1}".format(i, vars(self)[i]))
+
 
 class SynchrotronSource(object):
     """
@@ -476,6 +340,7 @@ class SynchrotronSource(object):
 
         write_syned_file(json_file, light_source_name, self.ElectronBeam, self.MagneticStructure)
 
+
 class UndulatorSource(SynchrotronSource):
     """
     Class representing an undulator radiation source, which combines an electron beam and 
@@ -499,39 +364,156 @@ class UndulatorSource(SynchrotronSource):
 
         super().__init__(**kwargs)
 
-    def set_undulator(self, wavelength, **kwargs) -> None:
+    def set_undulator(self, **kwargs) -> None:
         """
         Sets the parameters of the undulator.
 
-        Args:
-            wavelength (float): The wavelength of the undulator radiation [m].
-
         Keyword Args:
             verbose (bool): If True, prints additional information. Default is False.
+            B_horizontal (float): Horizontal magnetic field [T].
+            B_vertical (float): Vertical magnetic field [T].
+            K_horizontal (float): Horizontal deflection parameter.
+            K_vertical (float): Vertical deflection parameter.
+            direction (str): Direction of the undulator ('v' for vertical, 'h' for horizontal, 'b' for both).
+            wavelength (float): The wavelength of the undulator radiation [m].
+            harmonic (int): Harmonic number.
             mth_emittance (int): Method for emittance calculation. Default is 0.
             mth_fillament_emittance (int): Method for filament emittance calculation. Default is 0.
-            L (float): Length of the undulator. Defaults to period length times number of periods.
             center_undulator (float): Center position of the undulator. Default is 0.
             center_straight_section (float): Center position of the straight section. Default is 0.
         """
         verbose = kwargs.get('verbose', False)
+        direction = kwargs.get('direction', None)
+        wavelength = kwargs.get('wavelength', None)
+        self.harmonic = kwargs.get('harmonic', self.harmonic)
+        
+        if 'B_horizontal' in kwargs:
+            self.B_horizontal = kwargs['B_horizontal']
+        if 'B_vertical' in kwargs:
+            self.B_vertical = kwargs['B_vertical']
+        if 'K_horizontal' in kwargs:
+            self.K_horizontal = kwargs['K_horizontal']
+        if 'K_vertical' in kwargs:
+            self.K_vertical = kwargs['K_vertical']
 
+        piloting = [wavelength, self.B_horizontal, self.B_vertical, self.K_horizontal, self.K_vertical]
+        if all(param is None for param in piloting):
+            raise ValueError("Please, provide either the wavelength [m], the magnetic fields [T] or the deflection parameters Kx and/or Ky.")
+
+        if wavelength is not None:
+            self.set_resonant_energy(energy=energy_wavelength(wavelength, unity='m'), 
+                                     harmonic=self.harmonic, direction=direction, 
+                                     verbose=verbose)
+            self.wavelength = wavelength
+        else:
+            if self.B_horizontal is not None or self.B_vertical is not None:
+                self.set_K_from_magnetic_field(self.B_horizontal, self.B_vertical)
+
+            if self.K_horizontal is not None or self.K_vertical is not None:
+                self.set_magnetic_field_from_K(self.K_horizontal, self.K_vertical)
+
+            K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
+            gamma = get_gamma(self.energy_in_GeV)
+            self.wavelength = self.period_length/(2 * self.harmonic * gamma ** 2)*(1+(K**2)/2) 
+            
         mth_emittance = kwargs.get('mth_emittance', 0)
         mth_fillament_emittance = kwargs.get('mth_fillament_emittance', 0)
-        L = kwargs.get('L', self.period_length*self.number_of_periods)
         cund = kwargs.get('center_undulator', 0)
         css = kwargs.get('center_straight_section', 0)
 
         if verbose:
             self.print_rms()
 
-        self.set_filament_emittance(verbose=verbose, wavelength=wavelength, mth=mth_fillament_emittance, L=L)
+        self.set_filament_emittance(verbose=verbose, wavelength=wavelength, mth=mth_fillament_emittance)
         self.set_waist(verbose=verbose,center_undulator=cund, center_straight_section=css)
         self.set_emittance(verbose=verbose, mth=mth_emittance)
 
-        direction = kwargs.get('direction', None)
-        self.set_resonant_energy(energy=energy_wavelength(wavelength, unity='m'), harmonic=self.harmonic,
-                                 eBeamEnergy=self.energy_in_GeV, direction=direction, verbose=verbose)
+    def set_resonant_energy(self, energy: float, harmonic: int, direction: str,
+                            verbose: bool=False) -> None:
+        """
+        Sets the K-value based on the resonant energy and harmonic.
+
+        Args:
+            energy (float): Resonant energy in electron volts (eV).
+            harmonic (int): Harmonic number.
+            direction (str): Direction of the undulator ('v' for vertical, 'h' for horizontal, 'b' for both).
+            verbose (bool): If True, prints additional information. Default is False.
+
+        """
+        if self.CLASS_NAME.startswith(('B', 'W')):
+            raise ValueError("invalid operation for this synchrotron radiation source")
+        else:
+            self.wavelength = energy_wavelength(energy, 'eV')
+            gamma = get_gamma(self.energy_in_GeV)
+            K = np.sqrt(2)*np.sqrt(((2 * harmonic * self.wavelength * gamma ** 2)/self.period_length)-1)
+
+            if "v" in direction:
+                self.K_vertical = K
+                self.K_horizontal = 0
+            elif "h" in direction:
+                self.K_vertical = 0
+                self.K_horizontal = K
+            elif 'b' in direction:
+                self.K_vertical = K*np.sqrt(1/2)
+                self.K_horizontal = K*np.sqrt(1/2)
+            else:
+                raise ValueError("invalid value: direction should be in ['v','h','b']")
+    
+            if verbose:
+                print(f"undulator resonant energy set to {energy:.3f} eV (harm. n°: {harmonic}) with:\n\
+            >> Kh: {self.K_horizontal:.6f}\n\
+            >> Kv: {self.K_vertical:.6f}")
+
+    def set_K_from_magnetic_field(self, B_horizontal: float=None, B_vertical: float=None) -> None:
+        """
+        Sets the K-value based on the magnetic field strength.
+
+        Args:
+            B_horizontal (float): Magnetic field strength in the horizontal direction.
+            B_vertical (float): Magnetic field strength in the vertical direction.
+        """
+        if B_horizontal is not None:
+            self.K_horizontal = CHARGE * B_horizontal * self.period_length / (2 * PI * MASS * LIGHT)
+        if B_vertical is not None:
+            self.K_vertical = CHARGE * B_vertical * self.period_length / (2 * PI * MASS * LIGHT)
+
+    def set_magnetic_field_from_K(self, K_horizontal: float=None, K_vertical: float=None) -> None:
+        """
+        Sets the magnetic field strength based on the K-value.
+
+         Args:
+            K_horizontal (float): Horizonral deflection parameter.
+            K_vertical (float): Vertical deflection parameter.
+        """
+        if K_horizontal is not None:
+            self.B_horizontal = K_horizontal * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
+        if K_vertical is not None:
+            self.B_vertical = K_vertical * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
+
+    def get_resonant_energy(self, harmonic: int) -> float:
+        """
+        Returns the resonant energy based on the provided K-value, harmonic number, and electron beam energy.
+        Args:
+            harmonic (int): The harmonic number.
+        """
+        K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
+        gamma = get_gamma(self.energy_in_GeV)
+        wavelength = self.period_length/(2 * harmonic * gamma ** 2)*(1+(K**2)/2) 
+        energy = energy_wavelength(wavelength, 'm')
+        return energy
+    
+    def print_resonant_energy(self, harmonic: int) -> None:
+        """
+        Prints the resonant energy based on the provided K-value, harmonic number, and electron beam energy.
+
+        Args:
+            harmonic (int): The harmonic number.
+        """
+        if self.CLASS_NAME.startswith(('B', 'W')):
+            raise ValueError("invalid operation for this synchrotron radiation source")
+        else:
+            energy = self.get_resonant_energy(harmonic)
+            print(f">> resonant energy {energy:.2f} eV")
 
     def set_waist(self, **kwargs) -> None:
         """
@@ -541,8 +523,8 @@ class UndulatorSource(SynchrotronSource):
             verbose (bool): If True, prints additional information. Default is False.
             center_undulator (float): Center position of the undulator. Distance straight section/undulator 
                used as origin (positive sence: downstream)
-            center_straight_section (float): Center position of the straight section. Distance undulator/straight section 
-               used as origin (positive sence: downstream)
+            center_straight_section (float): Center position of the straight section. 
+               Distance undulator/straight section used as origin (positive sence: downstream)
         """
 
         verbose = kwargs.get('verbose', False)
@@ -578,19 +560,18 @@ class UndulatorSource(SynchrotronSource):
         """
 
         verbose = kwargs.get('verbose', False)
-        wavelength = kwargs.get('wavelength', self.wavelength)
         mth = kwargs.get('mth', 0)
-        L = kwargs.get('L', self.period_length*self.number_of_periods)
+        L = self.period_length*self.number_of_periods
 
         # Elleaume - doi:10.4324/9780203218235 (Chapter 2.5 and 2.6)
         if mth == 0:
-            self.sigma_u =  2.74*np.sqrt(wavelength*L)/(4*PI)
-            self.sigma_up = 0.69*np.sqrt(wavelength/L)
+            self.sigma_u =  2.74*np.sqrt(self.wavelength*L)/(4*PI)
+            self.sigma_up = 0.69*np.sqrt(self.wavelength/L)
 
         # Kim (laser mode approximation) - doi:10.1016/0168-9002(86)90048-3
         elif mth == 1:
-            self.sigma_u = np.sqrt(wavelength*L)/(4*PI)
-            self.sigma_up = np.sqrt(wavelength/L)
+            self.sigma_u = np.sqrt(self.wavelength*L)/(4*PI)
+            self.sigma_up = np.sqrt(self.wavelength/L)
         else:
             raise ValueError("Not a valid method for emittance calculation.")
         
@@ -638,7 +619,8 @@ class UndulatorSource(SynchrotronSource):
             
             def _qs(es:float) -> float:
                 qs = 2*(_qa(es/4))**(2/3)
-                if qs<2: qs=2
+                if qs<2: 
+                    qs=2
                 return qs
             
             sigma_x = np.sqrt(self.sigma_u**2*_qs(self.energy_spread) + self.e_x**2)
@@ -668,3 +650,156 @@ class UndulatorSource(SynchrotronSource):
             print(f"convolved photon beam:\n\
             >> x/xp = {sigma_x*1e6:0.2f} um vs. {sigma_x_div*1e6:0.2f} urad\n\
             >> y/yp = {sigma_y*1e6:0.2f} um vs. {sigma_y_div*1e6:0.2f} urad")
+     
+
+class BendingMagnetSource(SynchrotronSource):
+    """
+    Class representing an bending magnet source, which combines an electron beam and 
+    a magnetic structure.
+    """
+    def __init__(self, **kwargs) -> None:
+        """
+        Initializes an instance of the BendingMagnet class.
+
+        Args:
+            electron_beam (ElectronBeam): An instance of the ElectronBeam class 
+               representing the electron beam parameters.
+            magnetic_structure (MagneticStructure): An instance of the MagneticStructure 
+               class representing the magnetic structure parameters.
+        """
+        super().__init__(**kwargs)  
+
+    def set_bending_magnet(self, **kwargs) -> None:
+        """
+        Sets the parameters of the bending magnet.
+
+        Keyword Args:
+            verbose (bool): If True, prints additional information. Default is False.
+            critical_wavelength (float): The critical wavelength in meters. If provided,
+               the magnetic field and radius of curvature are recalculated.
+
+        """
+        verbose = kwargs.get('verbose', False)
+        critical_wavelength = kwargs.get('critical_wavelength', None)
+
+        piloting = [critical_wavelength, self.critical_energy, self.magnetic_field, self.radius]
+
+        if all(param is None for param in piloting):
+            raise ValueError("Please, provide either the critical wavelength [m], the magnetic field [T] or bending radius [m]")
+
+        if critical_wavelength is not None:
+            self.set_bm_B_from_critical_energy(energy=energy_wavelength(critical_wavelength, unity='m'), 
+                                               verbose=verbose)
+            self.MagneticStructure.critical_energy = energy_wavelength(critical_wavelength, unity='m')
+        else:
+            if self.magnetic_field is not None:
+                self.set_bm_radius_from_B(magnetic_field=self.magnetic_field, 
+                                          verbose=verbose)
+            else:
+                self.set_bm_B_from_radius(radius=self.radius, 
+                                          verbose=verbose)
+                
+    def set_bm_B_from_critical_energy(self, energy: float, verbose: bool=False) -> None:
+        """
+        Sets the magnetic field for a bending magnet based on the critical energy and  
+        on the electron beam energy. Updates the bending radius.
+
+        Args:
+            critical energy (float): critical energy for a bending magnet based (in eV).
+            verbose (bool): If True, prints additional information. Default is False.
+        """
+        self.MagneticStructure.critical_energy = energy
+        gamma = get_gamma(self.energy_in_GeV)
+        self.MagneticStructure.magnetic_field = (energy*4*PI*MASS)/(3*PLANCK*gamma**2)
+        self.set_bm_radius_from_B(self.magnetic_field, verbose)
+
+        if verbose:
+            print(f"Bending magnet critial energy energy set to {self.critical_energy:.3f} eV with:\n\
+        >> B: {self.magnetic_field:.6f}\n\
+        >> R: {self.radius:.6f}")
+
+    def set_bm_radius_from_B(self, magnetic_field: float, verbose: bool=False) -> None:
+        """
+        Sets the radius of curvature from the magnetic field for a bending magnet based 
+        on the electron beam energy.
+
+        Args:
+            magnetic_field (float): Vertical magnetic field component (in Tesla).
+            eBeamEnergy (float): Energy of the electron beam in GeV.
+            verbose (bool): If True, prints additional information. Default is False.
+        """
+
+        self.MagneticStructure.magnetic_field = magnetic_field
+        gamma = get_gamma(self.energy_in_GeV)
+        e_speed = LIGHT * np.sqrt(1-1/gamma)
+        self.MagneticStructure.radius = gamma * MASS * e_speed /(CHARGE * magnetic_field)
+        self.MagneticStructure.critical_energy = self.get_critical_energy()
+
+        if verbose:
+            print(f"Bending magnet critial energy energy set to {self.critical_energy:.3f} eV with:\n\
+        >> B: {self.magnetic_field:.6f}\n\
+        >> R: {self.radius:.6f}")
+
+    def set_bm_B_from_radius(self, radius:float, verbose: bool=False) -> None:
+        """
+        Sets the magnetic field from the radius of curvature for a bending magnet based 
+        on the electron beam energy.
+
+        Args:
+            eBeamEnergy (float): Energy of the electron beam in GeV.
+            verbose (bool): If True, prints additional information. Default is False.
+
+        """
+        self.MagneticStructure.radius = radius
+        gamma = get_gamma(self.energy_in_GeV)
+        e_speed = LIGHT * np.sqrt(1-1/gamma)
+        self.MagneticStructure.magnetic_field = gamma * MASS * e_speed /(CHARGE * radius)
+        self.MagneticStructure.critical_energy = self.get_critical_energy()
+
+        if verbose:
+            print(f"Bending magnet critial energy energy set to {self.critical_energy:.3f} eV with:\n\
+        >> B: {self.magnetic_field:.6f}\n\
+        >> R: {self.radius:.6f}")
+
+    def get_critical_energy(self):
+        """
+        Returns the critical energy for a bending magnet based on the electron beam energy
+        """
+        return (3*PLANCK*self.magnetic_field*get_gamma(self.energy_in_GeV)**2)/(4*PI*MASS)
+
+    def print_critical_energy(self) -> None:
+        """
+        Prints the critical energy for a bending magnet based on the electron beam energy
+
+        Args:
+            eBeamEnergy (float): Energy of the electron beam in GeV.
+        """
+
+        energy = self.get_critical_energy()
+        print(f">> critical energy {energy:.2f} eV")
+
+    def get_B_central_position(self, **kwargs):
+        """
+        Returns magnetic field central position to be used for the x-ray extraction.
+        Extraction at 0 rad is towards the end of the magnetic field, while the largest
+        angle is given by BM (length/radius) [radians] and defines the beginning of the 
+        magnetic field.
+        Keyword Args:
+            verbose (bool): If True, prints additional information. Default is False.
+            extraction_angle (floar): Extraction angle in radians. If provided, overwrites 
+                self.MagneticStructure.extraction_angle
+        """
+        verbose = kwargs.get('verbose', False)
+
+        self.MagneticStructure.extraction_angle = kwargs.get('extraction_angle',
+                                                              self.MagneticStructure.extraction_angle)
+
+        half_arc = 0.5*self.length/self.radius
+        if self.extraction_angle is None:
+            self.MagneticStructure.extraction_angle = half_arc
+        zpos = (half_arc - self.extraction_angle)*self.radius
+        if verbose:
+            print(f"Arc segment of {2*half_arc:.3f} radians (L={self.length:.3f} m/R={self.radius:.3f} m).")
+            print(f"Extraction at {-zpos:.3f} m from the centre of the bending magnet.")
+            print(f">> {(0.5*self.length - zpos):.3f} m from the BM entrance.")
+        return zpos
