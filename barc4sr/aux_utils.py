@@ -940,7 +940,6 @@ def core_srwlibCalcStokesUR(args: Tuple[np.ndarray,
     tzero = time()
 
     try:
-
         arPrecPar = [0]*5   # for spectral flux vs photon energy
         arPrecPar[0] = 1    # initial UR harmonic to take into account
         arPrecPar[1] = get_undulator_max_harmonic_number(resonant_energy, energy_array[-1]) #final UR harmonic to take into account

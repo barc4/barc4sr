@@ -16,7 +16,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
-__changed__ = '07/JAN/2025'
+__changed__ = '22/JAN/2025'
 
 import numpy as np
 from scipy.constants import physical_constants
@@ -385,27 +385,28 @@ class UndulatorSource(SynchrotronSource):
         verbose = kwargs.get('verbose', False)
         direction = kwargs.get('direction', None)
         wavelength = kwargs.get('wavelength', None)
-        self.harmonic = kwargs.get('harmonic', self.harmonic)
         
         if 'B_horizontal' in kwargs:
-            self.B_horizontal = kwargs['B_horizontal']
+            self.MagneticStructure.B_horizontal = kwargs['B_horizontal']
         if 'B_vertical' in kwargs:
-            self.B_vertical = kwargs['B_vertical']
+            self.MagneticStructure.B_vertical = kwargs['B_vertical']
         if 'K_horizontal' in kwargs:
-            self.K_horizontal = kwargs['K_horizontal']
+            self.MagneticStructure.K_horizontal = kwargs['K_horizontal']
         if 'K_vertical' in kwargs:
-            self.K_vertical = kwargs['K_vertical']
+            self.MagneticStructure.K_vertical = kwargs['K_vertical']
 
         piloting = [wavelength, self.B_horizontal, self.B_vertical, self.K_horizontal, self.K_vertical]
         if all(param is None for param in piloting):
             raise ValueError("Please, provide either the wavelength [m], the magnetic fields [T] or the deflection parameters Kx and/or Ky.")
 
         if wavelength is not None:
+            self.MagneticStructure.harmonic = kwargs.get('harmonic', None)
             self.set_resonant_energy(energy=energy_wavelength(wavelength, unity='m'), 
                                      harmonic=self.harmonic, direction=direction, 
                                      verbose=verbose)
             self.wavelength = wavelength
         else:
+            self.MagneticStructure.harmonic = kwargs.get('harmonic', self.harmonic)
             if self.B_horizontal is not None or self.B_vertical is not None:
                 self.set_K_from_magnetic_field(self.B_horizontal, self.B_vertical)
 
@@ -428,41 +429,85 @@ class UndulatorSource(SynchrotronSource):
         self.set_waist(verbose=verbose,center_undulator=cund, center_straight_section=css)
         self.set_emittance(verbose=verbose, mth=mth_emittance)
 
-    def set_resonant_energy(self, energy: float, harmonic: int, direction: str,
-                            verbose: bool=False) -> None:
+    def set_resonant_energy(self, energy: float, direction: str, verbose: bool=False,
+                            **kwargs) -> None:
         """
-        Sets the K-value based on the resonant energy and harmonic.
+        Sets the undulator K-value based on the specified resonant energy and harmonic.
+
+        This method calculates the undulator parameter K required to achieve the given resonant 
+        energy at a specified harmonic. If the harmonic number is not provided, the function 
+        searches for the lowest harmonic that meets the K-value constraints.
 
         Args:
             energy (float): Resonant energy in electron volts (eV).
-            harmonic (int): Harmonic number.
-            direction (str): Direction of the undulator ('v' for vertical, 'h' for horizontal, 'b' for both).
-            verbose (bool): If True, prints additional information. Default is False.
+            direction (str): Direction of the undulator magnetic field.
+                - 'v': Vertical polarization
+                - 'h': Horizontal polarization
+                - 'b': Both (equal distribution in vertical and horizontal)
+            verbose (bool, optional): If True, prints additional information. Default is False.
+            **kwargs:
+                - harmonic (int, optional): The harmonic number to use in the calculation. If None, 
+                  the function searches for a valid harmonic.
+                - even_harmonics (bool, optional): If True, even harmonics are considered. Default is False.
+                - Kmin (float, optional): Minimum allowed value for the K parameter. Default is 0.05.
+
+        Raises:
+            ValueError: If no valid harmonic is found within the search limit.
+            ValueError: If the provided direction is not one of ['v', 'h', 'b'].
 
         """
-        if self.CLASS_NAME.startswith(('B', 'W')):
-            raise ValueError("invalid operation for this synchrotron radiation source")
-        else:
-            self.wavelength = energy_wavelength(energy, 'eV')
-            gamma = get_gamma(self.energy_in_GeV)
-            K = np.sqrt(2)*np.sqrt(((2 * harmonic * self.wavelength * gamma ** 2)/self.period_length)-1)
+        
+        harmonic = kwargs.get('harmonic', None)
+        even_harmonics = kwargs.get('even_harmonics', False)
+        Kmin = kwargs.get('Kmin', 0.05)
 
-            if "v" in direction:
-                self.K_vertical = K
-                self.K_horizontal = 0
-            elif "h" in direction:
-                self.K_vertical = 0
-                self.K_horizontal = K
-            elif 'b' in direction:
-                self.K_vertical = K*np.sqrt(1/2)
-                self.K_horizontal = K*np.sqrt(1/2)
-            else:
-                raise ValueError("invalid value: direction should be in ['v','h','b']")
-    
-            if verbose:
-                print(f"undulator resonant energy set to {energy:.3f} eV (harm. n°: {harmonic}) with:\n\
-            >> Kh: {self.K_horizontal:.6f}\n\
-            >> Kv: {self.K_vertical:.6f}")
+        self.wavelength = energy_wavelength(energy, 'eV')
+        gamma = get_gamma(self.energy_in_GeV)
+
+        if harmonic is not None:
+            K = np.sqrt(2)*np.sqrt(((2 * harmonic * self.wavelength * gamma ** 2)/self.period_length)-1)
+        else:
+            n = starting_harmonic = 1
+            harmonic = theta = 0
+            while harmonic == 0:
+                try:
+                    arg_sqrt = 2 * ((2 * n * self.wavelength * gamma ** 2) / self.period_length - 1 - (gamma * theta) ** 2)
+                    if arg_sqrt>=0:
+                        K = np.sqrt(arg_sqrt)
+                    else:
+                        K=-1
+                    if K >= Kmin:
+                        if n % 2 == 0 and even_harmonics:
+                            harmonic = int(n)
+                        else:
+                            harmonic = int(n)
+                except ValueError:
+                    K = None
+                if even_harmonics or (even_harmonics is False and starting_harmonic%2==0):
+                    n += 1
+                else:
+                    n += 2
+                if n > 21:
+                    raise ValueError("No valid harmonic found.")
+                
+        self.MagneticStructure.harmonic = harmonic
+
+        if "v" in direction:
+            self.MagneticStructure.K_vertical = K
+            self.MagneticStructure.K_horizontal = 0
+        elif "h" in direction:
+            self.MagneticStructure.K_vertical = 0
+            self.MagneticStructure.K_horizontal = K
+        elif 'b' in direction:
+            self.MagneticStructure.K_vertical = K*np.sqrt(1/2)
+            self.MagneticStructure.K_horizontal = K*np.sqrt(1/2)
+        else:
+            raise ValueError("invalid value: direction should be in ['v','h','b']")
+
+        if verbose:
+            print(f"undulator resonant energy set to {energy:.3f} eV (harm. n°: {harmonic}) with:\n\
+        >> Kh: {self.K_horizontal:.6f}\n\
+        >> Kv: {self.K_vertical:.6f}")
 
     def set_K_from_magnetic_field(self, B_horizontal: float=None, B_vertical: float=None) -> None:
         """
@@ -473,9 +518,9 @@ class UndulatorSource(SynchrotronSource):
             B_vertical (float): Magnetic field strength in the vertical direction.
         """
         if B_horizontal is not None:
-            self.K_horizontal = CHARGE * B_horizontal * self.period_length / (2 * PI * MASS * LIGHT)
+            self.MagneticStructure.K_horizontal = CHARGE * B_horizontal * self.period_length / (2 * PI * MASS * LIGHT)
         if B_vertical is not None:
-            self.K_vertical = CHARGE * B_vertical * self.period_length / (2 * PI * MASS * LIGHT)
+            self.MagneticStructure.K_vertical = CHARGE * B_vertical * self.period_length / (2 * PI * MASS * LIGHT)
 
     def set_magnetic_field_from_K(self, K_horizontal: float=None, K_vertical: float=None) -> None:
         """
@@ -486,9 +531,9 @@ class UndulatorSource(SynchrotronSource):
             K_vertical (float): Vertical deflection parameter.
         """
         if K_horizontal is not None:
-            self.B_horizontal = K_horizontal * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
+            self.MagneticStructure.B_horizontal = K_horizontal * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
         if K_vertical is not None:
-            self.B_vertical = K_vertical * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
+            self.MagneticStructure.B_vertical = K_vertical * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
 
     def get_resonant_energy(self, harmonic: int) -> float:
         """
