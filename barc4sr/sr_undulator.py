@@ -250,6 +250,7 @@ def spectrum(file_name: str,
                                                     photon_energy_max,
                                                     resonant_energy,
                                                     stepsize)
+        photon_energy_points = len(energy)
     # ---------------------------------------------------------
     # On-Axis Spectrum from Filament Electron Beam
     if calculation == 0:

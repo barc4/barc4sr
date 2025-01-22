@@ -91,7 +91,7 @@ def generate_logarithmic_energy_values(emin: float, emax: float, resonant_energy
 
     # Calculate the total number of steps
     n_steps = int(n_steps_pos - n_steps_neg)
-    print(f"generate_logarithmic_energy_values - number of steps: {n_steps} ({n_steps_neg} and {n_steps_pos}) around E0")
+    print(f">>> generate_logarithmic_energy_values - number of steps: {n_steps} ({n_steps_neg} and {n_steps_pos}) around E0 with step size {stepsize:.3e}")
 
     # Generate the array of steps with logarithmic spacing
     steps = np.linspace(n_steps_neg, n_steps_pos, n_steps + 1)

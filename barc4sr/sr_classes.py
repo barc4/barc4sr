@@ -16,7 +16,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
-__changed__ = '07/JAN/2025'
+__changed__ = '22/JAN/2025'
 
 import numpy as np
 from scipy.constants import physical_constants
