@@ -385,16 +385,16 @@ class UndulatorSource(SynchrotronSource):
         verbose = kwargs.get('verbose', False)
         direction = kwargs.get('direction', None)
         wavelength = kwargs.get('wavelength', None)
-        self.harmonic = kwargs.get('harmonic', self.harmonic)
+        self.MagneticStructure.harmonic = kwargs.get('harmonic', self.harmonic)
         
         if 'B_horizontal' in kwargs:
-            self.B_horizontal = kwargs['B_horizontal']
+            self.MagneticStructure.B_horizontal = kwargs['B_horizontal']
         if 'B_vertical' in kwargs:
-            self.B_vertical = kwargs['B_vertical']
+            self.MagneticStructure.B_vertical = kwargs['B_vertical']
         if 'K_horizontal' in kwargs:
-            self.K_horizontal = kwargs['K_horizontal']
+            self.MagneticStructure.K_horizontal = kwargs['K_horizontal']
         if 'K_vertical' in kwargs:
-            self.K_vertical = kwargs['K_vertical']
+            self.MagneticStructure.K_vertical = kwargs['K_vertical']
 
         piloting = [wavelength, self.B_horizontal, self.B_vertical, self.K_horizontal, self.K_vertical]
         if all(param is None for param in piloting):
@@ -448,14 +448,14 @@ class UndulatorSource(SynchrotronSource):
             K = np.sqrt(2)*np.sqrt(((2 * harmonic * self.wavelength * gamma ** 2)/self.period_length)-1)
 
             if "v" in direction:
-                self.K_vertical = K
-                self.K_horizontal = 0
+                self.MagneticStructure.K_vertical = K
+                self.MagneticStructure.K_horizontal = 0
             elif "h" in direction:
-                self.K_vertical = 0
-                self.K_horizontal = K
+                self.MagneticStructure.K_vertical = 0
+                self.MagneticStructure.K_horizontal = K
             elif 'b' in direction:
-                self.K_vertical = K*np.sqrt(1/2)
-                self.K_horizontal = K*np.sqrt(1/2)
+                self.MagneticStructure.K_vertical = K*np.sqrt(1/2)
+                self.MagneticStructure.K_horizontal = K*np.sqrt(1/2)
             else:
                 raise ValueError("invalid value: direction should be in ['v','h','b']")
     
@@ -473,9 +473,9 @@ class UndulatorSource(SynchrotronSource):
             B_vertical (float): Magnetic field strength in the vertical direction.
         """
         if B_horizontal is not None:
-            self.K_horizontal = CHARGE * B_horizontal * self.period_length / (2 * PI * MASS * LIGHT)
+            self.MagneticStructure.K_horizontal = CHARGE * B_horizontal * self.period_length / (2 * PI * MASS * LIGHT)
         if B_vertical is not None:
-            self.K_vertical = CHARGE * B_vertical * self.period_length / (2 * PI * MASS * LIGHT)
+            self.MagneticStructure.K_vertical = CHARGE * B_vertical * self.period_length / (2 * PI * MASS * LIGHT)
 
     def set_magnetic_field_from_K(self, K_horizontal: float=None, K_vertical: float=None) -> None:
         """
@@ -486,9 +486,9 @@ class UndulatorSource(SynchrotronSource):
             K_vertical (float): Vertical deflection parameter.
         """
         if K_horizontal is not None:
-            self.B_horizontal = K_horizontal * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
+            self.MagneticStructure.B_horizontal = K_horizontal * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
         if K_vertical is not None:
-            self.B_vertical = K_vertical * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
+            self.MagneticStructure.B_vertical = K_vertical * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
 
     def get_resonant_energy(self, harmonic: int) -> float:
         """
