@@ -16,14 +16,14 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
-__changed__ = '22/JAN/2025'
+__changed__ = '23/JAN/2025'
 
 import numpy as np
 from scipy.constants import physical_constants
 from scipy.special import erf
 
 from barc4sr.aux_energy import energy_wavelength, get_gamma
-from barc4sr.aux_syned import write_syned_file
+from barc4sr.aux_syned import write_syned_file, read_syned_file
 
 PLANCK = physical_constants["Planck constant"][0]
 LIGHT = physical_constants["speed of light in vacuum"][0]
@@ -157,6 +157,27 @@ class ElectronBeam(object):
         self.moment_yy = y*y        # <(y-<y>)^2>    
         self.moment_yyp = yyp       # <(y-<y>)(y'-<y'>)>          
         self.moment_ypyp = yp*yp    # <(y'-<y'>)^2>        
+
+        self.to_rms()
+
+    def from_syned(self, json_file: str) -> None:
+        """
+        Reads and sets up electron beam internal data from a SYNED JSON configuration file.
+
+        Parameters:
+            json_file (str): The path to the JSON file where the dictionary is written.
+        """
+        syned  = read_syned_file(json_file)
+        self.energy_in_GeV = syned["electron_beam"]["energy_in_GeV"]
+        self.energy_spread = syned["electron_beam"]["energy_spread"]
+        self.current = syned["electron_beam"]["current"]
+        self.number_of_bunches = syned["electron_beam"]["number_of_bunches"]
+        self.moment_xx = syned["electron_beam"]["moment_xx"]
+        self.moment_xxp = syned["electron_beam"]["moment_xxp"]
+        self.moment_xpxp = syned["electron_beam"]["moment_xpxp"]
+        self.moment_yy = syned["electron_beam"]["moment_yy"]
+        self.moment_yyp = syned["electron_beam"]["moment_yyp"]
+        self.moment_ypyp = syned["electron_beam"]["moment_ypyp"]
 
         self.to_rms()
 
@@ -414,7 +435,7 @@ class UndulatorSource(SynchrotronSource):
                 self.set_magnetic_field_from_K(self.K_horizontal, self.K_vertical)
 
             K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
-            gamma = get_gamma(self.energy_in_GeV)
+            gamma = self.get_gamma()
             self.wavelength = self.period_length/(2 * self.harmonic * gamma ** 2)*(1+(K**2)/2) 
             
         mth_emittance = kwargs.get('mth_emittance', 0)
@@ -426,7 +447,7 @@ class UndulatorSource(SynchrotronSource):
             self.print_rms()
 
         self.set_filament_emittance(verbose=verbose, wavelength=wavelength, mth=mth_fillament_emittance)
-        self.set_waist(verbose=verbose,center_undulator=cund, center_straight_section=css)
+        self.set_waist(verbose=verbose, center_undulator=cund, center_straight_section=css)
         self.set_emittance(verbose=verbose, mth=mth_emittance)
 
     def set_resonant_energy(self, energy: float, direction: str, verbose: bool=False,
@@ -462,7 +483,7 @@ class UndulatorSource(SynchrotronSource):
         Kmin = kwargs.get('Kmin', 0.05)
 
         self.wavelength = energy_wavelength(energy, 'eV')
-        gamma = get_gamma(self.energy_in_GeV)
+        gamma = self.get_gamma()
 
         if harmonic is not None:
             K = np.sqrt(2)*np.sqrt(((2 * harmonic * self.wavelength * gamma ** 2)/self.period_length)-1)
@@ -542,7 +563,7 @@ class UndulatorSource(SynchrotronSource):
             harmonic (int): The harmonic number.
         """
         K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
-        gamma = get_gamma(self.energy_in_GeV)
+        gamma = self.get_gamma()
         wavelength = self.period_length/(2 * harmonic * gamma ** 2)*(1+(K**2)/2) 
         energy = energy_wavelength(wavelength, 'm')
         return energy
@@ -754,7 +775,7 @@ class BendingMagnetSource(SynchrotronSource):
             verbose (bool): If True, prints additional information. Default is False.
         """
         self.MagneticStructure.critical_energy = energy
-        gamma = get_gamma(self.energy_in_GeV)
+        gamma = self.get_gamma()
         self.MagneticStructure.magnetic_field = (energy*4*PI*MASS)/(3*PLANCK*gamma**2)
         self.set_bm_radius_from_B(self.magnetic_field, verbose)
 
@@ -775,7 +796,7 @@ class BendingMagnetSource(SynchrotronSource):
         """
 
         self.MagneticStructure.magnetic_field = magnetic_field
-        gamma = get_gamma(self.energy_in_GeV)
+        gamma = self.get_gamma()
         e_speed = LIGHT * np.sqrt(1-1/gamma)
         self.MagneticStructure.radius = gamma * MASS * e_speed /(CHARGE * magnetic_field)
         self.MagneticStructure.critical_energy = self.get_critical_energy()
@@ -796,7 +817,7 @@ class BendingMagnetSource(SynchrotronSource):
 
         """
         self.MagneticStructure.radius = radius
-        gamma = get_gamma(self.energy_in_GeV)
+        gamma = self.get_gamma()
         e_speed = LIGHT * np.sqrt(1-1/gamma)
         self.MagneticStructure.magnetic_field = gamma * MASS * e_speed /(CHARGE * radius)
         self.MagneticStructure.critical_energy = self.get_critical_energy()
@@ -810,7 +831,7 @@ class BendingMagnetSource(SynchrotronSource):
         """
         Returns the critical energy for a bending magnet based on the electron beam energy
         """
-        return (3*PLANCK*self.magnetic_field*get_gamma(self.energy_in_GeV)**2)/(4*PI*MASS)
+        return (3*PLANCK*self.magnetic_field*self.get_gamma()**2)/(4*PI*MASS)
 
     def print_critical_energy(self) -> None:
         """
