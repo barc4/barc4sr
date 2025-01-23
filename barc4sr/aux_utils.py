@@ -858,12 +858,42 @@ def srwlibCalcStokesUR(bl: dict,
     Returns:
         np.ndarray: Array containing intensity data.
     """
+
+    def smart_split_energy(energy_array, num_cores):
+        """
+        Splits an array of energy values into chunks based on a weighted distribution.
+
+        Parameters:
+        energy_array (numpy.ndarray): The array of energy values to be split.
+        num_cores (int): The number of chunks to split the energy array into.
+
+        Returns:
+        List[numpy.ndarray]: A list of numpy arrays, where each array is a chunk of the original energy array.
+        """
+        energy_array = np.sort(energy_array)
+        weights = np.exp(-np.linspace(0, 2, num_cores))
+        weights /= weights.sum()
+        
+        split_indices = np.cumsum(weights * len(energy_array)).astype(int)
+        split_indices = np.insert(split_indices, 0, 0)
+        split_indices[-1] = len(energy_array)
+
+        energy_chunks = [energy_array[split_indices[i]:split_indices[i+1]] for i in range(num_cores)]
+        return energy_chunks
     
     if parallel:
         if num_cores is None:
             num_cores = mp.cpu_count()
 
-        energy_chunks = np.array_split(list(energy_array), num_cores)
+        dE = np.diff(energy_array)    
+        dE1 = np.min(dE)
+        dE2 = np.max(dE)
+
+        wiggler_regime = bool(energy_array[-1]>21*energy_array[0])
+        if np.allclose(dE1, dE2) and wiggler_regime:
+            energy_chunks = smart_split_energy(energy_array, num_cores)
+        else:
+            energy_chunks = np.array_split(list(energy_array), num_cores)
 
         results = Parallel(n_jobs=num_cores)(delayed(core_srwlibCalcStokesUR)((
                                                                     list_pairs,
