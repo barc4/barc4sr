@@ -451,6 +451,8 @@ class UndulatorSource(SynchrotronSource):
             
         mth_emittance = kwargs.get('mth_emittance', 0)
         mth_fillament_emittance = kwargs.get('mth_fillament_emittance', 0)
+        mth_central_cone = kwargs.get('mth_central_cone', 0) 
+
         cund = kwargs.get('center_undulator', 0)
         css = kwargs.get('center_straight_section', 0)
 
@@ -460,9 +462,32 @@ class UndulatorSource(SynchrotronSource):
         self.set_filament_emittance(verbose=verbose, wavelength=wavelength, mth=mth_fillament_emittance)
         self.set_waist(verbose=verbose, center_undulator=cund, center_straight_section=css)
         self.set_emittance(verbose=verbose, mth=mth_emittance)
+        self.central_cone(verbose=verbose, mth=mth_central_cone)
 
-    def on_axis_flux(self):
+    def central_cone(self, verbose: bool=False) -> float:
         pass
+
+    def radiation_rings(self, verbose: bool=False) -> float:
+        pass
+
+    def on_axis_flux(self, verbose: bool=False) -> float:
+        """ 
+        Calculate the total power emitted by a planar undulator in watts (W) based on Eq. 56 
+        from K. J. Kim, "Optical and power characteristics of synchrotron radiation sources"
+        [also Erratum 34(4)1243(Apr1995)], Opt. Eng 34(2), 342 (1995). 
+
+        :param verbose: Whether to print results. Defaults to False.
+        
+        :return: Total power emitted by the undulator in watts (W).
+        """
+        K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
+
+        if self.K_vertical == 0 or self.K_horizontal == 0:
+            und_type = 'planar'
+        else:
+            und_type = 'helical'
+
+        gamma = self.get_gamma()
 
     def central_cone_flux(self):
         pass
@@ -536,8 +561,8 @@ class UndulatorSource(SynchrotronSource):
         dphi = np.linspace(-hor_slit / 2, hor_slit / 2, full_quadrant.shape[1])
         dpsi = np.linspace(-ver_slit / 2, ver_slit / 2, full_quadrant.shape[0])
 
-        dphi_step = np.diff(dphi, prepend=dphi[0] - (dphi[1] - dphi[0]))
-        dpsi_step = np.diff(dpsi, prepend=dpsi[0] - (dpsi[1] - dpsi[0]))
+        dphi_step = dphi[1] - dphi[0]
+        dpsi_step = dpsi[1] - dpsi[0]
 
         d2P_d2phi = d2P_d2phi_0*full_quadrant
 
