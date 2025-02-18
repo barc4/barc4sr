@@ -372,7 +372,7 @@ def srwlibCalcElecFieldSR(bl: dict,
                     bffr = np.delete(bffr, bffr >= dE * (i + 1) + energy_array[0])
                 energy_chunks.append(bffr)
 
-            results = Parallel(n_jobs=num_cores)(delayed(core_srwlibCalcElecFieldSR)((
+            results = Parallel(n_jobs=num_cores, backend="loky")(delayed(core_srwlibCalcElecFieldSR)((
                                                                         list_pairs,
                                                                         bl,
                                                                         eBeam,
@@ -666,7 +666,7 @@ def srwlibsrwl_wfr_emit_prop_multi_e(bl: dict,
                     bffr = np.delete(bffr, bffr >= dE * (i + 1) + energy_array[0])
                 energy_chunks.append(bffr)
 
-            results = Parallel(n_jobs=num_cores)(delayed(core_srwlibsrwl_wfr_emit_prop_multi_e)((
+            results = Parallel(n_jobs=num_cores, backend="loky")(delayed(core_srwlibsrwl_wfr_emit_prop_multi_e)((
                                                                         list_pairs,
                                                                         bl,
                                                                         eBeam, 
@@ -895,7 +895,7 @@ def srwlibCalcStokesUR(bl: dict,
         else:
             energy_chunks = np.array_split(list(energy_array), num_cores)
 
-        results = Parallel(n_jobs=num_cores)(delayed(core_srwlibCalcStokesUR)((
+        results = Parallel(n_jobs=num_cores, backend="loky")(delayed(core_srwlibCalcStokesUR)((
                                                                     list_pairs,
                                                                     bl,
                                                                     eBeam,
@@ -905,24 +905,37 @@ def srwlibCalcStokesUR(bl: dict,
                                                                     resonant_energy,
                                                                     radiation_polarisation))
                                              for list_pairs in energy_chunks)
-        energy_array = []
-        time_array = []
-        energy_chunks = []
+        
+        energy_array = [calcs[1][0] for calcs in results]
+        time_array = [calcs[2] for calcs in results]
+        energy_chunks = [len(calcs[0]) for calcs in results]
 
-        k = 0
-        for calcs in results:
-            energy_array.append(calcs[1][0])
-            time_array.append(calcs[2])
-            energy_chunks.append(len(calcs[0]))
-            if k == 0:
-                intensity = np.asarray(calcs[0], dtype="float64")
-            else:
-                intensity = np.concatenate((intensity, np.asarray(calcs[0], dtype="float64")), axis=0)
-            k+=1
-        print(">>> ellapse time:")
+        # Collect intensity arrays first, then concatenate all at once
+        intensity_arrays = [np.asarray(calcs[0], dtype="float64") for calcs in results]
+        intensity = np.concatenate(intensity_arrays, axis=0)
 
-        for ptime in range(len(time_array)):
-            print(f" Core {ptime+1}: {time_array[ptime]:.2f} s for {energy_chunks[ptime]} pts (E0 = {energy_array[ptime]:.1f} eV).")
+        # Print results
+        print(">>> elapsed time:")
+        for i, (t, pts, e0) in enumerate(zip(time_array, energy_chunks, energy_array), start=1):
+            print(f" Core {i}: {t:.2f} s for {pts} pts (E0 = {e0:.1f} eV).")
+        # energy_array = []
+        # time_array = []
+        # energy_chunks = []
+
+        # k = 0
+        # for calcs in results:
+        #     energy_array.append(calcs[1][0])
+        #     time_array.append(calcs[2])
+        #     energy_chunks.append(len(calcs[0]))
+        #     if k == 0:
+        #         intensity = np.asarray(calcs[0], dtype="float64")
+        #     else:
+        #         intensity = np.concatenate((intensity, np.asarray(calcs[0], dtype="float64")), axis=0)
+        #     k+=1
+        # print(">>> ellapse time:")
+
+        # for ptime in range(len(time_array)):
+        #     print(f" Core {ptime+1}: {time_array[ptime]:.2f} s for {energy_chunks[ptime]} pts (E0 = {energy_array[ptime]:.1f} eV).")
 
     else:
         results = core_srwlibCalcStokesUR((energy_array,
