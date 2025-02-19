@@ -213,9 +213,9 @@ class ElectronBeam(object):
         """
         Prints electron beam rms sizes and divergences 
         """
-        print(f"electron beam:\n\
-            >> x/xp = {self.e_x*1e6:0.2f} um vs. {self.e_xp*1e6:0.2f} urad\n\
-            >> y/yp = {self.e_y*1e6:0.2f} um vs. {self.e_yp*1e6:0.2f} urad")
+        print("electron beam:")
+        print(f"\t>> x/xp = {self.e_x*1e6:0.2f} um vs. {self.e_xp*1e6:0.2f} µrad")
+        print(f"\t>> y/yp = {self.e_y*1e6:0.2f} um vs. {self.e_yp*1e6:0.2f} µrad")
             
     def get_gamma(self) -> float:
         """Calculate the Lorentz factor (γ) based on the energy of electrons in GeV."""
@@ -467,6 +467,7 @@ class UndulatorSource(SynchrotronSource):
         self.set_waist(verbose=verbose, center_undulator=cund, center_straight_section=css)
         self.set_emittance(verbose=verbose, mth=mth_emittance)
 
+        self.set_central_cone(verbose=verbose)
         self.set_radiation_rings(verbose=verbose)
 
         self.set_on_axis_flux(verbose=verbose)
@@ -549,9 +550,9 @@ class UndulatorSource(SynchrotronSource):
             raise ValueError("invalid value: direction should be in ['v','h','b']")
         self.set_magnetic_field_from_K(self.MagneticStructure.K_horizontal, self.MagneticStructure.K_vertical)
         if verbose:
-            print(f"undulator resonant energy set to {energy:.3f} eV (harm. n°: {harmonic}) with:\n\
-            >> Kh: {self.K_horizontal:.6f}\n\
-            >> Kv: {self.K_vertical:.6f}")
+            print(f"undulator resonant energy set to {energy:.3f} eV (harm. n°: {harmonic}) with:")
+            print(f"\t>> Kh: {self.K_horizontal:.6f}")
+            print(f"\t>> Kv: {self.K_vertical:.6f}")
 
     def get_resonant_energy(self, harmonic: int) -> float:
         """
@@ -635,10 +636,10 @@ class UndulatorSource(SynchrotronSource):
         self.waist_y = Zy
 
         if verbose :        
-            print(f"photon beam waist positon:\n\
-            >> hor. x ver. waist position = {Zx:0.3f} m vs. {Zy:0.3f} m")
+            print("photon beam waist positon:")
+            print(f"\t>> hor. x ver. waist position = {Zx:0.3f} m vs. {Zy:0.3f} m")
 
-    def central_cone(self, verbose: bool=False, **kwargs) -> float:
+    def set_central_cone(self, verbose: bool=False, **kwargs) -> float:
 
         dtn = kwargs.get("off_res_wavelength", self.wavelength)
 
@@ -648,27 +649,29 @@ class UndulatorSource(SynchrotronSource):
         divergence_kim = np.sqrt(self.wavelength/2/L)
         divergence_elleaume = 0.69*np.sqrt(self.wavelength/L)
 
-        theta = np.linspace(-5, 5,1001)*divergence_krinsky
+        # theta = np.linspace(-5, 5,1001)*divergence_krinsky
 
-        Sigma = 0.5*self.harmonic*(theta/divergence_krinsky)**2 \
-            + self.number_of_periods*(self.wavelength/dtn - self.harmonic )
-        natural_divergence = np.sinc(Sigma)**2
+        # Sigma = 0.5*self.harmonic*(theta/divergence_krinsky)**2 \
+        #     + self.number_of_periods*(self.wavelength/dtn - self.harmonic )
+        # natural_divergence = np.sinc(Sigma)**2
 
-        e_div_h = gaussian(theta, 1, 0, self.e_xp)
-        e_div_v = gaussian(theta, 1, 0, self.e_yp)
+        # e_div_h = gaussian(theta, 1, 0, self.e_xp)
+        # e_div_v = gaussian(theta, 1, 0, self.e_yp)
 
-        conv_sig_x = np.convolve(natural_divergence, e_div_h, 'same')
-        conv_sig_x /= np.amax(conv_sig_x)
+        # conv_sig_x = np.convolve(natural_divergence, e_div_h, 'same')
+        # conv_sig_x /= np.amax(conv_sig_x)
 
-        conv_sig_y = np.convolve(natural_divergence, e_div_v, 'same')
-        conv_sig_y /= np.amax(conv_sig_y)
+        # conv_sig_y = np.convolve(natural_divergence, e_div_v, 'same')
+        # conv_sig_y /= np.amax(conv_sig_y)
 
         if verbose:
-            pass
+            print("central cone size:")
+            print(f"\t>> {divergence_krinsky*1E6:.2f} µrad (Krinsky's def.)")
+            print(f"\t>> {divergence_kim*1E6:.2f} µrad (Kim's def.)")
+            print(f"\t>> {divergence_elleaume*1E6:.2f} µrad (Elleaume's approx.)")
 
-
-        return {'natural_divergence': natural_divergence, 'ebeam_divergence':{'hor': e_div_h, 'ver':e_div_v},
-                'undulator_divergence':{'hor': conv_sig_x, 'ver':conv_sig_y}, 'axis':theta}
+        # return {'natural_divergence': natural_divergence, 'ebeam_divergence':{'hor': e_div_h, 'ver':e_div_v},
+        #         'undulator_divergence':{'hor': conv_sig_x, 'ver':conv_sig_y}, 'axis':theta}
 
 
     def set_radiation_rings(self, verbose: bool=False) -> float:
@@ -687,7 +690,8 @@ class UndulatorSource(SynchrotronSource):
         l = 1
         theta_nl = 1/gamma * np.sqrt(l/self.harmonic * (1+K**2 /2))
         if verbose:
-            print(f"First ring at {theta_nl*1E6:.3f} µrad")
+            print("first radiation ring:")
+            print(f"\t>> {theta_nl*1E6:.2f} µrad")
 
         return theta_nl
     
@@ -722,8 +726,8 @@ class UndulatorSource(SynchrotronSource):
             raise ValueError("Not a valid method for emittance calculation.")
         
         if verbose :        
-            print(f"filament photon beam:\n\
-            >> u/up = {self.sigma_u*1e6:0.2f} um vs. {self.sigma_up*1e6:0.2f} urad")
+            print("filament photon beam:")
+            print(f"\t>> u/up = {self.sigma_u*1e6:0.2f} µm vs. {self.sigma_up*1e6:0.2f} µrad")
         
     def set_emittance(self, **kwargs) -> None:
         """
@@ -793,9 +797,9 @@ class UndulatorSource(SynchrotronSource):
         self.sigma_y_div = sigma_y_div
 
         if verbose :        
-            print(f"convolved photon beam:\n\
-            >> x/xp = {sigma_x*1e6:0.2f} um vs. {sigma_x_div*1e6:0.2f} urad\n\
-            >> y/yp = {sigma_y*1e6:0.2f} um vs. {sigma_y_div*1e6:0.2f} urad")
+            print("convolved photon beam:")
+            print(f"\t>> x/xp = {sigma_x*1e6:0.2f} um vs. {sigma_x_div*1e6:0.2f} urad")
+            print(f"\t>> y/yp = {sigma_y*1e6:0.2f} um vs. {sigma_y_div*1e6:0.2f} urad")
 
     def set_on_axis_flux(self, verbose: bool=False) -> float:
         """ 
@@ -824,7 +828,8 @@ class UndulatorSource(SynchrotronSource):
         # RC20250219 - sanity check
         # d2Fn_d2phi_bis = 1.74*1E14*(self.number_of_periods**2)*(self.energy_in_GeV**2)*self.current*Fn(K, self.harmonic)
         if verbose:
-            print(f"> On axis flux: {d2Fn_d2phi:.3e} [ph/s/mrad²/0.1%bw]")
+            print("on axis flux:")
+            print(f"\t>> {d2Fn_d2phi:.3e} ph/s/mrad²/0.1%bw")
         self.on_axis_flux = d2Fn_d2phi
         # return d2Fn_d2phi
 
@@ -853,7 +858,8 @@ class UndulatorSource(SynchrotronSource):
         # flux_bis = 1.431*1E14*self.number_of_periods*self.current*Qn
 
         if verbose:
-            print(f"> Flux within the central cone: {flux:.3e} [ph/s/0.1%bw]")
+            print("flux within the central cone:")
+            print(f"\t>> {flux:.3e} ph/s/0.1%bw")
         self.central_cone_flux = flux
         # return flux
 
@@ -871,9 +877,10 @@ class UndulatorSource(SynchrotronSource):
 
         K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
         
-        tot_pow = (self.number_of_periods*Z0*self.current*CHARGE*2*PI*LIGHT*gamma**2*K**2)/(6*self.period_length)*1E-3
+        tot_pow = (self.number_of_periods*Z0*self.current*CHARGE*2*PI*LIGHT*gamma**2*K**2)/(6*self.period_length)
         if verbose:
-            print(f"> Total power integrated: {tot_pow:.3f} kW")
+            print("total integrated power:")
+            print(f"\t>> {tot_pow:.3e} W")
 
         self.total_power = tot_pow
         # return tot_pow
@@ -1090,7 +1097,6 @@ class BendingMagnetSource(SynchrotronSource):
             print(f">> {(0.5*self.length - zpos):.3f} m from the BM entrance.")
         return zpos
 
-
 #***********************************************************************************
 # **planar undulator** auxiliary functions 
 # K. J. Kim, "Optical and power characteristics of synchrotron radiation sources" 
@@ -1155,6 +1161,10 @@ def Fn(K, n):
     Jnm1 = jv((n-1)/2, arg_Bessel)
     arg_mult = ((K*n)/(1 + K**2/2))**2
     return arg_mult*(Jnp1 - Jnm1)**2
+
+#***********************************************************************************
+# **other** auxiliary functions 
+#***********************************************************************************
 
 def gaussian(x, a, x0, sigma):
     return a * np.exp(-((x - x0) ** 2) / (2 * sigma ** 2))
