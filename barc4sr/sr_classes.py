@@ -395,6 +395,8 @@ class UndulatorSource(SynchrotronSource):
         self.sigma_u = None
         self.sigma_up = None
 
+        self.first_ring = None
+
         self.on_axis_flux = None
         self.central_cone_flux = None
         self.total_power = None
@@ -693,7 +695,8 @@ class UndulatorSource(SynchrotronSource):
             print("first radiation ring:")
             print(f"\t>> {theta_nl*1E6:.2f} µrad")
 
-        return theta_nl
+        self.first_ring = theta_nl
+        # return theta_nl
     
     def set_filament_emittance(self, **kwargs) -> None:
         """
@@ -885,7 +888,7 @@ class UndulatorSource(SynchrotronSource):
         self.total_power = tot_pow
         # return tot_pow
 
-    def get_power_through_slit(self, hor_slit: float, ver_slit: float, verbose: bool=False) -> float:
+    def get_power_through_slit(self, hor_slit: float, ver_slit: float, verbose: bool=False, **kwargs) -> float:
         """ 
         Calculate the power emitted by a planar undulator passing through a slit in watts (W), 
         based on Eq. 50  from K. J. Kim, "Optical and power characteristics of synchrotron 
@@ -901,7 +904,8 @@ class UndulatorSource(SynchrotronSource):
 
         :return: Power passing through the slit in watts (W).
         """
-        npix = 501
+
+        npix = kwargs.get("npix", 501)
 
         K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
 
@@ -918,7 +922,8 @@ class UndulatorSource(SynchrotronSource):
 
         gk = G_K(K)
 
-        d2P_d2phi_0 = self.total_power(verbose=False)*1E3*(gk*21*gamma**2)/(16*PI*K)
+        self.set_total_power(verbose=False)
+        d2P_d2phi_0 = self.total_power*(gk*21*gamma**2)/(16*PI*K)
 
         quadrant = compute_f_K_numba(dphi, dpsi, K, gamma, gk)
 
