@@ -424,6 +424,11 @@ class UndulatorSource(SynchrotronSource):
         verbose = kwargs.get('verbose', False)
         direction = kwargs.get('direction', None)
         wavelength = kwargs.get('wavelength', None)
+
+        self.MagneticStructure.B_horizontal = None
+        self.MagneticStructure.K_horizontal = None
+        self.MagneticStructure.B_vertical = None
+        self.MagneticStructure.K_vertical = None
         
         if 'B_horizontal' in kwargs:
             self.MagneticStructure.B_horizontal = kwargs['B_horizontal']
@@ -445,7 +450,7 @@ class UndulatorSource(SynchrotronSource):
                                      verbose=verbose)
             self.wavelength = wavelength
         else:
-            self.MagneticStructure.harmonic = kwargs.get('harmonic', self.harmonic)
+            self.MagneticStructure.harmonic = kwargs.get('harmonic', 1)
             if self.B_horizontal is not None or self.B_vertical is not None:
                 self.set_K_from_magnetic_field(self.B_horizontal, self.B_vertical, verbose=verbose)
             elif self.K_horizontal is not None or self.K_vertical is not None:
@@ -591,7 +596,7 @@ class UndulatorSource(SynchrotronSource):
         **kwargs:
             - harmonic (int, optional): The harmonic number to use in the calculation.
         """
-        harmonic = kwargs.get('harmonic', 1)
+        harmonic = kwargs.get('harmonic', self.harmonic)
 
         self.MagneticStructure.B_horizontal = 0
         self.MagneticStructure.K_horizontal = 0
@@ -625,7 +630,7 @@ class UndulatorSource(SynchrotronSource):
             - harmonic (int, optional): The harmonic number to use in the calculation.
         """
 
-        harmonic = kwargs.get('harmonic', 1)
+        harmonic = kwargs.get('harmonic', self.harmonic)
 
         self.MagneticStructure.B_horizontal = 0
         self.MagneticStructure.K_horizontal = 0
