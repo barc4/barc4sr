@@ -447,10 +447,9 @@ class UndulatorSource(SynchrotronSource):
         else:
             self.MagneticStructure.harmonic = kwargs.get('harmonic', self.harmonic)
             if self.B_horizontal is not None or self.B_vertical is not None:
-                self.set_K_from_magnetic_field(self.B_horizontal, self.B_vertical)
-
-            if self.K_horizontal is not None or self.K_vertical is not None:
-                self.set_magnetic_field_from_K(self.K_horizontal, self.K_vertical)
+                self.set_K_from_magnetic_field(self.B_horizontal, self.B_vertical, verbose=verbose)
+            elif self.K_horizontal is not None or self.K_vertical is not None:
+                self.set_magnetic_field_from_K(self.K_horizontal, self.K_vertical, verbose=verbose)
 
             K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
             gamma = self.get_gamma()
@@ -581,14 +580,24 @@ class UndulatorSource(SynchrotronSource):
             energy = self.get_resonant_energy(harmonic)
             print(f">> resonant energy {energy:.2f} eV")
 
-    def set_K_from_magnetic_field(self, B_horizontal: float=None, B_vertical: float=None) -> None:
+    def set_K_from_magnetic_field(self, B_horizontal: float=None, B_vertical: float=None, verbose: bool=False, **kwargs) -> None:
         """
         Sets the K-value based on the magnetic field strength.
 
         Args:
             B_horizontal (float): Magnetic field strength in the horizontal direction.
             B_vertical (float): Magnetic field strength in the vertical direction.
+            verbose (bool, optional): If True, prints additional information. Default is False.
+        **kwargs:
+            - harmonic (int, optional): The harmonic number to use in the calculation.
         """
+        harmonic = kwargs.get('harmonic', 1)
+
+        self.MagneticStructure.B_horizontal = 0
+        self.MagneticStructure.K_horizontal = 0
+        self.MagneticStructure.B_vertical = 0
+        self.MagneticStructure.K_vertical = 0
+
         if B_horizontal is not None:
             self.MagneticStructure.B_horizontal = B_horizontal
             self.MagneticStructure.K_horizontal = CHARGE * B_horizontal * self.period_length / (2 * PI * MASS * LIGHT)
@@ -596,20 +605,45 @@ class UndulatorSource(SynchrotronSource):
             self.MagneticStructure.B_vertical = B_vertical
             self.MagneticStructure.K_vertical = CHARGE * B_vertical * self.period_length / (2 * PI * MASS * LIGHT)
 
-    def set_magnetic_field_from_K(self, K_horizontal: float=None, K_vertical: float=None) -> None:
+        self.wavelength = energy_wavelength(self.get_resonant_energy(harmonic), 'eV')
+
+        if verbose:
+            print(f"undulator resonant energy set to {self.get_resonant_energy(harmonic):.3f} eV (harm. n°: {harmonic}) with:")
+            print(f"\t>> Kh: {self.K_horizontal:.6f}")
+            print(f"\t>> Kv: {self.K_vertical:.6f}")
+
+
+    def set_magnetic_field_from_K(self, K_horizontal: float=None, K_vertical: float=None, verbose: bool=False, **kwargs) -> None:
         """
         Sets the magnetic field strength based on the K-value.
 
          Args:
             K_horizontal (float): Horizonral deflection parameter.
             K_vertical (float): Vertical deflection parameter.
+            verbose (bool, optional): If True, prints additional information. Default is False.
+        **kwargs:
+            - harmonic (int, optional): The harmonic number to use in the calculation.
         """
+
+        harmonic = kwargs.get('harmonic', 1)
+
+        self.MagneticStructure.B_horizontal = 0
+        self.MagneticStructure.K_horizontal = 0
+        self.MagneticStructure.B_vertical = 0
+        self.MagneticStructure.K_vertical = 0
         if K_horizontal is not None:
             self.MagneticStructure.K_horizontal = K_horizontal
             self.MagneticStructure.B_horizontal = K_horizontal * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
         if K_vertical is not None:
             self.MagneticStructure.K_vertical = K_vertical
             self.MagneticStructure.B_vertical = K_vertical * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
+
+        self.wavelength = energy_wavelength(self.get_resonant_energy(harmonic), 'eV')
+
+        if verbose:
+            print(f"undulator resonant energy set to {self.get_resonant_energy(harmonic):.3f} eV (harm. n°: {harmonic}) with:")
+            print(f"\t>> Bh: {self.B_horizontal:.6f}")
+            print(f"\t>> Bv: {self.B_vertical:.6f}")
 
     def set_waist(self, **kwargs) -> None:
         """
