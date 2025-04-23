@@ -16,21 +16,24 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'GPL-3.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
-__changed__ = '23/JAN/2025'
+__changed__ = '18/FEB/2025'
 
 import numpy as np
+import scipy.optimize as opt
+from numba import njit, prange
 from scipy.constants import physical_constants
-from scipy.special import erf
+from scipy.special import erf, jv
 
 from barc4sr.aux_energy import energy_wavelength, get_gamma
-from barc4sr.aux_syned import write_syned_file, read_syned_file
+from barc4sr.aux_syned import read_syned_file, write_syned_file #, write_spectra_file
 
-PLANCK = physical_constants["Planck constant"][0]
-LIGHT = physical_constants["speed of light in vacuum"][0]
+ALPHA =  physical_constants["fine-structure constant"][0]
 CHARGE = physical_constants["atomic unit of charge"][0]
+LIGHT = physical_constants["speed of light in vacuum"][0]
 MASS = physical_constants["electron mass"][0]
 PI = np.pi
-
+PLANCK = physical_constants["Planck constant"][0]
+Z0 = physical_constants["characteristic impedance of vacuum"][0]
 
 class ElectronBeam(object):
     """
@@ -181,6 +184,9 @@ class ElectronBeam(object):
 
         self.to_rms()
 
+    # def from_spectra(self):
+    #     pass
+
     def propagate(self, dist: float) -> None:
         """
         Propagates electron beam statistical moments over a distance in free space.
@@ -210,9 +216,9 @@ class ElectronBeam(object):
         """
         Prints electron beam rms sizes and divergences 
         """
-        print(f"electron beam:\n\
-            >> x/xp = {self.e_x*1e6:0.2f} um vs. {self.e_xp*1e6:0.2f} urad\n\
-            >> y/yp = {self.e_y*1e6:0.2f} um vs. {self.e_yp*1e6:0.2f} urad")
+        print("electron beam:")
+        print(f"\t>> x/xp = {self.e_x*1e6:0.2f} um vs. {self.e_xp*1e6:0.2f} µrad")
+        print(f"\t>> y/yp = {self.e_y*1e6:0.2f} um vs. {self.e_yp*1e6:0.2f} µrad")
             
     def get_gamma(self) -> float:
         """Calculate the Lorentz factor (γ) based on the energy of electrons in GeV."""
@@ -246,6 +252,7 @@ class MagneticStructure(object):
                 - "w", "wig", "wiggler" for wiggler.
                 - "bm", "bending magnet", "bending_magnet" for bending magnet.
             **kwargs: Additional optional parameters based on the magnetic structure type:
+                - centre (float): centre of the mag. structure (in meters) in relation to where the electron beam moments are calculated. Defaults to 0.
                 For undulators and wigglers:
                     - K_vertical (float): Vertical deflection parameter (K-value).
                     - B_vertical_phase (float): Phase offset for the vertical magnetic field in radians. Defaults to 0.
@@ -283,6 +290,8 @@ class MagneticStructure(object):
 
         self.B_vertical = B_vertical
         self.B_horizontal = B_horizontal
+
+        self.centre = kwargs.get("centre", 0)
 
         if mag_structure in und + wig:
             self.K_vertical = kwargs.get("K_vertical", None)
@@ -361,6 +370,25 @@ class SynchrotronSource(object):
 
         write_syned_file(json_file, light_source_name, self.ElectronBeam, self.MagneticStructure)
 
+    # def write_spectra_config(self, json_file: str, light_source_name: str=None):
+    #     """
+    #     Writes a SPECTRA JSON configuration file.
+
+    #     Parameters:
+    #         json_file (str): The path to the JSON file where the dictionary will be written.
+    #         light_source_name (str): The name of the light source.
+    #     """
+    #     if light_source_name is None:
+    #         light_source_name = json_file.split('/')[-1].replace('.json','')
+
+    #     write_spectra_file(json_file, light_source_name, self.ElectronBeam, self.MagneticStructure)
+
+    def print_attributes(self) -> None:
+        """
+        Prints all attribute of object
+        """
+        for i in (vars(self)):
+            print("{0:10}: {1}".format(i, vars(self)[i]))
 
 class UndulatorSource(SynchrotronSource):
     """
@@ -382,6 +410,12 @@ class UndulatorSource(SynchrotronSource):
         self.wavelength = None
         self.sigma_u = None
         self.sigma_up = None
+
+        self.first_ring = None
+
+        self.on_axis_flux = None
+        self.central_cone_flux = None
+        self.total_power = None
 
         super().__init__(**kwargs)
 
@@ -406,6 +440,11 @@ class UndulatorSource(SynchrotronSource):
         verbose = kwargs.get('verbose', False)
         direction = kwargs.get('direction', None)
         wavelength = kwargs.get('wavelength', None)
+
+        self.MagneticStructure.B_horizontal = None
+        self.MagneticStructure.K_horizontal = None
+        self.MagneticStructure.B_vertical = None
+        self.MagneticStructure.K_vertical = None
         
         if 'B_horizontal' in kwargs:
             self.MagneticStructure.B_horizontal = kwargs['B_horizontal']
@@ -427,12 +466,11 @@ class UndulatorSource(SynchrotronSource):
                                      verbose=verbose)
             self.wavelength = wavelength
         else:
-            self.MagneticStructure.harmonic = kwargs.get('harmonic', self.harmonic)
+            self.MagneticStructure.harmonic = kwargs.get('harmonic', 1)
             if self.B_horizontal is not None or self.B_vertical is not None:
-                self.set_K_from_magnetic_field(self.B_horizontal, self.B_vertical)
-
-            if self.K_horizontal is not None or self.K_vertical is not None:
-                self.set_magnetic_field_from_K(self.K_horizontal, self.K_vertical)
+                self.set_K_from_magnetic_field(self.B_horizontal, self.B_vertical, verbose=verbose)
+            elif self.K_horizontal is not None or self.K_vertical is not None:
+                self.set_magnetic_field_from_K(self.K_horizontal, self.K_vertical, verbose=verbose)
 
             K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
             gamma = self.get_gamma()
@@ -440,6 +478,7 @@ class UndulatorSource(SynchrotronSource):
             
         mth_emittance = kwargs.get('mth_emittance', 0)
         mth_fillament_emittance = kwargs.get('mth_fillament_emittance', 0)
+
         cund = kwargs.get('center_undulator', 0)
         css = kwargs.get('center_straight_section', 0)
 
@@ -449,6 +488,13 @@ class UndulatorSource(SynchrotronSource):
         self.set_filament_emittance(verbose=verbose, wavelength=wavelength, mth=mth_fillament_emittance)
         self.set_waist(verbose=verbose, center_undulator=cund, center_straight_section=css)
         self.set_emittance(verbose=verbose, mth=mth_emittance)
+
+        self.set_central_cone(verbose=verbose)
+        self.set_radiation_rings(verbose=verbose)
+
+        self.set_on_axis_flux(verbose=verbose)
+        self.set_central_cone_flux(verbose=verbose)
+        self.set_total_power(verbose=verbose)
 
     def set_resonant_energy(self, energy: float, direction: str, verbose: bool=False,
                             **kwargs) -> None:
@@ -524,37 +570,11 @@ class UndulatorSource(SynchrotronSource):
             self.MagneticStructure.K_horizontal = K*np.sqrt(1/2)
         else:
             raise ValueError("invalid value: direction should be in ['v','h','b']")
-
+        self.set_magnetic_field_from_K(self.MagneticStructure.K_horizontal, self.MagneticStructure.K_vertical)
         if verbose:
-            print(f"undulator resonant energy set to {energy:.3f} eV (harm. n°: {harmonic}) with:\n\
-        >> Kh: {self.K_horizontal:.6f}\n\
-        >> Kv: {self.K_vertical:.6f}")
-
-    def set_K_from_magnetic_field(self, B_horizontal: float=None, B_vertical: float=None) -> None:
-        """
-        Sets the K-value based on the magnetic field strength.
-
-        Args:
-            B_horizontal (float): Magnetic field strength in the horizontal direction.
-            B_vertical (float): Magnetic field strength in the vertical direction.
-        """
-        if B_horizontal is not None:
-            self.MagneticStructure.K_horizontal = CHARGE * B_horizontal * self.period_length / (2 * PI * MASS * LIGHT)
-        if B_vertical is not None:
-            self.MagneticStructure.K_vertical = CHARGE * B_vertical * self.period_length / (2 * PI * MASS * LIGHT)
-
-    def set_magnetic_field_from_K(self, K_horizontal: float=None, K_vertical: float=None) -> None:
-        """
-        Sets the magnetic field strength based on the K-value.
-
-         Args:
-            K_horizontal (float): Horizonral deflection parameter.
-            K_vertical (float): Vertical deflection parameter.
-        """
-        if K_horizontal is not None:
-            self.MagneticStructure.B_horizontal = K_horizontal * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
-        if K_vertical is not None:
-            self.MagneticStructure.B_vertical = K_vertical * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
+            print(f"undulator resonant energy set to {energy:.3f} eV (harm. n°: {harmonic}) with:")
+            print(f"\t>> Kh: {self.K_horizontal:.6f}")
+            print(f"\t>> Kv: {self.K_vertical:.6f}")
 
     def get_resonant_energy(self, harmonic: int) -> float:
         """
@@ -580,6 +600,71 @@ class UndulatorSource(SynchrotronSource):
         else:
             energy = self.get_resonant_energy(harmonic)
             print(f">> resonant energy {energy:.2f} eV")
+
+    def set_K_from_magnetic_field(self, B_horizontal: float=None, B_vertical: float=None, verbose: bool=False, **kwargs) -> None:
+        """
+        Sets the K-value based on the magnetic field strength.
+
+        Args:
+            B_horizontal (float): Magnetic field strength in the horizontal direction.
+            B_vertical (float): Magnetic field strength in the vertical direction.
+            verbose (bool, optional): If True, prints additional information. Default is False.
+        **kwargs:
+            - harmonic (int, optional): The harmonic number to use in the calculation.
+        """
+        harmonic = kwargs.get('harmonic', self.harmonic)
+
+        self.MagneticStructure.B_horizontal = 0
+        self.MagneticStructure.K_horizontal = 0
+        self.MagneticStructure.B_vertical = 0
+        self.MagneticStructure.K_vertical = 0
+
+        if B_horizontal is not None:
+            self.MagneticStructure.B_horizontal = B_horizontal
+            self.MagneticStructure.K_horizontal = CHARGE * B_horizontal * self.period_length / (2 * PI * MASS * LIGHT)
+        if B_vertical is not None:
+            self.MagneticStructure.B_vertical = B_vertical
+            self.MagneticStructure.K_vertical = CHARGE * B_vertical * self.period_length / (2 * PI * MASS * LIGHT)
+
+        self.wavelength = energy_wavelength(self.get_resonant_energy(harmonic), 'eV')
+
+        if verbose:
+            print(f"undulator resonant energy set to {self.get_resonant_energy(harmonic):.3f} eV (harm. n°: {harmonic}) with:")
+            print(f"\t>> Kh: {self.K_horizontal:.6f}")
+            print(f"\t>> Kv: {self.K_vertical:.6f}")
+
+
+    def set_magnetic_field_from_K(self, K_horizontal: float=None, K_vertical: float=None, verbose: bool=False, **kwargs) -> None:
+        """
+        Sets the magnetic field strength based on the K-value.
+
+         Args:
+            K_horizontal (float): Horizonral deflection parameter.
+            K_vertical (float): Vertical deflection parameter.
+            verbose (bool, optional): If True, prints additional information. Default is False.
+        **kwargs:
+            - harmonic (int, optional): The harmonic number to use in the calculation.
+        """
+
+        harmonic = kwargs.get('harmonic', self.harmonic)
+
+        self.MagneticStructure.B_horizontal = 0
+        self.MagneticStructure.K_horizontal = 0
+        self.MagneticStructure.B_vertical = 0
+        self.MagneticStructure.K_vertical = 0
+        if K_horizontal is not None:
+            self.MagneticStructure.K_horizontal = K_horizontal
+            self.MagneticStructure.B_horizontal = K_horizontal * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
+        if K_vertical is not None:
+            self.MagneticStructure.K_vertical = K_vertical
+            self.MagneticStructure.B_vertical = K_vertical * (2 * PI * MASS * LIGHT) / (self.period_length * CHARGE)
+
+        self.wavelength = energy_wavelength(self.get_resonant_energy(harmonic), 'eV')
+
+        if verbose:
+            print(f"undulator resonant energy set to {self.get_resonant_energy(harmonic):.3f} eV (harm. n°: {harmonic}) with:")
+            print(f"\t>> Bh: {self.B_horizontal:.6f}")
+            print(f"\t>> Bv: {self.B_vertical:.6f}")
 
     def set_waist(self, **kwargs) -> None:
         """
@@ -608,9 +693,66 @@ class UndulatorSource(SynchrotronSource):
         self.waist_y = Zy
 
         if verbose :        
-            print(f"photon beam waist positon:\n\
-            >> hor. x ver. waist position = {Zx:0.3f} m vs. {Zy:0.3f} m")
+            print("photon beam waist positon:")
+            print(f"\t>> hor. x ver. waist position = {Zx:0.3f} m vs. {Zy:0.3f} m")
 
+    def set_central_cone(self, verbose: bool=False, **kwargs) -> float:
+
+        dtn = kwargs.get("off_res_wavelength", self.wavelength)
+
+        L = self.period_length*self.number_of_periods
+
+        divergence_krinsky = np.sqrt(self.wavelength/L)
+        divergence_kim = np.sqrt(self.wavelength/2/L)
+        divergence_elleaume = 0.69*np.sqrt(self.wavelength/L)
+
+        # theta = np.linspace(-5, 5,1001)*divergence_krinsky
+
+        # Sigma = 0.5*self.harmonic*(theta/divergence_krinsky)**2 \
+        #     + self.number_of_periods*(self.wavelength/dtn - self.harmonic )
+        # natural_divergence = np.sinc(Sigma)**2
+
+        # e_div_h = gaussian(theta, 1, 0, self.e_xp)
+        # e_div_v = gaussian(theta, 1, 0, self.e_yp)
+
+        # conv_sig_x = np.convolve(natural_divergence, e_div_h, 'same')
+        # conv_sig_x /= np.amax(conv_sig_x)
+
+        # conv_sig_y = np.convolve(natural_divergence, e_div_v, 'same')
+        # conv_sig_y /= np.amax(conv_sig_y)
+
+        if verbose:
+            print("central cone size:")
+            print(f"\t>> {divergence_krinsky*1E6:.2f} µrad (Krinsky's def.)")
+            print(f"\t>> {divergence_kim*1E6:.2f} µrad (Kim's def.)")
+            print(f"\t>> {divergence_elleaume*1E6:.2f} µrad (Elleaume's approx.)")
+
+        # return {'natural_divergence': natural_divergence, 'ebeam_divergence':{'hor': e_div_h, 'ver':e_div_v},
+        #         'undulator_divergence':{'hor': conv_sig_x, 'ver':conv_sig_y}, 'axis':theta}
+
+
+    def set_radiation_rings(self, verbose: bool=False) -> float:
+        """ 
+        Calculate the angular position of the first radiation ring emitted by a planar
+        undulator at a given resonant energy and harmonic based on Eq. 38 from K. J. Kim, 
+        "Optical and power characteristics of synchrotron radiation sources" 
+        [also Erratum 34(4)1243(Apr1995)], Opt. Eng 34(2), 342 (1995). 
+
+        :param verbose: Whether to print results. Defaults to False.
+        
+        :return: Position of the first radiation ring in radians.
+        """
+        K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
+        gamma = self.get_gamma()
+        l = 1
+        theta_nl = 1/gamma * np.sqrt(l/self.harmonic * (1+K**2 /2))
+        if verbose:
+            print("first radiation ring:")
+            print(f"\t>> {theta_nl*1E6:.2f} µrad")
+
+        self.first_ring = theta_nl
+        # return theta_nl
+    
     def set_filament_emittance(self, **kwargs) -> None:
         """
         Sets the zero-emittance source size and divergence.
@@ -636,14 +778,14 @@ class UndulatorSource(SynchrotronSource):
 
         # Kim (laser mode approximation) - doi:10.1016/0168-9002(86)90048-3
         elif mth == 1:
-            self.sigma_u = np.sqrt(self.wavelength*L)/(4*PI)
-            self.sigma_up = np.sqrt(self.wavelength/L)
+            self.sigma_u = np.sqrt(2*self.wavelength*L)/(4*PI)
+            self.sigma_up = np.sqrt(self.wavelength/2/L)
         else:
             raise ValueError("Not a valid method for emittance calculation.")
         
         if verbose :        
-            print(f"filament photon beam:\n\
-            >> u/up = {self.sigma_u*1e6:0.2f} um vs. {self.sigma_up*1e6:0.2f} urad")
+            print("filament photon beam:")
+            print(f"\t>> u/up = {self.sigma_u*1e6:0.2f} µm vs. {self.sigma_up*1e6:0.2f} µrad")
         
     def set_emittance(self, **kwargs) -> None:
         """
@@ -713,10 +855,155 @@ class UndulatorSource(SynchrotronSource):
         self.sigma_y_div = sigma_y_div
 
         if verbose :        
-            print(f"convolved photon beam:\n\
-            >> x/xp = {sigma_x*1e6:0.2f} um vs. {sigma_x_div*1e6:0.2f} urad\n\
-            >> y/yp = {sigma_y*1e6:0.2f} um vs. {sigma_y_div*1e6:0.2f} urad")
-     
+            print("convolved photon beam:")
+            print(f"\t>> x/xp = {sigma_x*1e6:0.2f} um vs. {sigma_x_div*1e6:0.2f} urad")
+            print(f"\t>> y/yp = {sigma_y*1e6:0.2f} um vs. {sigma_y_div*1e6:0.2f} urad")
+
+    def set_on_axis_flux(self, verbose: bool=False) -> float:
+        """ 
+        Calculate the peak flux density [ph/s/mrad²/0.1%bw] at a given resonant energy and 
+        harmonic based on Eq. 39 (and 40) from K. J. Kim, "Optical and power characteristics 
+        of synchrotron radiation sources" [also Erratum 34(4)1243(Apr1995)],  Opt. Eng 34(2), 342 (1995). 
+
+        :param verbose: Whether to print results. Defaults to False.
+        
+        :return: Peak flux density in [ph/s/mrad²/0.1%bw].
+        """
+        K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
+
+        if self.K_vertical == 0 or self.K_horizontal == 0:
+            und_type = 'planar'
+        else:
+            und_type = 'helical'
+
+        gamma = self.get_gamma()
+        dw_w = 0.1/100
+        N2 = self.number_of_periods**2
+        n = self.harmonic
+        I = self.current
+        d2Fn_d2phi = (ALPHA*N2*(gamma**2)*dw_w*I/CHARGE)*Fn(K, n)*1E-6
+        
+        # RC20250219 - sanity check
+        # d2Fn_d2phi_bis = 1.74*1E14*(self.number_of_periods**2)*(self.energy_in_GeV**2)*self.current*Fn(K, self.harmonic)
+        if verbose:
+            print("on axis flux:")
+            print(f"\t>> {d2Fn_d2phi:.3e} ph/s/mrad²/0.1%bw")
+        self.on_axis_flux = d2Fn_d2phi
+        # return d2Fn_d2phi
+
+    def set_central_cone_flux(self, verbose: bool=False) -> float:
+        """ 
+        Calculate the total flux integrated over the central cone in [ph/s/0.1%bw] at a given 
+        resonant energy and harmonic based on Eq. 41 and 42 from K. J. Kim, "Optical and 
+        power characteristics of synchrotron radiation sources" [also Erratum 34(4)1243(Apr1995)],
+            Opt. Eng 34(2), 342 (1995). 
+
+        :param verbose: Whether to print results. Defaults to False.
+        
+        :return: Integrated flux in [ph/s/0.1%bw].
+        """
+        K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
+
+        dw_w = 0.1/100
+        N = self.number_of_periods
+        n = self.harmonic
+        I = self.current
+        Qn = (1+K**2/2)*Fn(K, n)/n
+
+        flux = PI*ALPHA*N*dw_w*I/CHARGE*Qn
+
+        # RC20250219 - sanity check
+        # flux_bis = 1.431*1E14*self.number_of_periods*self.current*Qn
+
+        if verbose:
+            print("flux within the central cone:")
+            print(f"\t>> {flux:.3e} ph/s/0.1%bw")
+        self.central_cone_flux = flux
+        # return flux
+
+    def set_total_power(self, verbose: bool=False) -> float:
+        """ 
+        Calculate the total power emitted by a planar undulator in watts (W) based on Eq. 56 
+        from K. J. Kim, "Optical and power characteristics of synchrotron radiation sources"
+        [also Erratum 34(4)1243(Apr1995)], Opt. Eng 34(2), 342 (1995). 
+
+        :param verbose: Whether to print results. Defaults to False.
+        
+        :return: Total power emitted by the undulator in watts (W).
+        """
+        gamma = self.get_gamma()
+
+        K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
+        
+        tot_pow = (self.number_of_periods*Z0*self.current*CHARGE*2*PI*LIGHT*gamma**2*K**2)/(6*self.period_length)
+        if verbose:
+            print("total integrated power:")
+            print(f"\t>> {tot_pow:.3e} W")
+
+        self.total_power = tot_pow
+        # return tot_pow
+
+    def get_power_through_slit(self, hor_slit: float, ver_slit: float, verbose: bool=False, **kwargs) -> float:
+        """ 
+        Calculate the power emitted by a planar undulator passing through a slit in watts (W), 
+        based on Eq. 50  from K. J. Kim, "Optical and power characteristics of synchrotron 
+        radiation sources" [also Erratum 34(4)1243(Apr1995)], Opt. Eng 34(2), 342 (1995).
+
+        The integration is performed only over one quadrant (positive phi and psi) for 
+        computational efficiency, and the result is scaled by 4, leveraging symmetry 
+        about zero in both directions.
+
+        :param hor_slit (float): Horizontal slit size [rad].
+        :param ver_slit (float): Vertical slit size [rad].
+        :param verbose: Whether to print results. Defaults to False.
+
+        :return: Power passing through the slit in watts (W).
+        """
+
+        npix = kwargs.get("npix", 501)
+
+        K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
+
+        if self.K_vertical == 0 or self.K_horizontal == 0:
+            und_type = 'planar'
+        else:
+            und_type = 'helical'
+
+        gamma = self.get_gamma()
+
+        # positive quadrant
+        dphi = np.linspace(0, hor_slit/2, npix)
+        dpsi = np.linspace(0, ver_slit/2, npix)
+
+        gk = G_K(K)
+
+        self.set_total_power(verbose=False)
+        d2P_d2phi_0 = self.total_power*(gk*21*gamma**2)/(16*PI*K)
+
+        quadrant = compute_f_K_numba(dphi, dpsi, K, gamma, gk)
+
+        full_quadrant = np.block([
+            [np.flip(np.flip(quadrant[1:, 1:], axis=0), axis=1),   # Top-left quadrant
+             np.flip(quadrant[1:, :], axis=0)],                    # Top-right quadrant
+            [np.flip(quadrant[:, 1:], axis=1),                     # Bottom-left quadrant
+             quadrant]                                             # Bottom-right quadrant
+        ])
+
+        dphi = np.linspace(-hor_slit / 2, hor_slit / 2, full_quadrant.shape[1])
+        dpsi = np.linspace(-ver_slit / 2, ver_slit / 2, full_quadrant.shape[0])
+
+        dphi_step = dphi[1] - dphi[0]
+        dpsi_step = dpsi[1] - dpsi[0]
+
+        d2P_d2phi = d2P_d2phi_0*full_quadrant
+
+        CumPow = d2P_d2phi.sum()*dphi_step*dpsi_step
+
+        if verbose:
+            print(f"Power emitted through a {hor_slit*1E3:.3f} x {ver_slit*1E3:.3f} mrad² slit: {CumPow:.3f} W")
+
+        return CumPow
+
 
 class BendingMagnetSource(SynchrotronSource):
     """
@@ -764,6 +1051,8 @@ class BendingMagnetSource(SynchrotronSource):
             else:
                 self.set_bm_B_from_radius(radius=self.radius, 
                                           verbose=verbose)
+                
+        self.get_B_central_position(**kwargs)
                 
     def set_bm_B_from_critical_energy(self, energy: float, verbose: bool=False) -> None:
         """
@@ -869,3 +1158,80 @@ class BendingMagnetSource(SynchrotronSource):
             print(f"Extraction at {-zpos:.3f} m from the centre of the bending magnet.")
             print(f">> {(0.5*self.length - zpos):.3f} m from the BM entrance.")
         return zpos
+
+#***********************************************************************************
+# **planar undulator** auxiliary functions 
+# K. J. Kim, "Optical and power characteristics of synchrotron radiation sources" 
+# [also Erratum 34(4)1243(Apr1995)],  Opt. Eng 34(2), 342 (1995)
+#***********************************************************************************
+
+def G_K(K):
+    """ Angular function f_k, based on Eq. 52 from K. J. Kim, "Optical and power 
+    characteristics of synchrotron radiation sources" [also Erratum 34(4)1243(Apr1995)],
+    Opt. Eng 34(2), 342 (1995).
+    """
+    numerator = K*(K**6 + 24/7 * K**4 + 4*K**2 + 16/7)
+    denominator = (1+K**2)**(7/2)
+
+    return numerator/denominator
+
+@njit(parallel=True)
+def compute_f_K_numba(dphi, dpsi, K, gamma, gk):
+    npix = len(dphi)
+    angular_function_f_K = np.zeros((npix, npix))
+    for j in prange(npix):
+        for i in range(npix):
+            angular_function_f_K[i, j] = f_K_numba(dphi[j], dpsi[i], K, gamma)
+    return angular_function_f_K*16*K/(7*np.pi*gk)
+
+@njit
+def f_K_numba(phi, psi, K, gamma):
+    """ Angular function f_k, based on Eq. 53 from K. J. Kim, "Optical and power 
+    characteristics of synchrotron radiation sources" [also Erratum 34(4)1243(Apr1995)],
+    Opt. Eng 34(2), 342 (1995).
+    """
+    n_points = int(2*np.pi*1001)  # Number of integration points
+    return integrate_trapezoidal_numba(f_K_integrand_numba, -np.pi, np.pi, n_points, phi, psi, K, gamma)
+
+@njit
+def f_K_integrand_numba(csi, phi, psi, K, gamma):
+    """ Angular function f_k, based on Eq. 53 from K. J. Kim, "Optical and power 
+    characteristics of synchrotron radiation sources" [also Erratum 34(4)1243(Apr1995)],
+    Opt. Eng 34(2), 342 (1995).
+    """
+    X = gamma * psi
+    Y = K * np.cos(csi) - gamma * phi
+    D = 1 + X**2 + Y**2
+    return (np.sin(csi)**2) * ((1 + X**2 - Y**2)**2 + 4 * (X * Y)**2) / (D**5)
+
+@njit
+def integrate_trapezoidal_numba(func, a, b, n, *args):
+    """Custom trapezoidal integration."""
+    h = (b - a) / n
+    s = 0.5 * (func(a, *args) + func(b, *args))
+    for i in range(1, n):
+        s += func(a + i * h, *args)
+    return s * h
+
+def Fn(K, n):
+    """
+    Function F_n(K), based on Eq. 40 from K. J. Kim, "Optical and power characteristics
+    of synchrotron radiation sources" [also Erratum 34(4)1243(Apr1995)], Opt. Eng 34(2), 342 (1995).
+    """
+    arg_Bessel = 0.25*(n*K**2)/(1 + K**2/2)
+    Jnp1 = jv((n+1)/2, arg_Bessel)
+    Jnm1 = jv((n-1)/2, arg_Bessel)
+    arg_mult = ((K*n)/(1 + K**2/2))**2
+    return arg_mult*(Jnp1 - Jnm1)**2
+
+#***********************************************************************************
+# **other** auxiliary functions 
+#***********************************************************************************
+
+def gaussian(x, a, x0, sigma):
+    return a * np.exp(-((x - x0) ** 2) / (2 * sigma ** 2))
+
+def fit_gaussian(x, fx):
+    p0 = [np.max(fx), x[np.argmax(fx)], np.std(x)]
+    popt, _ = opt.curve_fit(gaussian, x, fx, p0=p0)
+    return popt
