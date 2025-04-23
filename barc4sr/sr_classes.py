@@ -25,7 +25,7 @@ from scipy.constants import physical_constants
 from scipy.special import erf, jv
 
 from barc4sr.aux_energy import energy_wavelength, get_gamma
-from barc4sr.aux_syned import read_syned_file, write_syned_file
+from barc4sr.aux_syned import read_syned_file, write_syned_file #, write_spectra_file
 
 ALPHA =  physical_constants["fine-structure constant"][0]
 CHARGE = physical_constants["atomic unit of charge"][0]
@@ -183,6 +183,9 @@ class ElectronBeam(object):
         self.moment_ypyp = syned["electron_beam"]["moment_ypyp"]
 
         self.to_rms()
+
+    # def from_spectra(self):
+    #     pass
 
     def propagate(self, dist: float) -> None:
         """
@@ -366,6 +369,19 @@ class SynchrotronSource(object):
             light_source_name = json_file.split('/')[-1].replace('.json','')
 
         write_syned_file(json_file, light_source_name, self.ElectronBeam, self.MagneticStructure)
+
+    # def write_spectra_config(self, json_file: str, light_source_name: str=None):
+    #     """
+    #     Writes a SPECTRA JSON configuration file.
+
+    #     Parameters:
+    #         json_file (str): The path to the JSON file where the dictionary will be written.
+    #         light_source_name (str): The name of the light source.
+    #     """
+    #     if light_source_name is None:
+    #         light_source_name = json_file.split('/')[-1].replace('.json','')
+
+    #     write_spectra_file(json_file, light_source_name, self.ElectronBeam, self.MagneticStructure)
 
     def print_attributes(self) -> None:
         """
@@ -1035,6 +1051,8 @@ class BendingMagnetSource(SynchrotronSource):
             else:
                 self.set_bm_B_from_radius(radius=self.radius, 
                                           verbose=verbose)
+                
+        self.get_B_central_position(**kwargs)
                 
     def set_bm_B_from_critical_energy(self, energy: float, verbose: bool=False) -> None:
         """
