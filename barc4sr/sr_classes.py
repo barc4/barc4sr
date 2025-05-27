@@ -22,10 +22,12 @@ import numpy as np
 import scipy.optimize as opt
 from numba import njit, prange
 from scipy.constants import physical_constants
+from scipy.interpolate import interp1d
+from scipy.signal import fftconvolve
 from scipy.special import erf, jv
 
 from barc4sr.aux_energy import energy_wavelength, get_gamma
-from barc4sr.aux_syned import read_syned_file, write_syned_file #, write_spectra_file
+from barc4sr.aux_syned import read_syned_file, write_syned_file  #, write_spectra_file
 
 ALPHA =  physical_constants["fine-structure constant"][0]
 CHARGE = physical_constants["atomic unit of charge"][0]
@@ -415,7 +417,13 @@ class UndulatorSource(SynchrotronSource):
 
         self.on_axis_flux = None
         self.central_cone_flux = None
+        self.coherent_flux = None
+        self.brilliance = None
+
+        self.coherent_fraction = None
+
         self.total_power = None
+        self.power_though_slit = None
 
         super().__init__(**kwargs)
 
@@ -436,10 +444,13 @@ class UndulatorSource(SynchrotronSource):
             mth_fillament_emittance (int): Method for filament emittance calculation. Default is 0.
             center_undulator (float): Center position of the undulator. Default is 0.
             center_straight_section (float): Center position of the straight section. Default is 0.
+            complete (bool): If True, computes full central cone and power-through-slit characteristics.
         """
         verbose = kwargs.get('verbose', False)
         direction = kwargs.get('direction', None)
         wavelength = kwargs.get('wavelength', None)
+
+        complete = kwargs.get('complete', False)
 
         self.MagneticStructure.B_horizontal = None
         self.MagneticStructure.K_horizontal = None
@@ -483,18 +494,32 @@ class UndulatorSource(SynchrotronSource):
         css = kwargs.get('center_straight_section', 0)
 
         if verbose:
+            print('\n>>>>>>>>>>> beam phase-space characteristics <<<<<<<<<<<')
             self.print_rms()
 
         self.set_filament_emittance(verbose=verbose, wavelength=wavelength, mth=mth_fillament_emittance)
+        self.set_radiation_rings(verbose=verbose)
         self.set_waist(verbose=verbose, center_undulator=cund, center_straight_section=css)
         self.set_emittance(verbose=verbose, mth=mth_emittance)
 
-        self.set_central_cone(verbose=verbose)
-        self.set_radiation_rings(verbose=verbose)
+        if verbose:
+            print('\n>>>>>>>>>>> beam spectral characteristics <<<<<<<<<<<')
 
-        self.set_on_axis_flux(verbose=verbose)
-        self.set_central_cone_flux(verbose=verbose)
+        self.get_coherent_fraction(verbose=verbose)
+        self.set_on_axis_flux(verbose=False)
+        if complete:
+            self.get_central_cone_flux(mtd=1, verbose=verbose)
+        else:
+            self.get_central_cone_flux(mtd=0, verbose=verbose)
+
+        self.get_coherent_flux(verbose=verbose)
+        self.get_brilliance(verbose=verbose)
+
+        if verbose:
+            print('\n>>>>>>>>>>> power characteristics <<<<<<<<<<<')
         self.set_total_power(verbose=verbose)
+        if complete:
+            self.get_power_through_slit(verbose=verbose)
 
     def set_resonant_energy(self, energy: float, direction: str, verbose: bool=False,
                             **kwargs) -> None:
@@ -633,7 +658,6 @@ class UndulatorSource(SynchrotronSource):
             print(f"\t>> Kh: {self.K_horizontal:.6f}")
             print(f"\t>> Kv: {self.K_vertical:.6f}")
 
-
     def set_magnetic_field_from_K(self, K_horizontal: float=None, K_vertical: float=None, verbose: bool=False, **kwargs) -> None:
         """
         Sets the magnetic field strength based on the K-value.
@@ -696,40 +720,24 @@ class UndulatorSource(SynchrotronSource):
             print("photon beam waist positon:")
             print(f"\t>> hor. x ver. waist position = {Zx:0.3f} m vs. {Zy:0.3f} m")
 
-    def set_central_cone(self, verbose: bool=False, **kwargs) -> float:
+    def print_central_cone(self, verbose: bool=False, **kwargs) -> float:
+        """
+        Prints the angular divergence estimates of the undulator central cone using various definitions.
 
-        dtn = kwargs.get("off_res_wavelength", self.wavelength)
-
+        Args:
+            verbose (bool): If True, prints detailed angular divergence estimates.
+        """
         L = self.period_length*self.number_of_periods
 
         divergence_krinsky = np.sqrt(self.wavelength/L)
         divergence_kim = np.sqrt(self.wavelength/2/L)
         divergence_elleaume = 0.69*np.sqrt(self.wavelength/L)
 
-        # theta = np.linspace(-5, 5,1001)*divergence_krinsky
-
-        # Sigma = 0.5*self.harmonic*(theta/divergence_krinsky)**2 \
-        #     + self.number_of_periods*(self.wavelength/dtn - self.harmonic )
-        # natural_divergence = np.sinc(Sigma)**2
-
-        # e_div_h = gaussian(theta, 1, 0, self.e_xp)
-        # e_div_v = gaussian(theta, 1, 0, self.e_yp)
-
-        # conv_sig_x = np.convolve(natural_divergence, e_div_h, 'same')
-        # conv_sig_x /= np.amax(conv_sig_x)
-
-        # conv_sig_y = np.convolve(natural_divergence, e_div_v, 'same')
-        # conv_sig_y /= np.amax(conv_sig_y)
-
         if verbose:
             print("central cone size:")
             print(f"\t>> {divergence_krinsky*1E6:.2f} µrad (Krinsky's def.)")
             print(f"\t>> {divergence_kim*1E6:.2f} µrad (Kim's def.)")
             print(f"\t>> {divergence_elleaume*1E6:.2f} µrad (Elleaume's approx.)")
-
-        # return {'natural_divergence': natural_divergence, 'ebeam_divergence':{'hor': e_div_h, 'ver':e_div_v},
-        #         'undulator_divergence':{'hor': conv_sig_x, 'ver':conv_sig_y}, 'axis':theta}
-
 
     def set_radiation_rings(self, verbose: bool=False) -> float:
         """ 
@@ -751,7 +759,6 @@ class UndulatorSource(SynchrotronSource):
             print(f"\t>> {theta_nl*1E6:.2f} µrad")
 
         self.first_ring = theta_nl
-        # return theta_nl
     
     def set_filament_emittance(self, **kwargs) -> None:
         """
@@ -881,45 +888,117 @@ class UndulatorSource(SynchrotronSource):
         N2 = self.number_of_periods**2
         n = self.harmonic
         I = self.current
-        d2Fn_d2phi = (ALPHA*N2*(gamma**2)*dw_w*I/CHARGE)*Fn(K, n)*1E-6
+        self.on_axis_flux = (ALPHA*N2*(gamma**2)*dw_w*I/CHARGE)*Fn(K, n)*1E-6
         
-        # RC20250219 - sanity check
-        # d2Fn_d2phi_bis = 1.74*1E14*(self.number_of_periods**2)*(self.energy_in_GeV**2)*self.current*Fn(K, self.harmonic)
         if verbose:
             print("on axis flux:")
-            print(f"\t>> {d2Fn_d2phi:.3e} ph/s/mrad²/0.1%bw")
-        self.on_axis_flux = d2Fn_d2phi
-        # return d2Fn_d2phi
+            print(f"\t>> {self.on_axis_flux:.3e} ph/s/mrad²/0.1%bw")
 
-    def set_central_cone_flux(self, verbose: bool=False) -> float:
+    def get_central_cone_flux(self, mtd=0, verbose: bool=False, **kwargs):
         """ 
         Calculate the total flux integrated over the central cone in [ph/s/0.1%bw] at a given 
-        resonant energy and harmonic based on Eq. 41 and 42 from K. J. Kim, "Optical and 
-        power characteristics of synchrotron radiation sources" [also Erratum 34(4)1243(Apr1995)],
-            Opt. Eng 34(2), 342 (1995). 
+        resonant energy and harmonic. If mtd is 0, this is based on Eq. 41 and 42 from K. J. Kim,
+        "Optical and  power characteristics of synchrotron radiation sources" 
+        [also Erratum 34(4)1243(Apr1995)], Opt. Eng 34(2), 342 (1995). If mtd is 1, calculation
+        is based on the integration of the convolution between undulator natural divergence and 
+        electron ebam divergence as in Elleaume - doi:10.4324/9780203218235 (Chapter 2.5, Eq. 24)
 
         :param verbose: Whether to print results. Defaults to False.
         
-        :return: Integrated flux in [ph/s/0.1%bw].
+        :return: float: Total photon flux in the central cone [ph/s/0.1%bw].
         """
-        K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
 
-        dw_w = 0.1/100
-        N = self.number_of_periods
-        n = self.harmonic
-        I = self.current
-        Qn = (1+K**2/2)*Fn(K, n)/n
+        if mtd == 0:
+            K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
+            dw_w = 0.1/100
+            N = self.number_of_periods
+            n = self.harmonic
+            I = self.current
+            Qn = (1+K**2/2)*Fn(K, n)/n
+            flux = PI*ALPHA*N*dw_w*I/CHARGE*Qn
+        else:
+            nsigma = kwargs.get("nsigma", 6)
+            dtn = kwargs.get("off_res_wavelength", self.wavelength)
 
-        flux = PI*ALPHA*N*dw_w*I/CHARGE*Qn
-
-        # RC20250219 - sanity check
-        # flux_bis = 1.431*1E14*self.number_of_periods*self.current*Qn
+            divergence = np.amax([self.sigma_x_div, self.sigma_y_div])
+            # natural undulator divergence
+            theta = np.linspace(0, nsigma/2, 1001)*divergence
+            natural_divergence_1d = np.sinc(0.5*self.harmonic*(theta/divergence)**2 
+                                            + self.number_of_periods*(self.wavelength/dtn - self.harmonic))**2
+            nat_div_interp_func = interp1d(theta, natural_divergence_1d, 
+                                           bounds_error=False, fill_value=0)
+            x = np.linspace(-nsigma*divergence/2, nsigma*divergence/2, 2001)
+            y = np.linspace(-nsigma*divergence/2, nsigma*divergence/2, 2001)
+            xx, yy = np.meshgrid(x, y)
+            natural_divergence = nat_div_interp_func(np.sqrt(xx**2 + yy**2))
+            # electron beam divergence
+            ebam_divergence = np.exp(-((xx**2) / (2 * self.e_xp**2) + 
+                                       (yy**2) / (2 * self.e_yp**2)))
+            # electron beam divergence
+            photon_beam_divergence = fftconvolve(natural_divergence, ebam_divergence/ebam_divergence.sum(), mode='same')
+            self.central_cone_flux = np.sum(photon_beam_divergence*self.on_axis_flux)*(x[1]-x[0])*(y[1]-y[0])*1E6
 
         if verbose:
             print("flux within the central cone:")
-            print(f"\t>> {flux:.3e} ph/s/0.1%bw")
-        self.central_cone_flux = flux
-        # return flux
+            print(f"\t>> {self.central_cone_flux:.3e} ph/s/0.1%bw")
+
+    def get_brilliance(self, verbose: bool=False):
+        """
+        Calculates and sets the brilliance (spectral brightness) of the undulator source in 
+        [ph/s/mrad²/mm²/0.1%bw].
+
+        If the central cone flux is not yet computed, it is calculated using the current configuration.
+
+        Args:
+            verbose (bool): If True, prints the calculated brilliance value.
+        """
+        if self.central_cone_flux is None:
+            self.get_central_cone_flux(verbose=verbose)
+        self.brilliance = self.central_cone_flux/(self.sigma_x*self.sigma_x_div*self.sigma_y*self.sigma_y_div*1E12)
+
+        if verbose:
+            print("brilliance:")
+            print(f"\t>> {self.brilliance:.3e} ph/s/mrad²/mm²/0.1%bw")
+
+    def get_coherent_flux(self, verbose: bool=False):
+        """
+        Calculates and sets the coherent flux in [ph/s/0.1%bw].
+
+        If the coherent fraction or central cone flux are not already available, they are computed.
+
+        Args:
+            verbose (bool): If True, prints the coherent flux.
+        """
+        if self.coherent_fraction is None:
+            self.get_coherent_fraction(verbose=verbose)
+
+        if self.central_cone_flux is None:
+            self.get_central_cone_flux(verbose=verbose)
+
+        self.coherent_flux = self.coherent_fraction * self.central_cone_flux / 100
+
+        if verbose:
+            print("coherent flux:")
+            print(f"\t>> {self.coherent_flux:.3e} ph/s/0.1%bw")
+
+    def get_coherent_fraction(self, verbose: bool=False):
+        """
+        Estimates and sets the coherent fraction [%] of the undulator beam.
+
+        This is defined as the product of the ratios of filament beam phase space to total 
+        beam phase space in both transverse directions.
+
+        Args:
+            verbose (bool): If True, prints the coherent fraction estimation.
+        """
+        CF_x = self.sigma_u * self.sigma_up / (self.sigma_x * self.sigma_x_div)
+        CF_y = self.sigma_u * self.sigma_up / (self.sigma_y * self.sigma_y_div)
+
+        self.coherent_fraction = CF_x*CF_y*100
+
+        if verbose:
+            print("coherent fraction (estimation):")
+            print(f"\t>> {self.coherent_fraction:.1f} %")   
 
     def set_total_power(self, verbose: bool=False) -> float:
         """ 
@@ -941,9 +1020,8 @@ class UndulatorSource(SynchrotronSource):
             print(f"\t>> {tot_pow:.3e} W")
 
         self.total_power = tot_pow
-        # return tot_pow
 
-    def get_power_through_slit(self, hor_slit: float, ver_slit: float, verbose: bool=False, **kwargs) -> float:
+    def get_power_through_slit(self, verbose: bool=False, **kwargs) -> float:
         """ 
         Calculate the power emitted by a planar undulator passing through a slit in watts (W), 
         based on Eq. 50  from K. J. Kim, "Optical and power characteristics of synchrotron 
@@ -960,7 +1038,10 @@ class UndulatorSource(SynchrotronSource):
         :return: Power passing through the slit in watts (W).
         """
 
-        npix = kwargs.get("npix", 501)
+        npix = kwargs.get("npix", 251)
+        nsigma = kwargs.get("nsigma", 6)
+        hor_slit= kwargs.get("hor_slit", nsigma*self.sigma_x_div)
+        ver_slit= kwargs.get("ver_slit", nsigma*self.sigma_y_div)
 
         K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
 
@@ -1000,9 +1081,10 @@ class UndulatorSource(SynchrotronSource):
         CumPow = d2P_d2phi.sum()*dphi_step*dpsi_step
 
         if verbose:
-            print(f"Power emitted through a {hor_slit*1E3:.3f} x {ver_slit*1E3:.3f} mrad² slit: {CumPow:.3f} W")
+            print(f"power emitted through a {hor_slit*1E3:.3f} x {ver_slit*1E3:.3f} mrad² slit:")
+            print(f"\t>> {CumPow:.3f} W")
 
-        return CumPow
+        self.power_though_slit = {'power': CumPow, 'slit': {'dh':hor_slit, 'dv':ver_slit}}
 
 
 class BendingMagnetSource(SynchrotronSource):
