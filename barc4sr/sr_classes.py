@@ -507,10 +507,7 @@ class UndulatorSource(SynchrotronSource):
 
         self.get_coherent_fraction(verbose=verbose)
         self.set_on_axis_flux(verbose=False)
-        if complete:
-            self.get_central_cone_flux(mtd=1, verbose=verbose)
-        else:
-            self.get_central_cone_flux(mtd=0, verbose=verbose)
+        self.get_central_cone_flux(mtd=0, verbose=verbose)
 
         self.get_coherent_flux(verbose=verbose)
         self.get_brilliance(verbose=verbose)
@@ -915,7 +912,8 @@ class UndulatorSource(SynchrotronSource):
             n = self.harmonic
             I = self.current
             Qn = (1+K**2/2)*Fn(K, n)/n
-            flux = PI*ALPHA*N*dw_w*I/CHARGE*Qn
+            self.central_cone_flux = PI*ALPHA*N*dw_w*I/CHARGE*Qn
+
         else:
             nsigma = kwargs.get("nsigma", 6)
             dtn = kwargs.get("off_res_wavelength", self.wavelength)
