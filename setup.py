@@ -2,14 +2,14 @@ from setuptools import find_packages, setup
 
 setup(
     name='barc4sr',
-    version='2024.12.04',
+    version='2025.06.13',
     author='Rafael Celestre',
     author_email='rafael.celestre@synchrotron-soleil.fr',
     description='A Python package for Synchrotron Radiation calculations',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
     url='https://github.com/barc4/barc4sr',
-    license='GPL-3.0',
+    license='CC BY-NC-SA 4.0',
     packages=find_packages(),
     install_requires=[
         'numpy>=1.20',
