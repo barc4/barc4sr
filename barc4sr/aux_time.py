@@ -5,7 +5,7 @@ This module provides auxiliary functions for time keeping
 
 __author__ = ['Rafael Celestre']
 __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
-__license__ = 'GPL-3.0'
+__license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
 __changed__ = '25/NOV/2024'

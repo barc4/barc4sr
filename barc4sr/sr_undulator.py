@@ -8,7 +8,7 @@ xoppy.sources module from https://github.com/oasys-kit/xoppylib
 
 __author__ = ['Rafael Celestre']
 __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
-__license__ = 'GPL-3.0'
+__license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '12/MAR/2024'
 __changed__ = '07/Jan/2025'

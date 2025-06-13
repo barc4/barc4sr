@@ -14,7 +14,7 @@ This module provides a collection of functions for processing and analyzing data
 
 __author__ = ['Rafael Celestre']
 __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
-__license__ = 'GPL-3.0'
+__license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '26/JAN/2024'
 __changed__ = '25/NOV/2024'
