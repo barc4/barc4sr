@@ -1,36 +1,93 @@
 #!/bin/python
 
 """
-This module provides auxiliary functions for eplotting barc4sr data
+This module provides auxiliary functions for plotting barc4sr data
 """
 
 __author__ = ['Rafael Celestre']
 __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
-__created__ = '25/NOV/2024'
-__changed__ = '25/NOV/2024'
+__created__ = '13/JUN/2025'
+__changed__ = '14/JUN/2025'
 
-import numpy as np
-from scipy.constants import physical_constants
-
-PLANCK = physical_constants["Planck constant"][0]
-LIGHT = physical_constants["speed of light in vacuum"][0]
-CHARGE = physical_constants["atomic unit of charge"][0]
-MASS = physical_constants["electron mass"][0]
+import matplotlib.pyplot as plt
+from matplotlib import rcParamsDefault
 
 
+def start_plotting(k: float = 1.0) -> None:
+    """
+    Set global Matplotlib plot parameters scaled by factor k.
 
-def plot_electron_trajectory(eBeamTraj, **kwargs):
-    xmin = kwargs.get("xmin", None)
-    xmax = kwargs.get("xmax", None)
-    ymin = kwargs.get("ymin", None)
-    ymax = kwargs.get("ymax", None)
+    Args:
+        k: Scaling factor for font sizes.
+    """
+    plt.rcParams.update(rcParamsDefault)
+    plt.rcParams.update({
+        "text.usetex": False,
+        "font.family": "DeJavu Serif",
+        "font.serif": ["Times New Roman"]
+    })
+    plt.rc('axes', titlesize=15 * k)
+    plt.rc('axes', labelsize=14 * k)
+    plt.rc('xtick', labelsize=13 * k)
+    plt.rc('ytick', labelsize=13 * k)
+    plt.rc('legend', fontsize=12 * k)
 
-    file_name = kwargs.get("file_name", None)
 
-    img = PlotManager(eBeamTraj["eTraj"]["X"]*1E6,  eBeamTraj["eTraj"]["Z"])
-    img.additional_info('electron trajectory', "s [m]",  "[µm]", xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax)
-    img.aesthetics(400, True, True, 0, 1, True, 4).info_1d_plot(0, 'hor.', 0, "-", False, 0, 1).plot_1d(enable=False)
-    img.image = eBeamTraj["eTraj"]["Y"]*1E6
-    img.info_1d_plot(1, 'ver.', 1, "-", False, 0, 1).plot_1d(file_name=file_name, enable=True, hold=True)
+def plot_electron_trajectory(eBeamTraj: dict, direction: str, **kwargs) -> None:
+    """
+    Plot horizontal or vertical electron trajectory from simulation data.
+
+    Args:
+        eBeamTraj: Dictionary containing electron trajectory data.
+        direction: 'horizontal', 'vertical', or 'both'.
+        **kwargs: Optional keyword arguments, e.g., scaling factor `k`.
+    """
+    k = kwargs.get('k', 1)
+    start_plotting(k)
+
+    colors = ['firebrick', 'olive', 'steelblue']
+    x = eBeamTraj['eTraj']['Z']
+
+    if direction.lower() in ['x', 'h', 'hor', 'horizontal']:
+        B = eBeamTraj['eTraj']['By']
+        graph_title = 'Horizontal electron trajectory'
+        axis = 'X'
+    elif direction.lower() in ['y', 'v', 'ver', 'vertical']:
+        B = eBeamTraj['eTraj']['Bx']
+        graph_title = 'Vertical electron trajectory'
+        axis = 'Y'
+    elif direction.lower() in ['b', 'both']:
+        plot_electron_trajectory(eBeamTraj, 'horizontal', **kwargs)
+        plot_electron_trajectory(eBeamTraj, 'vertical', **kwargs)
+        return
+    else:
+        raise ValueError("Direction must be 'horizontal', 'vertical', or 'both'.")
+
+    fig, axes = plt.subplots(3, 1, sharex=True, figsize=(8, 8), height_ratios=[1, 1, 1])
+    fig.suptitle(graph_title, fontsize=16)
+    fig.subplots_adjust(hspace=0.3)
+
+    ys = [
+        B,
+        eBeamTraj['eTraj'][axis] * 1e3,   # mm
+        eBeamTraj['eTraj'][f'{axis}p'] * 1e3  # mrad
+    ]
+    labels = ['B [T]', f'{axis.lower()} [mm]', f"{axis.lower()}' [mrad]"]
+
+    for ax, y, color, label in zip(axes, ys, colors, labels):
+        ax.set_facecolor('white')
+        ax.plot(x, y, color=color, linewidth=1.5, label=label)
+        ax.grid(True, which='both', color='gray', linestyle=':', linewidth=0.5)
+        ax.tick_params(direction='in', top=True, right=True)
+        for spine in ['top', 'right', 'bottom', 'left']:
+            ax.spines[spine].set_visible(True)
+            ax.spines[spine].set_color('black')
+        ax.yaxis.label.set_color('black')
+        ax.legend(loc='upper right', frameon=True)
+
+    axes[-1].set_xlabel('[mm]', color='black')
+    plt.tight_layout()
+    plt.show()
+            

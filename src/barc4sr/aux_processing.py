@@ -47,6 +47,148 @@ if USE_SRWLIB is False:
 CHARGE = physical_constants["atomic unit of charge"][0]
 
 #***********************************************************************************
+# electron trajectory
+#***********************************************************************************
+
+def write_electron_trajectory(file_name:str, eTraj: srwlib.SRWLPrtTrj) -> None:
+    """
+    Saves electron trajectory data to an HDF5 file and returns a dictionary containing the trajectory data.
+
+    This function processes the trajectory data from an `SRWLPrtTrj` object and stores it in both an HDF5 file 
+    and a Python dictionary. 
+
+    Parameters:
+        file_name (str): Base file path for saving the trajectory data. The data will be saved 
+                         in a file with the suffix '_eTraj.h5'.
+        eTraj (SRWLPrtTrj): SRW library object containing the electron trajectory data. The object must include:
+            - `arX`: Array of horizontal positions [m].
+            - `arXp`: Array of horizontal relative velocities (trajectory angles) [rad].
+            - `arY`: Array of vertical positions [m].
+            - `arYp`: Array of vertical relative velocities (trajectory angles) [rad].
+            - `arZ`: Array of longitudinal positions [m].
+            - `arZp`: Array of longitudinal relative velocities (trajectory angles) [rad].
+            - `arBx` (optional): Array of horizontal magnetic field components [T].
+            - `arBy` (optional): Array of vertical magnetic field components [T].
+            - `arBz` (optional): Array of longitudinal magnetic field components [T].
+            - `np`: Number of trajectory points.
+            - `ctStart`: Start value of the independent variable (c*t) for the trajectory [m].
+            - `ctEnd`: End value of the independent variable (c*t) for the trajectory [m].
+
+    Returns:
+        dict: A dictionary containing the trajectory data with the following keys:
+              - "ct": List of time values corresponding to the trajectory points.
+              - "X", "Y", "Z": Lists of positions in the respective axes.
+              - "Xp", "Yp", "Zp": Lists of velocity components (trajectory angles) in the respective axes.
+              - "Bx", "By", "Bz" (optional): Lists of magnetic field components in the respective axes, if present.
+    """
+
+    eTrajDict = {"eTraj":{
+        "ct": [],
+        "X": [],
+        "Xp": [],
+        "Y": [],
+        "Yp": [],
+        "Z": [],
+        "Zp": [],
+    }}
+
+    if hasattr(eTraj, 'arBx'):
+        eTrajDict["eTraj"]["Bx"] = []
+    if hasattr(eTraj, 'arBy'):
+        eTrajDict["eTraj"]["By"] = []
+    if hasattr(eTraj, 'arBz'):
+        eTrajDict["eTraj"]["Bz"] = []
+
+    if file_name is not None:
+        with h5.File(f"{file_name}_eTraj.h5", "w") as f:
+            group = f.create_group("XOPPY_ETRAJ")
+            intensity_group = group.create_group("eTraj")
+            
+            intensity_group.create_dataset("ct", data=np.zeros(eTraj.np))
+            intensity_group.create_dataset("X", data=eTraj.arX)
+            intensity_group.create_dataset("Xp", data=eTraj.arXp)
+            intensity_group.create_dataset("Y", data=eTraj.arY)
+            intensity_group.create_dataset("Yp", data=eTraj.arYp)
+            intensity_group.create_dataset("Z", data=eTraj.arZ)
+            intensity_group.create_dataset("Zp", data=eTraj.arZp)
+            if hasattr(eTraj, 'arBx'):
+                intensity_group.create_dataset("Bx", data=eTraj.arBx)
+            if hasattr(eTraj, 'arBy'):
+                intensity_group.create_dataset("By", data=eTraj.arBy)
+            if hasattr(eTraj, 'arBz'):
+                intensity_group.create_dataset("Bz", data=eTraj.arBz)
+
+    eTrajDict["eTraj"]["ct"] = np.zeros(eTraj.np)
+    eTrajDict["eTraj"]["X"] = np.asarray(eTraj.arX)
+    eTrajDict["eTraj"]["Xp"] = np.asarray(eTraj.arXp)
+    eTrajDict["eTraj"]["Y"] = np.asarray(eTraj.arY)
+    eTrajDict["eTraj"]["Yp"] = np.asarray(eTraj.arYp)
+    eTrajDict["eTraj"]["Z"] = np.asarray(eTraj.arZ)
+    eTrajDict["eTraj"]["Zp"] = np.asarray(eTraj.arZ)
+    eTrajDict["eTraj"]["Bx"] = np.asarray(eTraj.arBx)
+    eTrajDict["eTraj"]["By"] = np.asarray(eTraj.arBy)
+    eTrajDict["eTraj"]["Bz"] = np.asarray(eTraj.arBz)
+
+    return eTrajDict
+    
+
+def read_electron_trajectory(file_path: str) -> dict:
+    """
+    Reads SRW electron trajectory data from a .h5 file (XOPPY_ETRAJ format).
+
+    Args:
+        file_path (str): The path to the .h5 file containing electron trajectory data.
+
+    Returns:
+        dict: A dictionary where keys are the column names (ct, X, Xp, Y, Yp, Z, Zp, Bx, By, Bz),
+            and values are lists containing the corresponding column data from the file.
+    """
+    result = {"eTraj": {}}
+
+    with h5.File(file_path, "r") as f:
+        try:
+            trajectory_group = f["XOPPY_ETRAJ"]["eTraj"]
+        except KeyError:
+            raise ValueError(f"Invalid file structure: {file_path} does not contain 'XOPPY_ETRAJ/eTraj'.")
+
+        # Read datasets
+        for key in trajectory_group.keys():
+            result["eTraj"][key] = trajectory_group[key][:].tolist()
+
+    return result
+
+
+def read_electron_trajectory_dat(file_path: str) -> dict:
+    """
+    Reads SRW electron trajectory data from a .dat file (SRW native format).
+
+    Args:
+        file_path (str): The path to the .dat file containing electron trajectory data.
+
+    Returns:
+        dict: A dictionary where keys are the column names extracted from the header
+            (ct, X, Xp, Y, Yp, Z, Zp, Bx, By, Bz),
+            and values are lists containing the corresponding column data from the file.
+    """
+    data = []
+    header = None
+    with open(file_path, 'r') as file:
+        header_line = next(file).strip()
+        header = [col.split()[0] for col in header_line.split(',')]
+        header[0] = header[0].replace("#","")
+        for line in file:
+            values = line.strip().split('\t')
+            values = [float(value) if value != '' else None for value in values]
+            data.append(values)
+            
+    eTrajDict = {}
+    for i, key in enumerate(header):
+        eTrajDict[key] = np.asarray([row[i] for row in data])
+
+    return eTrajDict
+
+
+#***********************************************************************************
 # Spectrum
 #***********************************************************************************
 
@@ -1102,146 +1244,7 @@ def read_wavefront(file_name: str) -> Dict:
     
     return wftDict
 
-#***********************************************************************************
-# electron trajectory
-#***********************************************************************************
 
-def write_electron_trajectory(file_name:str, eTraj: srwlib.SRWLPrtTrj):
-    """
-    Saves electron trajectory data to an HDF5 file and returns a dictionary containing the trajectory data.
-
-    This function processes the trajectory data from an `SRWLPrtTrj` object and stores it in both an HDF5 file 
-    and a Python dictionary. 
-
-    Parameters:
-        file_name (str): Base file path for saving the trajectory data. The data will be saved 
-                         in a file with the suffix '_eTraj.h5'.
-        eTraj (SRWLPrtTrj): SRW library object containing the electron trajectory data. The object must include:
-            - `arX`: Array of horizontal positions [m].
-            - `arXp`: Array of horizontal relative velocities (trajectory angles) [rad].
-            - `arY`: Array of vertical positions [m].
-            - `arYp`: Array of vertical relative velocities (trajectory angles) [rad].
-            - `arZ`: Array of longitudinal positions [m].
-            - `arZp`: Array of longitudinal relative velocities (trajectory angles) [rad].
-            - `arBx` (optional): Array of horizontal magnetic field components [T].
-            - `arBy` (optional): Array of vertical magnetic field components [T].
-            - `arBz` (optional): Array of longitudinal magnetic field components [T].
-            - `np`: Number of trajectory points.
-            - `ctStart`: Start value of the independent variable (c*t) for the trajectory [m].
-            - `ctEnd`: End value of the independent variable (c*t) for the trajectory [m].
-
-    Returns:
-        dict: A dictionary containing the trajectory data with the following keys:
-              - "ct": List of time values corresponding to the trajectory points.
-              - "X", "Y", "Z": Lists of positions in the respective axes.
-              - "BetaX", "BetaY", "BetaZ": Lists of velocity components (trajectory angles) in the respective axes.
-              - "Bx", "By", "Bz" (optional): Lists of magnetic field components in the respective axes, if present.
-    """
-
-    eTrajDict = {"eTraj":{
-        "ct": [],
-        "X": [],
-        "BetaX": [],
-        "Y": [],
-        "BetaY": [],
-        "Z": [],
-        "BetaZ": [],
-    }}
-
-    if hasattr(eTraj, 'arBx'):
-        eTrajDict["eTraj"]["Bx"] = []
-    if hasattr(eTraj, 'arBy'):
-        eTrajDict["eTraj"]["By"] = []
-    if hasattr(eTraj, 'arBz'):
-        eTrajDict["eTraj"]["Bz"] = []
-
-    if file_name is not None:
-        with h5.File(f"{file_name}_eTraj.h5", "w") as f:
-            group = f.create_group("XOPPY_ETRAJ")
-            intensity_group = group.create_group("eTraj")
-            
-            intensity_group.create_dataset("ct", data=np.zeros(eTraj.np))
-            intensity_group.create_dataset("X", data=eTraj.arX)
-            intensity_group.create_dataset("BetaX", data=eTraj.arXp)
-            intensity_group.create_dataset("Y", data=eTraj.arY)
-            intensity_group.create_dataset("BetaY", data=eTraj.arYp)
-            intensity_group.create_dataset("Z", data=eTraj.arZ)
-            intensity_group.create_dataset("BetaZ", data=eTraj.arZp)
-            if hasattr(eTraj, 'arBx'):
-                intensity_group.create_dataset("Bx", data=eTraj.arBx)
-            if hasattr(eTraj, 'arBy'):
-                intensity_group.create_dataset("By", data=eTraj.arBy)
-            if hasattr(eTraj, 'arBz'):
-                intensity_group.create_dataset("Bz", data=eTraj.arBz)
-
-    eTrajDict["eTraj"]["ct"] = np.zeros(eTraj.np)
-    eTrajDict["eTraj"]["X"] = np.asarray(eTraj.arX)
-    eTrajDict["eTraj"]["BetaX"] = np.asarray(eTraj.arXp)
-    eTrajDict["eTraj"]["Y"] = np.asarray(eTraj.arY)
-    eTrajDict["eTraj"]["BetaY"] = np.asarray(eTraj.arY)
-    eTrajDict["eTraj"]["Z"] = np.asarray(eTraj.arZ)
-    eTrajDict["eTraj"]["BetaZ"] = np.asarray(eTraj.arZ)
-    eTrajDict["eTraj"]["Bx"] = np.asarray(eTraj.arBx)
-    eTrajDict["eTraj"]["By"] = np.asarray(eTraj.arBy)
-    eTrajDict["eTraj"]["Bz"] = np.asarray(eTraj.arBz)
-
-    return eTrajDict
-    
-
-def read_electron_trajectory(file_path: str) -> Dict[str, List[Union[float, None]]]:
-    """
-    Reads SRW electron trajectory data from a .h5 file (XOPPY_ETRAJ format).
-
-    Args:
-        file_path (str): The path to the .h5 file containing electron trajectory data.
-
-    Returns:
-        dict: A dictionary where keys are the column names (ct, X, BetaX, Y, BetaY, Z, BetaZ, Bx, By, Bz),
-            and values are lists containing the corresponding column data from the file.
-    """
-    result = {"eTraj": {}}
-
-    with h5.File(file_path, "r") as f:
-        try:
-            trajectory_group = f["XOPPY_ETRAJ"]["eTraj"]
-        except KeyError:
-            raise ValueError(f"Invalid file structure: {file_path} does not contain 'XOPPY_ETRAJ/eTraj'.")
-
-        # Read datasets
-        for key in trajectory_group.keys():
-            result["eTraj"][key] = trajectory_group[key][:].tolist()
-
-    return result
-
-
-def read_electron_trajectory_dat(file_path: str) -> Dict[str, List[Union[float, None]]]:
-    """
-    Reads SRW electron trajectory data from a .dat file (SRW native format).
-
-    Args:
-        file_path (str): The path to the .dat file containing electron trajectory data.
-
-    Returns:
-        dict: A dictionary where keys are the column names extracted from the header
-            (ct, X, BetaX, Y, BetaY, Z, BetaZ, Bx, By, Bz),
-            and values are lists containing the corresponding column data from the file.
-    """
-    data = []
-    header = None
-    with open(file_path, 'r') as file:
-        header_line = next(file).strip()
-        header = [col.split()[0] for col in header_line.split(',')]
-        header[0] = header[0].replace("#","")
-        for line in file:
-            values = line.strip().split('\t')
-            values = [float(value) if value != '' else None for value in values]
-            data.append(values)
-            
-    eTrajDict = {}
-    for i, key in enumerate(header):
-        eTrajDict[key] = np.asarray([row[i] for row in data])
-
-    return eTrajDict
 
 #***********************************************************************************
 # magnetic measurments
