@@ -8,6 +8,7 @@ This module provides the barc4sr classes:
 - SynchrotronSource
 - UndulatorSource(SynchrotronSource)
 - BendingMagnetSource(SynchrotronSource)
+- ArbitraryMagneticFieldSource(SynchrotronSource)
 
 """
 
@@ -16,7 +17,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
-__changed__ = '18/FEB/2025'
+__changed__ = '17/JUN/2025'
 
 import numpy as np
 import scipy.optimize as opt
@@ -247,14 +248,17 @@ class MagneticStructure(object):
         Initializes the MagneticStructure class with parameters representing the magnetic field and geometry.
 
         Args:
-            B_vertical (float): Vertical magnetic field component (in Tesla).
-            B_horizontal (float): Horizontal magnetic field component (in Tesla).
-            mag_structure (str): Type of magnetic structure, which can be:
-                - "u", "und", "undulator" for undulator (default).
-                - "w", "wig", "wiggler" for wiggler.
-                - "bm", "bending magnet", "bending_magnet" for bending magnet.
+            B_vertical (float): Vertical magnetic field (T).
+            B_horizontal (float): Horizontal magnetic field (T).
+            mag_structure (str): One of:
+                - Undulator: 'u', 'und', 'undulator'
+                - Wiggler: 'w', 'wig', 'wiggler'
+                - Bending magnet: 'bm', 'bending magnet', 'bending_magnet'
+                - Arbitrary field: 'a', 'arbitrary', 'measured'
+
             **kwargs: Additional optional parameters based on the magnetic structure type:
                 - centre (float): centre of the mag. structure (in meters) in relation to where the electron beam moments are calculated. Defaults to 0.
+
                 For undulators and wigglers:
                     - K_vertical (float): Vertical deflection parameter (K-value).
                     - B_vertical_phase (float): Phase offset for the vertical magnetic field in radians. Defaults to 0.
@@ -269,6 +273,7 @@ class MagneticStructure(object):
                     - harmonic (int): Harmonic number. Defaults to 1.
                     - period_length (float): Length of one period (in meters).
                     - number_of_periods (int): Number of periods.
+
                 For bending magnets:
                     - radius (float): Radius of curvature (in meters). Effective if > 0.
                     - length (float): Effective length of the magnet (in meters). Effective if > 0.
@@ -285,7 +290,9 @@ class MagneticStructure(object):
         und = ['u', 'und', 'undulator']
         wig = ['w', 'wig', 'wiggler']
         bm = ['bm', 'bending magnet', 'bending_magnet']
-        allowed_mag_structure = [ms for group in [und, wig, bm] for ms in group]
+        arb = ['a', 'arbitrary', 'measured']
+
+        allowed_mag_structure = [ms for group in [und, wig, bm, arb] for ms in group]
 
         if mag_structure not in allowed_mag_structure:
             raise ValueError(f"Invalid magnetic structure: {mag_structure}. Must be one of {allowed_mag_structure}")
@@ -315,6 +322,9 @@ class MagneticStructure(object):
             self.length_edge = kwargs.get("length_edge", 0)
             self.extraction_angle = kwargs.get("extraction_angle", None)
             self.critical_energy = kwargs.get("critical_energy", None)
+
+        if mag_structure in arb:
+            self.CLASS_NAME = "Arbitrary"
 
     def print_attributes(self) -> None:
         """
@@ -1238,6 +1248,24 @@ class BendingMagnetSource(SynchrotronSource):
             print(f"Extraction at {-zpos:.3f} m from the centre of the bending magnet.")
             print(f">> {(0.5*self.length - zpos):.3f} m from the BM entrance.")
         return zpos
+
+class ArbitraryMagneticFieldSource(SynchrotronSource):
+    """
+    Class representing an arbitrary magnetic source, which combines an electron beam and 
+    a magnetic structure.
+    """
+    def __init__(self, **kwargs) -> None:
+        """
+        Initializes an instance of the ArbitraryMagneticFieldSource class.
+
+        Args:
+            electron_beam (ElectronBeam): An instance of the ElectronBeam class 
+               representing the electron beam parameters.
+            magnetic_structure (MagneticStructure): An instance of the MagneticStructure 
+               class representing the magnetic structure parameters.
+        """
+        super().__init__(**kwargs)  
+
 
 #***********************************************************************************
 # **planar undulator** auxiliary functions 

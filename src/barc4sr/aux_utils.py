@@ -44,8 +44,7 @@ PI = np.pi
 # SRW interface functions (high level)
 #***********************************************************************************
 
-def set_light_source(file_name: str,
-                     bl: dict,
+def set_light_source(bl: dict,
                      electron_trajectory: bool,
                      id_type: str,
                      **kwargs) -> Tuple[srwlib.SRWLPartBeam, srwlib.SRWLMagFldC, srwlib.SRWLPrtTrj]:
@@ -53,57 +52,50 @@ def set_light_source(file_name: str,
     Set up the light source parameters including electron beam, magnetic structure, and electron trajectory.
 
     Args:
-        file_name (str): The name of the output file.
         bl (dict): Beamline parameters dictionary containing essential information for setup.
         electron_trajectory (bool): Whether to calculate and save electron trajectory.
         id_type (str): Type of magnetic structure, can be undulator (u), wiggler (w), or bending magnet (bm).
 
     Optional Args (kwargs):
+        verbose (bool): Whether to print dialogue.
         ebeam_initial_position (float): Electron beam initial average longitudinal position [m]
         magfield_initial_position (float): Longitudinal position of the magnet center [m]
-        magnetic_measurement (str): Path to the file containing magnetic measurement data.
-        tabulated_undulator_mthd (int): Method to tabulate the undulator field.
 
     Returns:
         Tuple[srwlib.SRWLPartBeam, srwlib.SRWLMagFldC, srwlib.SRWLPrtTrj]: A tuple containing the electron beam,
         magnetic structure, and electron trajectory.
     """    
 
+    verbose = kwargs.get('verbose', True)
     ebeam_initial_position = kwargs.get('ebeam_initial_position', 0)
     magfield_central_position = kwargs.get('magfield_central_position', 0)
-    magnetic_measurement = kwargs.get('magnetic_measurement', None)
-    tabulated_undulator_mthd = kwargs.get('tabulated_undulator_mthd', 0)
 
     # ----------------------------------------------------------------------------------
     # definition of the electron beam
     # ----------------------------------------------------------------------------------
-    print('> Generating the electron beam ... ', end='')
+    if verbose: print('> Generating the electron beam ... ', end='')
     eBeam = set_electron_beam(bl,
                               id_type,
                               ebeam_initial_position=ebeam_initial_position)
-    print('completed')
+    if verbose: print('completed')
     # ----------------------------------------------------------------------------------
     # definition of magnetic structure
     # ----------------------------------------------------------------------------------
-    print('> Generating the magnetic structure ... ', end='')
+    if verbose: print('> Generating the magnetic structure ... ', end='')
     magFldCnt = set_magnetic_structure(bl, 
                                        id_type,
-                                       magnetic_measurement = magnetic_measurement, 
-                                       magfield_central_position = magfield_central_position,
-                                       tabulated_undulator_mthd = tabulated_undulator_mthd)
-    print('completed')
+                                       magfield_central_position = magfield_central_position)
+    if verbose: print('completed')
     # ----------------------------------------------------------------------------------
     # calculate electron trajectory
     # ----------------------------------------------------------------------------------
-    print('> Electron trajectory calculation ... ', end='')
+    if verbose: print('> Electron trajectory calculation ... ', end='')
     if electron_trajectory:
-        # electron_trajectory_file_name = file_name+"_eTraj.dat"
         eTraj = srwlCalcPartTraj(eBeam, magFldCnt)
-        # eTraj.save_ascii(electron_trajectory_file_name)
-        # print(f">>>{electron_trajectory_file_name}<<< ", end='')
     else:
         eTraj = 0
-    print('completed')
+    if verbose: print('completed')
+
     return eBeam, magFldCnt, eTraj
 
 
@@ -168,54 +160,29 @@ def set_magnetic_structure(bl: dict,
 
     Optional Args (kwargs):
         magfield_central_position (float): Longitudinal position of the magnet center [m]
-        magnetic_measurement (str): Path to the tabulated magnetic field data.
         tabulated_undulator_mthd (int): Method to use for generating undulator field if magnetic_measurement is provided. Defaults to 0
 
     Returns:
         srwlib.SRWLMagFldC: Magnetic field container.
 
     """
-    magnetic_measurement = kwargs.get('magnetic_measurement', None)
     magfield_central_position = kwargs.get('magfield_central_position', 0)
 
     if id_type.startswith('u'):
-        tabulated_undulator_mthd = kwargs.get('tabulated_undulator_mthd', 0)
-        if magnetic_measurement is None:    # ideal sinusoidal undulator magnetic structure
-            und = srwlib.SRWLMagFldU()
-            und.set_sin(_per=bl["PeriodID"],
-                        _len=bl['PeriodID']*bl['NPeriods'], 
-                        _bx=bl['Kh']*2*PI*MASS*LIGHT/(CHARGE*bl["PeriodID"]), 
-                        _by=bl['Kv']*2*PI*MASS*LIGHT/(CHARGE*bl["PeriodID"]), 
-                        _phx=bl['MagFieldPhaseH'], 
-                        _phy=bl['MagFieldPhaseV'], 
-                        _sx=bl['MagFieldSymmetryH'], 
-                        _sy=bl['MagFieldSymmetryV'])
+        und = srwlib.SRWLMagFldU()
+        und.set_sin(_per=bl["PeriodID"],
+                    _len=bl['PeriodID']*bl['NPeriods'], 
+                    _bx=bl['Kh']*2*PI*MASS*LIGHT/(CHARGE*bl["PeriodID"]), 
+                    _by=bl['Kv']*2*PI*MASS*LIGHT/(CHARGE*bl["PeriodID"]), 
+                    _phx=bl['MagFieldPhaseH'], 
+                    _phy=bl['MagFieldPhaseV'], 
+                    _sx=bl['MagFieldSymmetryH'], 
+                    _sy=bl['MagFieldSymmetryV'])
 
-            magFldCnt = srwlib.SRWLMagFldC(_arMagFld=[und],
-                                            _arXc=srwlib.array('d', [0.0]),
-                                            _arYc=srwlib.array('d', [0.0]),
-                                            _arZc=srwlib.array('d', [magfield_central_position]))
-            
-        else:    # tabulated magnetic field
-            magFldCnt = srwlib.srwl_uti_read_mag_fld_3d(magnetic_measurement, _scom='#')
-            print(" tabulated magnetic field ... ", end="")
-            if tabulated_undulator_mthd  != 0:   # similar to srwl_bl.set_und_per_from_tab()
-                # TODO: parametrise
-                """Setup periodic Magnetic Field from Tabulated one
-                :param _rel_ac_thr: relative accuracy threshold
-                :param _max_nh: max. number of harmonics to create
-                :param _max_per: max. period length to consider
-                """
-                _rel_ac_thr=0.05
-                _max_nh=50
-                _max_per=0.1
-                arHarm = []
-                for i in range(_max_nh): 
-                    arHarm.append(srwlib.SRWLMagFldH())
-                magFldCntHarm = srwlib.SRWLMagFldC(srwlib.SRWLMagFldU(arHarm))
-                srwlib.srwl.UtiUndFromMagFldTab(magFldCntHarm, magFldCnt, [_rel_ac_thr, _max_nh, _max_per])
-                return magFldCntHarm
-            
+        magFldCnt = srwlib.SRWLMagFldC(_arMagFld=[und],
+                                        _arXc=srwlib.array('d', [0.0]),
+                                        _arYc=srwlib.array('d', [0.0]),
+                                        _arZc=srwlib.array('d', [magfield_central_position]))
     if id_type.startswith('bm'):
         # RC:2025JAN08 TODO: recheck magfield central position/extraction angle for edge radiation
         bm = srwlib.SRWLMagFldM()
@@ -230,6 +197,32 @@ def set_magnetic_structure(bl: dict,
                                        _arXc=srwlib.array('d', [0.0]),
                                        _arYc=srwlib.array('d', [0.0]),
                                        _arZc=srwlib.array('d', [magfield_central_position]))
+        
+    if id_type.startswith('arb'):
+
+        field_axis = bl["B"]['s']
+        if np.sum(bl["B"][:, 0]) == 0:
+            Bx = None
+        else:
+            Bx = bl["B"][:, 0]
+
+        if np.sum(bl["B"][:, 1]) == 0:
+            By = None
+        else:
+            By = bl["B"][:, 1]
+
+        if np.sum(bl["B"][:, 2]) == 0:
+            Bz = None
+        else:
+            Bz = bl["B"][:, 2]
+
+        magFldCnt = srwlib.SRWLMagFldC(srwlib.SRWLMagFld3D(
+                                        Bx, By, Bz,
+                                        1, 1, len(field_axis),
+                                        0, 0, field_axis[-1]-field_axis[0]),
+                                        _arXc=srwlib.array('d', [0.0]),
+                                        _arYc=srwlib.array('d', [0.0]),
+                                        _arZc=srwlib.array('d', [magfield_central_position]))
 
     return magFldCnt
 
