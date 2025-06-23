@@ -9,9 +9,12 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '26/JAN/2024'
-__changed__ = '17/JUN/2025'
+__changed__ = '20/JUN/2025'
 
+import json
 import os
+import pickle
+from array import array
 
 import h5py as h5
 import numpy as np
@@ -167,66 +170,125 @@ def read_electron_trajectory_dat(file_path: str) -> dict:
     return eTrajDict
 
 #***********************************************************************************
-# magnetic measurments
+# Wavevfront
 #***********************************************************************************
-
-def write_magnetic_field(mag_field_array: np.ndarray, file_path: str = None) -> srwlib.SRWLMagFld3D:
+   
+def write_wavefront(file_name: str, wfr: srwlib.SRWLWfr, selected_polarisations: list, number_macro_electrons: int) -> dict:
     """
-    Generate a 3D magnetic field object based on the input magnetic field array.
+    Writes wavefront data (intensity, phase, and wavefront object) to an HDF5 file.
 
     Parameters:
-        mag_field_array (np.ndarray): Array containing magnetic field data. Each row corresponds to a point in the 3D space,
-                                      where the first column represents the position along the longitudinal axis, and subsequent 
-                                      columns represent magnetic field components (e.g., Bx, By, Bz).
-        file_path (str): File path to save the generated magnetic field object. If None, the object won't be saved.
+        file_name (str): Base file path for saving the wavefront data. The data will be stored
+                         in a file named '<file_name>_undulator_wfr.h5'.
+        wfr (srwlib.SRWLWfr): The SRW wavefront object containing the simulated electric field.
+        selected_polarisations (list or str): List of polarisations to export. Can be a single
+                         string or a list of strings. Accepted values include: 'LH', 'LV', 
+                         'L45', 'L135', 'CR', 'CL', 'T'.
+        number_macro_electrons (int): Number of macro electrons. Default is -1.
 
     Returns:
-        SRWLMagFld3D: Generated 3D magnetic field object.
-
+        dict: A dictionary containing the wavefront object, computed axes, intensities for selected
+              polarisations, and phase image.
     """
-    nfield, ncomponents = mag_field_array.shape
 
-    field_axis = (mag_field_array[:, 0] - np.mean(mag_field_array[:, 0])) * 1e-3
+    if isinstance(selected_polarisations, str):
+        selected_polarisations = [selected_polarisations]
+    elif not isinstance(selected_polarisations, list):
+        raise ValueError("Input should be a list of strings.")
+    
+    for i, s in enumerate(selected_polarisations):
+        if not s.isupper():
+            selected_polarisations[i] = s.upper()
 
-    Bx = mag_field_array[:, 1]
-    if ncomponents > 2:
-        By = mag_field_array[:, 2]
-    else:
-        By = np.zeros(nfield)
-    if ncomponents > 3:
-        Bz = mag_field_array[:, 3]
-    else:
-        Bz = np.zeros(nfield)
+    wfrDict = {'wfr': wfr}
 
-    magFldCnt = srwlib.SRWLMagFld3D(Bx, By, Bz, 1, 1, nfield - 1, 0, 0, field_axis[-1]-field_axis[0], 1)
+    wfrDict.update({'axis':{'x': np.linspace(wfr.mesh.xStart, wfr.mesh.xFin, wfr.mesh.nx),
+                            'y': np.linspace(wfr.mesh.yStart, wfr.mesh.yFin, wfr.mesh.ny)}})
 
-    if file_path is not None:
-        print(f">>> saving {file_path}")
-        magFldCnt.save_ascii(file_path)
+    all_polarisations = ['LH', 'LV', 'L45', 'L135', 'CR', 'CL', 'T']
+    pol_map = {pol: i for i, pol in enumerate(all_polarisations)}
 
-    return magFldCnt
+    selected_indices = [pol_map[pol] for pol in selected_polarisations if pol in pol_map]
 
+    if not selected_indices:
+        print(">>>>> No valid polarisation found - defaulting to 'T'")
+        return write_wavefront(file_name, wfr, selected_polarisations=['T'])
+    
+    wfrDict.update({'intensity':{}})
 
-def read_magnetic_measurement(file_path: str) -> np.ndarray:
+    _inIntType = int(number_macro_electrons)
+    _inDepType = 3
+    for polarisation, index in zip(selected_polarisations, selected_indices):
+        _inPol = index
+        arInt = array('f', [0]*wfr.mesh.nx*wfr.mesh.ny)
+        srwlib.srwl.CalcIntFromElecField(arInt, wfr, _inPol, _inIntType, _inDepType, wfr.mesh.eStart, 0, 0)
+        wfrDict['intensity'].update({polarisation:np.asarray(arInt, dtype="float64").reshape((wfr.mesh.ny, wfr.mesh.nx))})
+
+    _inDepType = 4
+    arPh = array('d', [0]*wfr.mesh.nx*wfr.mesh.ny)
+    srwlib.srwl.CalcIntFromElecField(arPh, wfr, 6, _inIntType, _inDepType, wfr.mesh.eStart, 0, 0)
+    wfrDict.update({'phase':np.asarray(arPh, dtype="float128").reshape((wfr.mesh.ny, wfr.mesh.nx))})
+
+    if file_name is not None:
+        with h5.File(f'{file_name}_undulator_wfr.h5', 'w') as f:
+            group = f.create_group('XOPPY_WAVEFRONT')
+
+            group.create_dataset('axis_x', data=wfrDict['axis']['x'] * 1e3)  # mm
+            group.create_dataset('axis_y', data=wfrDict['axis']['y'] * 1e3)
+
+            intensity_group = group.create_group('Intensity')
+            for pol, img in wfrDict['intensity'].items():
+                intensity_group.create_dataset(pol, data=img)
+
+            phase_group = group.create_group('Phase')
+            phase_group.create_dataset('image_data', data=wfrDict['phase'])
+
+            wfr_pickled = pickle.dumps(wfr)
+            group.create_dataset('wfr', data=np.void(wfr_pickled))
+    
+    return wfrDict
+
+def read_wavefront(file_name: str) -> dict:
     """
-    Read magnetic measurement data from a file.
+    Reads wavefront data from an HDF5 file and reconstructs the full wavefront dictionary.
 
     Parameters:
-        file_path (str): The path to the file containing magnetic measurement data.
+        file_name (str): Path to the HDF5 file containing wavefront data.
 
     Returns:
-        np.ndarray: A NumPy array containing the magnetic measurement data.
+        dict: Dictionary with keys:
+            - 'wfr': the SRW wavefront object (unpickled).
+            - 'axis': dict with 'x' and 'y' numpy arrays (in meters).
+            - 'intensity': dict with polarisation labels as keys and 2D numpy arrays as values.
+            - 'phase': 2D numpy array of the phase image.
     """
+    if not (file_name.endswith("h5") or file_name.endswith("hdf5")):
+        raise ValueError("Only HDF5 format supported for this function.")
 
-    data = []
+    with h5.File(file_name, "r") as f:
+        group = f["XOPPY_WAVEFRONT"]
 
-    with open(file_path, 'r') as file:
-        for line in file:
-            if not line.startswith('#'):
-                values = line.split( )
-                data.append([float(value) for value in values])
-                
-    return np.asarray(data)
+        x = group["axis_x"][()] * 1e-3  # back to meters
+        y = group["axis_y"][()] * 1e-3
+
+        intensity = {}
+        for pol in group["Intensity"]:
+            intensity[pol] = group["Intensity"][pol][()]
+
+        phase = group["Phase"]["image_data"][()]
+
+        wfr = pickle.loads(group["wfr"][()])
+
+    return {
+        "wfr": wfr,
+        "axis": {
+            "x": x,
+            "y": y,
+        },
+        "intensity": intensity,
+        "phase": phase
+    }
+
 
 if __name__ == '__main__':
 

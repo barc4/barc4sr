@@ -58,14 +58,14 @@ def read_syned_file(json_file: str) -> Dict[str, Any]:
     return data
 
 
-def syned_dictionary(json_file: str, magnetic_measurement: Union[str, None], observation_point: float, 
+def syned_dictionary(json_file: str, magnetic_measurement: str, observation_point: float, 
                      hor_slit: float, ver_slit: float, hor_slit_cen: float, ver_slit_cen: float) -> dict:
     """
     Generate beamline parameters based on a SYNED JSON configuration file and additional input parameters.
 
     Args:
         json_file (str): Path to the SYNED JSON configuration file.
-        magnetic_measurement (Union[str, None]): Path to the file containing magnetic measurement data.
+        magnetic_measurement (str): Path to the file containing magnetic measurement data.
             Overrides SYNED undulator data if provided.
         observation_point (float): Distance to the observation point in meters.
         hor_slit (float): Horizontal slit size in meters.
@@ -123,7 +123,7 @@ def syned_dictionary(json_file: str, magnetic_measurement: Union[str, None], obs
     return beamline
 
 
-def barc4sr_dictionary(light_source: object, magnetic_measurement: Union[str, None], 
+def barc4sr_dictionary(light_source: object, magnetic_measurement: str, 
                        observation_point: float, hor_slit: float, ver_slit: float, 
                        hor_slit_cen: float, ver_slit_cen: float) -> dict:
     """
@@ -131,7 +131,7 @@ def barc4sr_dictionary(light_source: object, magnetic_measurement: Union[str, No
 
     Args:
         light_source (SynchrotronSource): Instance of SynchrotronSource or any object that inherits from it.
-        magnetic_measurement (Union[str, None]): Path to the file containing magnetic measurement data.
+        magnetic_measurement (str): Path to the file containing magnetic measurement data.
             Overrides SYNED undulator data if provided.
         observation_point (float): Distance to the observation point in meters.
         hor_slit (float): Horizontal slit size in meters.

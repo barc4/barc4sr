@@ -98,7 +98,6 @@ def set_light_source(bl: dict,
 
     return eBeam, magFldCnt, eTraj
 
-
 def set_electron_beam(bl: dict, 
                       id_type: str, 
                       **kwargs) -> srwlib.SRWLPartBeam:
@@ -146,7 +145,6 @@ def set_electron_beam(bl: dict,
     eBeam.arStatMom2[10] = sigEperE * sigEperE  # <(E-<E>)^2>/<E>^2
 
     return eBeam
-
 
 def set_magnetic_structure(bl: dict, 
                            id_type: str, 
@@ -259,6 +257,60 @@ def srwlCalcPartTraj(eBeam:srwlib.SRWLPartBeam,
 
     return partTraj
 
+def srwlibCalcElecFieldSR_2D(bl: dict, 
+                             eBeam: srwlib.SRWLPartBeam, 
+                             magFldCnt: srwlib.SRWLMagFldC, 
+                             energy: float,
+                             h_slit_points: int, 
+                             v_slit_points: int,
+                             id_type: str) -> srwlib.SRWLWfr:
+    """
+    Calculates the electric field for synchrotron radiation.
+
+    Args:
+        bl (dict): Dictionary containing beamline parameters.
+        eBeam (srwlib.SRWLPartBeam): Electron beam properties.
+        magFldCnt (srwlib.SRWLMagFldC): Magnetic field container.
+        energy (float): Photon energy [eV].
+        h_slit_points (int): Number of horizontal slit points.
+        v_slit_points (int): Number of vertical slit points.
+        id_type (str): Type of magnetic structure, can be undulator (u), wiggler (w), 
+        bending magnet (bm) or arbitrary (arb).
+
+    Returns:
+        np.ndarray: Array containing intensity data, horizontal and vertical axes
+    """
+    arPrecPar = [0]*7
+    if id_type in ['bm', 'w', 'arb']:
+        arPrecPar[0] = 2      # SR calculation method: 0- "manual", 1- "auto-undulator", 2- "auto-wiggler"
+    else:
+        arPrecPar[0] = 1
+    arPrecPar[1] = 0.001  
+    arPrecPar[2] = 0     # longitudinal position to start integration (effective if < zEndInteg)
+    arPrecPar[3] = 0     # longitudinal position to finish integration (effective if > zStartInteg)
+    arPrecPar[4] = 50000 # Number of points for trajectory calculation
+    arPrecPar[5] = 1     # Use "terminating terms" or not (1 or 0 respectively)
+    arPrecPar[6] = 0     # sampling factor for adjusting nx, ny (effective if > 0)
+
+    mesh = srwlib.SRWLRadMesh(_eStart= energy,
+                              _eFin  = energy,
+                              _ne    = 1,
+                              _xStart= -bl['slitH']/2-bl['slitHcenter'],
+                              _xFin  =  bl['slitH']/2-bl['slitHcenter'],
+                              _nx    =  h_slit_points,
+                              _yStart= -bl['slitV']/2-bl['slitVcenter'],
+                              _yFin  =  bl['slitV']/2-bl['slitVcenter'],
+                              _ny    =  v_slit_points,
+                              _zStart=  bl['distance'])
+    
+    wfr = srwlib.SRWLWfr()
+    wfr.allocate(mesh.ne, mesh.nx, mesh.ny)
+    wfr.mesh = mesh
+    wfr.partBeam = eBeam
+
+    return srwlib.srwl.CalcElecFieldSR(wfr, 0, magFldCnt, arPrecPar)
+
+# srwlibsrwl_wfr_emit_prop_multi_e_2D():
 
 def srwlibCalcElecFieldSR(bl: dict, 
                           eBeam: srwlib.SRWLPartBeam, 
@@ -335,7 +387,6 @@ def srwlibCalcElecFieldSR(bl: dict,
 
         wiggler_regime = bool(energy_array[-1]>51*energy_array[0])
 
-        # if np.allclose(dE1, dE2) and wiggler_regime:
         if wiggler_regime:
             chunk_size = 20
             n_slices = len(energy_array)
@@ -547,7 +598,7 @@ def core_srwlibCalcElecFieldSR(args: Tuple[np.ndarray,
                         else:
                             arI1 = array.array('f', [0]*wfr.mesh.nx*wfr.mesh.ny)
                         srwlib.srwl.CalcIntFromElecField(arI1, wfr, _inPol, _inIntType, _inDepType, energy_array[ie], 0, 0)
-                        data = np.asarray(arI1, dtype="float64").reshape((wfr.mesh.ny, wfr.mesh.nx)) #np.ndarray(buffer=arI1, shape=(wfr.mesh.ny, wfr.mesh.nx),dtype=arI1.typecode)
+                        data = np.asarray(arI1, dtype="float64").reshape((wfr.mesh.ny, wfr.mesh.nx))
                         intensity[ie, :, :] = data
 
         except:

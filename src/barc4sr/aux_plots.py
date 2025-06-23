@@ -11,7 +11,9 @@ __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '13/JUN/2025'
 __changed__ = '16/JUN/2025'
 
+import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
+import numpy as np
 import scipy.integrate as integrate
 from matplotlib import rcParamsDefault
 
@@ -151,3 +153,67 @@ def plot_magnetic_field(eBeamTraj: dict, direction: str, **kwargs) -> None:
     axes[-1].set_xlabel('[mm]', color='black')
     plt.tight_layout()
     plt.show()
+
+def plot_wavefront(wfr: dict, cuts: bool = True, **kwargs) -> None:
+    """
+    Plot wavefront intensity and optionally phase from a wavefront dictionary.
+
+    For each polarisation in the dictionary, this plots:
+        - If cuts=True: 2D intensity map + horizontal (y=0) and vertical (x=0) cuts.
+        - If cuts=False: Only the 2D intensity map.
+    Phase map is shown at the end if requested.
+
+    Args:
+        wfr (dict): Dictionary returned by `write_wavefront` or `read_wavefront`.
+        cuts (bool): Whether to include 1D cuts in the plot.
+        **kwargs: Optional keyword arguments, e.g., scaling factor `k`.
+    """
+    k = kwargs.get('k', 1)
+    vmin = kwargs.get('vmin', None)
+    vmax = kwargs.get('vmax', None)
+
+    start_plotting(k)
+
+    x = wfr['axis']['x'] * 1e3  # mm
+    y = wfr['axis']['y'] * 1e3  # mm
+    X, Y = np.meshgrid(x, y)
+
+    dx = wfr['axis']['x'][1]-wfr['axis']['x'][0]
+    dy = wfr['axis']['y'][1]-wfr['axis']['y'][0]
+
+    fctr =wfr['axis']['x'][-1]-wfr['axis']['x'][0]/wfr['axis']['y'][-1]-wfr['axis']['y'][0]
+
+    for pol, data in wfr['intensity'].items():
+
+        flux = np.sum(data*dx*1E3*dy*1E3)
+        fig = plt.figure(figsize=(4.2*fctr, 4))
+        fig.suptitle(f"Intensity ({pol}) - integrated flux: {flux:.2e} ph/s/0.1%bw", fontsize=16 * k, x=0.5)
+        ax = fig.add_subplot(111)
+        im = ax.pcolormesh(X, Y, data, shading='auto', cmap='turbo', vmin=vmin, vmax=vmax)
+        ax.set_aspect('equal')
+        ax.set_xlabel('x [mm]')
+        ax.set_ylabel('y [mm]')
+        ax.grid(True, linestyle=':', linewidth=0.5)
+        cb = plt.colorbar(im, ax=ax, fraction=0.046 * 1, pad=0.04,
+                          format='%.0e')
+        plt.show()
+
+        if cuts:
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4), sharey=True)
+            ix0 = np.argmin(np.abs(x))
+            iy0 = np.argmin(np.abs(y))
+
+            ax1.plot(x, data[iy0, :], color='steelblue', lw=1.5)
+            ax1.set_title('Hor. cut (y=0)')
+            ax1.set_xlabel('x [mm]')
+            ax1.set_ylabel('ph/s/mm²/0.1%bw')
+            ax1.grid(True, linestyle=':', linewidth=0.5)
+            ax1.tick_params(direction='in', top=True, right=True)
+            ax2.plot(y, data[:, ix0], color='steelblue', lw=1.5)
+            ax2.set_title('Ver. cut (x=0)')
+            ax2.set_xlabel('y [mm]')
+            ax2.grid(True, linestyle=':', linewidth=0.5)
+            ax2.tick_params(direction='in', top=True, right=True)
+            plt.tight_layout(rect=[0, 0, 1, 0.95])
+            plt.show()      
+
