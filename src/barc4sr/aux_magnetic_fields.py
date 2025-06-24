@@ -1,7 +1,7 @@
 #!/bin/python
 
 """
-This module provides several auxiliary functions
+This module provides several auxiliary magnetic field functions
 """
 
 __author__ = ['Rafael Celestre']
@@ -9,11 +9,54 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
-__changed__ = '25/NOV/2024'
+__changed__ = '24/JUL/2025'
 
 import numpy as np
+from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
+#***********************************************************************************
+# Arbitrary magnetic fields
+#***********************************************************************************
+def DB_magnetic_field(B: float,
+                      L: float,
+                      straight_length: float,
+                      fringe: float = 0,
+                      step_size: float = 1e-3,
+                      gaussian_kernel: float = 0):
+    """
+    Generate a double-bend magnetic field.
+
+    Parameters:
+        B (float): Magnetic field strength (Tesla).
+        L (float): Length of each bending magnet.
+        straight_length (float): Central zero-field region length.
+        fringe (float): Size of the fringe.
+        step_size (float): Spatial step size in meters.
+        gaussian_kernel (float): If > 0, applies Gaussian smoothing with given standard deviation in meters.
+
+    Returns:
+        s (np.ndarray): Position array along the beamline [m].
+        B_field (np.ndarray): Magnetic field vectors.
+    """
+
+    total_length = 2 * (fringe + L) + straight_length
+    s = np.arange(-total_length / 2, total_length / 2 + step_size, step_size)
+    B_field = np.zeros(s.size)
+
+    bump1_start = s[0] + fringe
+    bump1_end   = bump1_start + L
+    bump2_start = bump1_end + straight_length
+    bump2_end   = bump2_start + L
+
+    B_field[(s >= bump1_start) & (s <= bump1_end)] = B
+    B_field[(s >= bump2_start) & (s <= bump2_end)] = B
+
+    if gaussian_kernel > 0:
+        B_field = gaussian_filter1d(B_field, sigma=gaussian_kernel/step_size)
+
+    return {'s': s.T,
+            'B': np.asarray([np.zeros(len(s)), B_field, np.zeros(len(s))]).T}
 
 #***********************************************************************************
 # periodic signal treatment

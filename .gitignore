@@ -174,3 +174,4 @@ cython_debug/
 *__srwl_logs__
 *.txt
 *docs*
+*examples*

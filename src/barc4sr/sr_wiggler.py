@@ -20,4 +20,3 @@ if __name__ == '__main__':
     file_name = os.path.basename(__file__)
 
     print(f"This is the barc4sr.{file_name} module!")
-    print("This module provides functions for interfacing SRW when calculating wavefronts, synchrotron radiation, power density, and spectra.")

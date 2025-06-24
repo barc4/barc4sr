@@ -227,7 +227,7 @@ def write_wavefront(file_name: str, wfr: srwlib.SRWLWfr, selected_polarisations:
     _inDepType = 4
     arPh = array('d', [0]*wfr.mesh.nx*wfr.mesh.ny)
     srwlib.srwl.CalcIntFromElecField(arPh, wfr, 6, _inIntType, _inDepType, wfr.mesh.eStart, 0, 0)
-    wfrDict.update({'phase':np.asarray(arPh, dtype="float128").reshape((wfr.mesh.ny, wfr.mesh.nx))})
+    wfrDict.update({'phase':np.asarray(arPh, dtype="float64").reshape((wfr.mesh.ny, wfr.mesh.nx))})
 
     if file_name is not None:
         with h5.File(f'{file_name}_undulator_wfr.h5', 'w') as f:

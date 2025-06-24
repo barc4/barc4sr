@@ -234,7 +234,6 @@ class ElectronBeam(object):
         for i in (vars(self)):
             print("{0:10}: {1}".format(i, vars(self)[i]))
 
-
 class MagneticStructure(object):
     """
     Class for defining magnetic structure parameters, including undulators, wigglers, and bending magnets.
@@ -254,7 +253,7 @@ class MagneticStructure(object):
                 - Undulator: 'u', 'und', 'undulator'
                 - Wiggler: 'w', 'wig', 'wiggler'
                 - Bending magnet: 'bm', 'bending magnet', 'bending_magnet'
-                - Arbitrary field: 'a', 'arbitrary', 'measured'
+                - Arbitrary field: 'a', 'arb', 'arbitrary', 'measured'
 
             **kwargs: Additional optional parameters based on the magnetic structure type:
                 - centre (float): centre of the mag. structure (in meters) in relation to where the electron beam moments are calculated. Defaults to 0.
@@ -283,6 +282,9 @@ class MagneticStructure(object):
                     - extraction_angle (float):
                     - critical_energy (float):
 
+                For arbitrary magnet fields:
+                    - 
+
         Raises:
             ValueError: If an invalid magnetic structure type is provided.
         """
@@ -290,7 +292,7 @@ class MagneticStructure(object):
         und = ['u', 'und', 'undulator']
         wig = ['w', 'wig', 'wiggler']
         bm = ['bm', 'bending magnet', 'bending_magnet']
-        arb = ['a', 'arbitrary', 'measured']
+        arb = ['a', 'arb', 'arbitrary', 'measured']
 
         allowed_mag_structure = [ms for group in [und, wig, bm, arb] for ms in group]
 
@@ -316,7 +318,7 @@ class MagneticStructure(object):
 
         if mag_structure in bm:
             self.CLASS_NAME = "BendingMagnet"
-            self.magnetic_field = self.B_vertical
+            self.magnetic_field = kwargs.get("magnetic_field", self.B_vertical)
             self.radius = kwargs.get("radius", None)
             self.length = kwargs.get("length", None)
             self.length_edge = kwargs.get("length_edge", 0)
@@ -325,6 +327,7 @@ class MagneticStructure(object):
 
         if mag_structure in arb:
             self.CLASS_NAME = "Arbitrary"
+            self.magnetic_field = kwargs.get("magnetic_field", None)
 
     def print_attributes(self) -> None:
         """
@@ -332,7 +335,6 @@ class MagneticStructure(object):
         """
         for i in (vars(self)):
             print("{0:10}: {1}".format(i, vars(self)[i]))
-
 
 class SynchrotronSource(object):
     """
@@ -382,19 +384,6 @@ class SynchrotronSource(object):
 
         write_syned_file(json_file, light_source_name, self.ElectronBeam, self.MagneticStructure)
 
-    # def write_spectra_config(self, json_file: str, light_source_name: str=None):
-    #     """
-    #     Writes a SPECTRA JSON configuration file.
-
-    #     Parameters:
-    #         json_file (str): The path to the JSON file where the dictionary will be written.
-    #         light_source_name (str): The name of the light source.
-    #     """
-    #     if light_source_name is None:
-    #         light_source_name = json_file.split('/')[-1].replace('.json','')
-
-    #     write_spectra_file(json_file, light_source_name, self.ElectronBeam, self.MagneticStructure)
-
     def print_attributes(self) -> None:
         """
         Prints all attribute of object
@@ -418,7 +407,6 @@ class UndulatorSource(SynchrotronSource):
                class representing the magnetic structure parameters.
         """
 
-        # initializes attributes for a frozen object
         self.wavelength = None
         self.sigma_u = None
         self.sigma_up = None
@@ -1094,7 +1082,6 @@ class UndulatorSource(SynchrotronSource):
 
         self.power_though_slit = {'power': CumPow, 'slit': {'dh':hor_slit, 'dv':ver_slit}}
 
-
 class BendingMagnetSource(SynchrotronSource):
     """
     Class representing an bending magnet source, which combines an electron beam and 
@@ -1266,7 +1253,72 @@ class ArbitraryMagneticFieldSource(SynchrotronSource):
         """
         super().__init__(**kwargs)  
 
+    def set_arb_mag_field(self, **kwargs) -> None:
+        """
+        Sets a user-defined arbitrary magnetic field.
 
+        Keyword Args:
+            magnetic_field (dict): Dictionary with keys 's' and 'B', where:
+                's' (np.ndarray): Longitudinal positions [m].
+                'B' (np.ndarray): Magnetic field vectors of shape (N, 3) in Tesla.
+            recenter (float): If provided, recenters the field profile such that its center is at this position.
+            si (float): Start position [m] for field trimming. Default is -1e23 (no trimming).
+            sf (float): End position [m] for field trimming. Default is 1e23 (no trimming).
+
+        Raises:
+            ValueError: If no magnetic field is provided or if its format is invalid.
+        """
+        recenter = kwargs.get('recenter', None)
+        si = kwargs.get('si', -1e23)
+        sf = kwargs.get('sf', 1e23)
+
+        magnetic_field = kwargs.get("magnetic_field", None)
+
+        piloting = [magnetic_field, self.magnetic_field]
+
+        if all(param is None for param in piloting):
+            raise ValueError("Please, provide the magnetic field dictionary {'s': np.asarray(ns), 'B': np.asarray(Bx, By, Bz)}")
+        
+        if magnetic_field is not None:
+            if self.check_magnetic_field_dictionary(magnetic_field) is False:
+                raise ValueError("Expected dictionary format: {'s': np.asarray(ns), 'B': np.asarray(Bx, By, Bz)}")
+            self.MagneticStructure.magnetic_field = magnetic_field
+        else:
+            if self.check_magnetic_field_dictionary(self.MagneticStructure.magnetic_field) is False:
+                raise ValueError("Expected dictionary format: {'s': np.asarray(ns), 'B': np.asarray(Bx, By, Bz)}")
+
+        if recenter is not None:
+            s = self.MagneticStructure.magnetic_field['s']
+            ds = (s[-1]-s[0])/2
+            self.MagneticStructure.magnetic_field['s'] = s - (ds + recenter)
+
+        s = self.MagneticStructure.magnetic_field['s']
+        B = self.MagneticStructure.magnetic_field['B']  # shape (N, 3)
+        mask = (s >= si) & (s <= sf)
+        self.MagneticStructure.magnetic_field['s'] = s[mask]
+        self.MagneticStructure.magnetic_field['B'] = B[mask, :]
+
+    def check_magnetic_field_dictionary(self, magnetic_field_dictionary):
+        """
+        Checks whether the magnetic field dictionary is valid.
+
+        Args:
+            magnetic_field_dictionary (dict): Dictionary to validate.
+
+        Returns:
+            bool: True if the dictionary is valid, False otherwise.
+        """
+        if not isinstance(magnetic_field_dictionary, dict):
+            return False
+        if set(magnetic_field_dictionary.keys()) != {'s', 'B'}:
+            return False
+        s, B = magnetic_field_dictionary['s'], magnetic_field_dictionary['B']
+        if not (isinstance(s, np.ndarray) and s.ndim == 1):
+            return False
+        if not (isinstance(B, np.ndarray) and B.shape == (len(s), 3)):
+            return False
+        return True
+    
 #***********************************************************************************
 # **planar undulator** auxiliary functions 
 # K. J. Kim, "Optical and power characteristics of synchrotron radiation sources" 
@@ -1331,6 +1383,12 @@ def Fn(K, n):
     Jnm1 = jv((n-1)/2, arg_Bessel)
     arg_mult = ((K*n)/(1 + K**2/2))**2
     return arg_mult*(Jnp1 - Jnm1)**2
+
+#***********************************************************************************
+# **elliptical** auxiliary functions 
+# K. J. Kim, "Optical and power characteristics of synchrotron radiation sources" 
+# [also Erratum 34(4)1243(Apr1995)],  Opt. Eng 34(2), 342 (1995)
+#***********************************************************************************
 
 #***********************************************************************************
 # **other** auxiliary functions 

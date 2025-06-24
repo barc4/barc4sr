@@ -51,7 +51,7 @@ def plot_electron_trajectory(eBeamTraj: dict, direction: str, **kwargs) -> None:
     start_plotting(k)
 
     colors = ['firebrick', 'olive', 'steelblue']
-    s = eBeamTraj['eTraj']['Z']
+    s = eBeamTraj['eTraj']['Z']*1E3
 
     if direction.lower() in ['x', 'h', 'hor', 'horizontal']:
         B = eBeamTraj['eTraj']['By']
@@ -108,7 +108,7 @@ def plot_magnetic_field(eBeamTraj: dict, direction: str, **kwargs) -> None:
     start_plotting(k)
 
     colors = ['firebrick', 'olive', 'steelblue']
-    s = eBeamTraj['eTraj']['Z']
+    s = eBeamTraj['eTraj']['Z']*1E3
 
     if direction.lower() in ['x', 'h', 'hor', 'horizontal']:
         B = eBeamTraj['eTraj']['By']
@@ -181,8 +181,8 @@ def plot_wavefront(wfr: dict, cuts: bool = True, **kwargs) -> None:
     dx = wfr['axis']['x'][1]-wfr['axis']['x'][0]
     dy = wfr['axis']['y'][1]-wfr['axis']['y'][0]
 
-    fctr =wfr['axis']['x'][-1]-wfr['axis']['x'][0]/wfr['axis']['y'][-1]-wfr['axis']['y'][0]
-
+    fctr =(wfr['axis']['x'][-1]-wfr['axis']['x'][0])/(wfr['axis']['y'][-1]-wfr['axis']['y'][0])
+   
     for pol, data in wfr['intensity'].items():
 
         flux = np.sum(data*dx*1E3*dy*1E3)
@@ -194,8 +194,7 @@ def plot_wavefront(wfr: dict, cuts: bool = True, **kwargs) -> None:
         ax.set_xlabel('x [mm]')
         ax.set_ylabel('y [mm]')
         ax.grid(True, linestyle=':', linewidth=0.5)
-        cb = plt.colorbar(im, ax=ax, fraction=0.046 * 1, pad=0.04,
-                          format='%.0e')
+        cb = plt.colorbar(im, ax=ax, fraction=0.046 * 1, pad=0.04, format='%.0e')
         plt.show()
 
         if cuts:
