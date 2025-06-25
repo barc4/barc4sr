@@ -177,6 +177,9 @@ def barc4sr_dictionary(light_source: object, magnetic_measurement: str,
         beamline['Leff'] = light_source.MagneticStructure.length
         beamline['Ledge'] = light_source.MagneticStructure.length_edge
         beamline['ExtAng'] = light_source.MagneticStructure.extraction_angle
+    # bending magnet        
+    if light_source.MagneticStructure.CLASS_NAME.startswith("A"):
+        beamline['MagFieldDict'] = light_source.MagneticStructure.magnetic_field
 
     # radiation observation
     beamline['distance'] = observation_point

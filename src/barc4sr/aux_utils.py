@@ -198,26 +198,27 @@ def set_magnetic_structure(bl: dict,
         
     if id_type.startswith('arb'):
 
-        field_axis = bl["B"]['s']
-        if np.sum(bl["B"][:, 0]) == 0:
-            Bx = None
-        else:
-            Bx = bl["B"][:, 0]
+        field_axis = bl["MagFieldDict"]['s']
 
-        if np.sum(bl["B"][:, 1]) == 0:
-            By = None
-        else:
-            By = bl["B"][:, 1]
+        Bx = bl["MagFieldDict"]['B'][:, 0]
+        By = bl["MagFieldDict"]['B'][:, 1]
+        Bz = bl["MagFieldDict"]['B'][:, 2]
 
-        if np.sum(bl["B"][:, 2]) == 0:
-            Bz = None
-        else:
-            Bz = bl["B"][:, 2]
+        arFA = srwlib.array('d', [0.0]*len(field_axis))
+        arBx = srwlib.array('d', [0.0]*len(field_axis))
+        arBy = srwlib.array('d', [0.0]*len(field_axis))
+        arBz = srwlib.array('d', [0.0]*len(field_axis))
 
-        magFldCnt = srwlib.SRWLMagFldC(srwlib.SRWLMagFld3D(
-                                        Bx, By, Bz,
-                                        1, 1, len(field_axis),
-                                        0, 0, field_axis[-1]-field_axis[0]),
+        for i in range(len(field_axis)):
+            # arFA[i] = float(field_axis[i])
+            arBx[i] = float(Bx[i])
+            arBy[i] = float(By[i])
+            arBz[i] = float(Bz[i])
+
+        range_z = field_axis[-1]-field_axis[0]
+        magFldCnt = srwlib.SRWLMagFldC(_arMagFld=[srwlib.SRWLMagFld3D(
+                                        arBx, arBy, arBz,
+                                        1, 1, len(field_axis), _rz=range_z)],
                                         _arXc=srwlib.array('d', [0.0]),
                                         _arYc=srwlib.array('d', [0.0]),
                                         _arZc=srwlib.array('d', [magfield_central_position]))

@@ -8,7 +8,7 @@ This module provides the barc4sr classes:
 - SynchrotronSource
 - UndulatorSource(SynchrotronSource)
 - BendingMagnetSource(SynchrotronSource)
-- ArbitraryMagneticFieldSource(SynchrotronSource)
+- ArbitraryMagnetSource(SynchrotronSource)
 
 """
 
@@ -17,7 +17,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
-__changed__ = '17/JUN/2025'
+__changed__ = '24/JUN/2025'
 
 import numpy as np
 import scipy.optimize as opt
@@ -1236,14 +1236,14 @@ class BendingMagnetSource(SynchrotronSource):
             print(f">> {(0.5*self.length - zpos):.3f} m from the BM entrance.")
         return zpos
 
-class ArbitraryMagneticFieldSource(SynchrotronSource):
+class ArbitraryMagnetSource(SynchrotronSource):
     """
     Class representing an arbitrary magnetic source, which combines an electron beam and 
     a magnetic structure.
     """
     def __init__(self, **kwargs) -> None:
         """
-        Initializes an instance of the ArbitraryMagneticFieldSource class.
+        Initializes an instance of the ArbitraryMagnetSource class.
 
         Args:
             electron_beam (ElectronBeam): An instance of the ElectronBeam class 
