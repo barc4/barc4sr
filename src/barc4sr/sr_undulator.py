@@ -14,7 +14,7 @@ __created__ = '12/MAR/2024'
 __changed__ = '20/JUN/2025'
 
 # import multiprocessing as mp
-import barc4sr.aux_common as cm
+import barc4sr.src.barc4sr.sr_calculations as cm
 
 import os
 # import time

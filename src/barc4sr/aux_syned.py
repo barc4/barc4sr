@@ -94,6 +94,7 @@ def syned_dictionary(json_file: str, magnetic_measurement: str, observation_poin
     beamline['magnetic_measurement'] = magnetic_measurement
     # undulator        
     if data["magnetic_structure"]["CLASS_NAME"].startswith("U"):
+        beamline['Class'] = 'u'
         beamline['NPeriods'] = data["magnetic_structure"]["number_of_periods"]
         beamline['PeriodID'] = data["magnetic_structure"]["period_length"]
 
@@ -106,6 +107,7 @@ def syned_dictionary(json_file: str, magnetic_measurement: str, observation_poin
         beamline['MagFieldSymmetryV'] = data["magnetic_structure"]["B_vertical_symmetry"]
     # bending magnet        
     if data["magnetic_structure"]["CLASS_NAME"].startswith("B"):
+        beamline['Class'] = 'bm'
         beamline['Bh'] = data["magnetic_structure"]["B_horizontal"]
         beamline['Bv'] = data["magnetic_structure"]["B_vertical"]
         beamline['B'] = data["magnetic_structure"]["magnetic_field"]
@@ -158,6 +160,7 @@ def barc4sr_dictionary(light_source: object, magnetic_measurement: str,
     beamline['magnetic_measurement'] = magnetic_measurement
     # undulator        
     if light_source.MagneticStructure.CLASS_NAME.startswith("U"):
+        beamline['Class'] = 'und'
         beamline['NPeriods'] = light_source.MagneticStructure.number_of_periods
         beamline['PeriodID'] = light_source.MagneticStructure.period_length
 
@@ -170,6 +173,7 @@ def barc4sr_dictionary(light_source: object, magnetic_measurement: str,
         beamline['MagFieldSymmetryV'] = light_source.MagneticStructure.B_vertical_symmetry
     # bending magnet        
     if light_source.MagneticStructure.CLASS_NAME.startswith("B"):
+        beamline['Class'] = 'bm'
         beamline['Bh'] = light_source.MagneticStructure.B_horizontal
         beamline['Bv'] = light_source.MagneticStructure.B_vertical
         beamline['B'] = light_source.MagneticStructure.magnetic_field
@@ -179,6 +183,7 @@ def barc4sr_dictionary(light_source: object, magnetic_measurement: str,
         beamline['ExtAng'] = light_source.MagneticStructure.extraction_angle
     # bending magnet        
     if light_source.MagneticStructure.CLASS_NAME.startswith("A"):
+        beamline['Class'] = 'arb'
         beamline['MagFieldDict'] = light_source.MagneticStructure.magnetic_field
 
     # radiation observation

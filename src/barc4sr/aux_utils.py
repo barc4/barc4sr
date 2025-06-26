@@ -53,7 +53,7 @@ def set_light_source(bl: dict,
 
     Args:
         bl (dict): Beamline parameters dictionary containing essential information for setup.
-        electron_trajectory (bool): Whether to calculate and save electron trajectory.
+        electron_trajectory (bool): Whether to calculate electron trajectory.
         id_type (str): Type of magnetic structure, can be undulator (u), wiggler (w), or bending magnet (bm).
 
     Optional Args (kwargs):
