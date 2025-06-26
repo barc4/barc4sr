@@ -9,9 +9,8 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '26/JAN/2024'
-__changed__ = '20/JUN/2025'
+__changed__ = '26/JUN/2025'
 
-import json
 import os
 import pickle
 from array import array
@@ -288,6 +287,113 @@ def read_wavefront(file_name: str) -> dict:
         "intensity": intensity,
         "phase": phase
     }
+
+#***********************************************************************************
+# Power density
+#***********************************************************************************
+
+def write_power_density(file_name: str, stks: srwlib.SRWLStokes, selected_polarisations: list):
+    """
+    Writes power density data () to an HDF5 file.
+
+    Parameters:
+        file_name (str): Base file path for saving the wavefront data. The data will be stored
+                         in a file named '<file_name>_undulator_wfr.h5'.
+        wfr (srwlib.SRWLStokes): The SRW Stokes object containing the simulated power density.
+        selected_polarisations (list or str): List of polarisations to export. Can be a single
+                         string or a list of strings. Accepted values include: 'LH', 'LV', 
+                         'L45', 'L135', 'CR', 'CL', 'T'.
+
+    Returns:
+        dict: A dictionary containing the wavefront object, computed axes, intensities for selected
+              polarisations, and phase image.
+    """
+    if isinstance(selected_polarisations, str):
+        selected_polarisations = [selected_polarisations]
+    elif not isinstance(selected_polarisations, list):
+        raise ValueError("Input should be a list of strings.")
+    
+    for i, s in enumerate(selected_polarisations):
+        if not s.isupper():
+            selected_polarisations[i] = s.upper()
+
+    pwrDict = {}
+
+    pwrDict.update({'axis':{'x': np.linspace(stks.mesh.xStart, stks.mesh.xFin, stks.mesh.nx),
+                            'y': np.linspace(stks.mesh.yStart, stks.mesh.yFin, stks.mesh.ny)}})
+
+    all_polarisations = ['LH', 'LV', 'L45', 'L135', 'CR', 'CL', 'T']
+    pol_map = {pol: i for i, pol in enumerate(all_polarisations)}
+
+    selected_indices = [pol_map[pol] for pol in selected_polarisations if pol in pol_map]
+
+    if not selected_indices:
+        print(">>>>> No valid polarisation found - defaulting to 'T'")
+        return write_wavefront(file_name, stks, selected_polarisations=['T'])
+    
+    dx = pwrDict['axis']['x'][1]-pwrDict['axis']['x'][0]*1E3
+    dy = pwrDict['axis']['y'][1]-pwrDict['axis']['y'][0]*1E3
+
+    for polarisation, index in zip(selected_polarisations, selected_indices):
+        _inPol = index
+        pow_map = np.reshape(stks.to_int(_inPol), (stks.mesh.ny, stks.mesh.nx))
+        cum_pow = pow_map.sum()*dx*dy
+        pwrDict.update({polarisation:{'map': pow_map,
+                                      'integrated': cum_pow,
+                                      'peak': pow_map.max()}})
+
+    if file_name is not None:
+        with h5.File(f'{file_name}_power_density.h5', 'w') as f:
+            group = f.create_group('XOPPY_POWERDENSITY')
+            group.create_dataset('axis_x', data=pwrDict['axis']['x'] * 1e3)  # mm
+            group.create_dataset('axis_y', data=pwrDict['axis']['y'] * 1e3)  # mm
+
+            for pol in selected_polarisations:
+                pol_group = group.create_group(pol)
+                pol_group.create_dataset('map', data=pwrDict[pol]['map'])
+                pol_group.attrs['integrated'] = pwrDict[pol]['integrated']
+                pol_group.attrs['peak'] = pwrDict[pol]['peak']
+
+    return pwrDict
+
+def read_power_density(file_name: str) -> dict:
+    """
+    Reads power density data from an HDF5 file and reconstructs the power dictionary.
+
+    Parameters:
+        file_name (str): Path to the HDF5 file containing power density data.
+
+    Returns:
+        dict: Dictionary with keys:
+            - 'axis': dict with 'x' and 'y' numpy arrays (in meters).
+            - <polarisation>: for each polarisation, a dict with:
+                - 'map': 2D numpy array of power density.
+                - 'integrated': scalar total power [W].
+                - 'peak': scalar peak power density [W/m^2].
+    """
+    if not (file_name.endswith("h5") or file_name.endswith("hdf5")):
+        raise ValueError("Only HDF5 format supported for this function.")
+
+    with h5.File(file_name, "r") as f:
+        group = f["XOPPY_POWERDENSITY"]
+
+        x = group["axis_x"][()] * 1e-3  # back to meters
+        y = group["axis_y"][()] * 1e-3
+
+        pwrDict = {"axis": {"x": x, "y": y}}
+
+        for pol in group:
+            if pol.startswith("axis_"):
+                continue  # skip axes
+
+            pol_group = group[pol]
+            pwrDict[pol] = {
+                "map": pol_group["map"][()],
+                "integrated": pol_group.attrs["integrated"],
+                "peak": pol_group.attrs["peak"],
+            }
+
+    return pwrDict
 
 
 if __name__ == '__main__':

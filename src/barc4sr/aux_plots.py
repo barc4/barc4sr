@@ -9,7 +9,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '13/JUN/2025'
-__changed__ = '16/JUN/2025'
+__changed__ = '26/JUN/2025'
 
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
@@ -216,3 +216,67 @@ def plot_wavefront(wfr: dict, cuts: bool = True, **kwargs) -> None:
             plt.tight_layout(rect=[0, 0, 1, 0.95])
             plt.show()      
 
+def plot_power_density(pwr: dict, cuts: bool = True, **kwargs) -> None:
+    """
+    Plot power density maps from a power dictionary.
+
+    For each polarisation in the dictionary, this plots:
+        - If cuts=True: 2D power map + horizontal (y=0) and vertical (x=0) cuts.
+        - If cuts=False: Only the 2D power map.
+
+    Args:
+        pwr (dict): Dictionary returned by `write_power_density` or `read_power_density`.
+        cuts (bool): Whether to include 1D cuts in the plot.
+        **kwargs: Optional keyword arguments, e.g., scaling factor `k`, vmin, vmax.
+    """
+    k = kwargs.get('k', 1)
+    vmin = kwargs.get('vmin', None)
+    vmax = kwargs.get('vmax', None)
+
+    start_plotting(k)
+
+    x = pwr['axis']['x'] * 1e3  # mm
+    y = pwr['axis']['y'] * 1e3  # mm
+    X, Y = np.meshgrid(x, y)
+
+    fctr = (x[-1] - x[0]) / (y[-1] - y[0])
+
+    for pol in [p for p in pwr if p != 'axis']:
+        data = pwr[pol]['map']
+        integrated = pwr[pol]['integrated']
+        peak = pwr[pol]['peak']
+
+        fig = plt.figure(figsize=(4.2 * fctr, 4))
+        fig.suptitle(f"{pol} - Total: {integrated:.3e} W | Peak: {peak:.2f} W/mm²",
+                     fontsize=16 * k, x=0.5)
+
+        ax = fig.add_subplot(111)
+        im = ax.pcolormesh(X, Y, data, shading='auto', cmap='plasma', vmin=vmin, vmax=vmax)
+        ax.set_aspect('equal')
+        ax.set_xlabel('x [mm]')
+        ax.set_ylabel('y [mm]')
+        ax.grid(True, linestyle=':', linewidth=0.5)
+        cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, format='%.1e')
+        cb.set_label('Power Density [W/mm²]')
+        plt.show()
+
+        if cuts:
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4), sharey=True)
+            ix0 = np.argmin(np.abs(x))
+            iy0 = np.argmin(np.abs(y))
+
+            ax1.plot(x, data[iy0, :], color='darkred', lw=1.5)
+            ax1.set_title('Hor. cut (y=0)')
+            ax1.set_xlabel('x [mm]')
+            ax1.set_ylabel('Power density [W/mm²]')
+            ax1.grid(True, linestyle=':', linewidth=0.5)
+            ax1.tick_params(direction='in', top=True, right=True)
+
+            ax2.plot(y, data[:, ix0], color='darkred', lw=1.5)
+            ax2.set_title('Ver. cut (x=0)')
+            ax2.set_xlabel('y [mm]')
+            ax2.grid(True, linestyle=':', linewidth=0.5)
+            ax2.tick_params(direction='in', top=True, right=True)
+
+            plt.tight_layout(rect=[0, 0, 1, 0.95])
+            plt.show()

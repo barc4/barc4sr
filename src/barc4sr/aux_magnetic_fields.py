@@ -9,11 +9,12 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
-__changed__ = '24/JUL/2025'
+__changed__ = '26/JUL/2025'
 
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
+
 
 #***********************************************************************************
 # Arbitrary magnetic fields

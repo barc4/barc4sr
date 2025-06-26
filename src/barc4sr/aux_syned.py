@@ -9,10 +9,9 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
-__changed__ = '25/NOV/2024'
+__changed__ = '26/JUN/2025'
 
 import json
-from typing import Any, Dict, Union
 
 import numpy as np
 
@@ -43,7 +42,7 @@ def write_syned_file(json_file: str, light_source_name: str, ElectronBeamClass: 
         json.dump(data, file, indent=4)
 
 
-def read_syned_file(json_file: str) -> Dict[str, Any]:
+def read_syned_file(json_file: str) -> dict:
     """
     Reads a SYNED JSON configuration file and returns its contents as a dictionary.
 

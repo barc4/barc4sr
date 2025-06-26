@@ -1,23 +1,21 @@
 #!/bin/python
 
 """ 
-This module provides SR classes, SRW interfaced functions, r/w SYNED compatible functions,
-r/w functions for the electron trajectory and magnetic field as well as other auxiliary 
-functions.
+This module provides SRW interfaced functions.
 """
 __author__ = ['Rafael Celestre']
 __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '15/MAR/2024'
-__changed__ = '04/DEC/2024'
+__changed__ = '26/JUN/2025'
 
 import array
 import copy
 import multiprocessing as mp
 import os
 from time import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import  List, Tuple
 
 import numpy as np
 from joblib import Parallel, delayed
@@ -279,7 +277,7 @@ def srwlibCalcElecFieldSR_2D(bl: dict,
         bending magnet (bm) or arbitrary (arb).
 
     Returns:
-        np.ndarray: Array containing intensity data, horizontal and vertical axes
+        srwlib.SRWLWfr: Object containing the calculated wavefront
     """
     arPrecPar = [0]*7
     if id_type in ['bm', 'w', 'arb']:
@@ -312,6 +310,41 @@ def srwlibCalcElecFieldSR_2D(bl: dict,
     return srwlib.srwl.CalcElecFieldSR(wfr, 0, magFldCnt, arPrecPar)
 
 # srwlibsrwl_wfr_emit_prop_multi_e_2D():
+
+def srwlibCalcPowDenSR(bl: dict, 
+                       eBeam: srwlib.SRWLPartBeam, 
+                       magFldCnt: srwlib.SRWLMagFldC, 
+                       h_slit_points: int, 
+                       v_slit_points: int) -> srwlib.SRWLStokes:
+    """
+    Calculates the power density.
+
+    Args:
+        bl (dict): Dictionary containing beamline parameters.
+        eBeam (srwlib.SRWLPartBeam): Electron beam properties.
+        magFldCnt (srwlib.SRWLMagFldC): Magnetic field container.
+        h_slit_points (int): Number of horizontal slit points.
+        v_slit_points (int): Number of vertical slit points.
+
+    Returns:
+        srwlib.SRWLStokes: Object containing the calculated wavefront
+    """
+    arPrecPar = [0]*5     # for power density
+    arPrecPar[0] = 1.5    # precision factor
+    arPrecPar[1] = 1      # power density computation method (1- "near field", 2- "far field")
+    arPrecPar[2] = 0.0    # initial longitudinal position (effective if arPrecPar[2] < arPrecPar[3])
+    arPrecPar[3] = 0.0    # final longitudinal position (effective if arPrecPar[2] < arPrecPar[3])
+    arPrecPar[4] = 50000  # number of points for (intermediate) trajectory calculation
+
+    stk = srwlib.SRWLStokes() 
+    stk.allocate(1, h_slit_points, v_slit_points)     
+    stk.mesh.zStart = bl['distance']
+    stk.mesh.xStart = bl['slitHcenter'] - bl['slitH']/2
+    stk.mesh.xFin =   bl['slitHcenter'] + bl['slitH']/2
+    stk.mesh.yStart = bl['slitVcenter'] - bl['slitV']/2
+    stk.mesh.yFin =   bl['slitVcenter'] + bl['slitV']/2
+
+    return srwlib.srwl.CalcPowDenSR(stk, eBeam, 0, magFldCnt, arPrecPar)
 
 def srwlibCalcElecFieldSR(bl: dict, 
                           eBeam: srwlib.SRWLPartBeam, 

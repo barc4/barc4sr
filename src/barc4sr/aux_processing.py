@@ -17,7 +17,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '26/JAN/2024'
-__changed__ = '25/NOV/2024'
+__changed__ = '26/JUN/2025'
 
 import json
 import multiprocessing
@@ -168,124 +168,6 @@ def read_spectrum(file_list: List[str]) -> Dict:
 #***********************************************************************************
 # Power density
 #***********************************************************************************
-
-def write_power_density(file_name: str, power_density: np.array, h_axis: np.array, v_axis: np.array) -> None:
-    """
-    Writes power density data to an HDF5 file.
-
-    This function writes the provided power density data along with the corresponding 
-    horizontal (h_axis) and vertical (v_axis) axes to an HDF5 file. The data is stored in 
-    the 'XOPPY_POWERDENSITY' group within the file, with a subgroup for 'PowerDensity'.
-
-    Parameters:
-        file_name (str): Base file path for saving the power density data. The file will be 
-                         saved with the suffix '_power_density.h5'.
-        power_density (np.array): 2D numpy array containing the power density data.
-        h_axis (np.array): 1D numpy array containing the horizontal axis data.
-        v_axis (np.array): 1D numpy array containing the vertical axis data.
-
-    """
-    if file_name is not None:
-        with h5.File('%s_power_density.h5' % file_name, 'w') as f:
-            group = f.create_group('XOPPY_POWERDENSITY')
-            sub_group = group.create_group('PowerDensity')
-            sub_group.create_dataset('image_data', data=power_density)
-            sub_group.create_dataset('axis_x', data=h_axis * 1e3)  # axis in [mm]
-            sub_group.create_dataset('axis_y', data=v_axis * 1e3)
-
-    dx = (h_axis[1]-h_axis[0])*1E3
-    dy = (v_axis[1]-v_axis[0])*1E3
-
-    CumPow = power_density.sum()*dx*dy
-
-    print(f"Total received power: {CumPow:.3f} W")
-    print(f"Peak power density: {power_density.max():.3f} W/mm^2")
-
-    powDenSRdict = {
-        "axis": {
-            "x": h_axis,
-            "y": v_axis,
-            },
-        "power_density": {
-            "map":power_density,
-            "CumPow": CumPow,
-            "PowDenSRmax": power_density.max()
-            }
-        }
-    
-    return powDenSRdict
-
-def read_power_density(file_name: str) -> Dict:
-    """
-    Reads power density data from an HDF5 (barc4sr) or JSON (SPECTRA) file and processes it.
-
-    This function reads power density data from either an  HDF5 (barc4sr) or JSON (SPECTRA)
-    file specified by 'file_name'. It extracts the power density map along with 
-    corresponding x and y axes from the file.
-
-    Parameters:
-        file_name (str): File path containing power density data.
-
-    Returns:
-        Dict: A dictionary containing processed power density data with the following keys:
-            - 'axis': A dictionary containing 'x' and 'y' axes arrays.
-            - 'power_density': A dictionary containing power density-related data, including the power density map,
-              total received power, and peak power density.
-    """
-    if file_name.endswith("h5") or file_name.endswith("hdf5"):
-        f = h5.File(file_name, "r")
-        PowDenSR = f["XOPPY_POWERDENSITY"]["PowerDensity"]["image_data"][()]
-
-        x = f["XOPPY_POWERDENSITY"]["PowerDensity"]["axis_x"][()]
-        y = f["XOPPY_POWERDENSITY"]["PowerDensity"]["axis_y"][()]
-
-    elif file_name.endswith("json"):
-        f = open(file_name)
-        data = json.load(f)
-        f.close()
-
-        PowDenSR = np.reshape(data['Output']['data'][2],
-                            (len(data['Output']['data'][1]), 
-                             len(data['Output']['data'][0])))
-
-        if "mrad" in data['Output']['units'][2]:
-            dist = data["Input"]["Configurations"]["Distance from the Source (m)"]
-            dx = (data["Input"]["Configurations"]["x Range (mm)"][1]-data["Input"]["Configurations"]["x Range (mm)"][0])*1e-3
-            dy = (data["Input"]["Configurations"]["y Range (mm)"][1]-data["Input"]["Configurations"]["y Range (mm)"][0])*1e-3
-
-            dtx = 2*np.arctan(dx/dist/2)*1e3    # mrad
-            dty = 2*np.arctan(dy/dist/2)*1e3
-
-            PowDenSR *= 1e3 * (dtx*dty)/(dx*dy*1e3*1e3)
-            x = data['Output']['data'][0]
-            y = data['Output']['data'][1]
-        else:
-            PowDenSR *= 1e3
-    else:
-        raise ValueError("Invalid file extension.")
-
-    dx = x[1]-x[0]
-    dy = y[1]-y[0]
-
-    CumPow = PowDenSR.sum()*dx*dy
-
-    print(f"Total received power: {CumPow:.3f} W")
-    print(f"Peak power density: {PowDenSR.max():.3f} W/mm^2")
-
-    powDenSRdict = {
-        "axis": {
-            "x": x,
-            "y": y,
-            },
-        "power_density": {
-            "map":PowDenSR,
-            "CumPow": CumPow,
-            "PowDenSRmax": PowDenSR.max()
-            }
-        }
-    
-    return powDenSRdict
-
 
 def trim_and_resample_power_density(powDenSRdict: Dict, **kwargs: Union[float, bool]) -> Dict:
     """
