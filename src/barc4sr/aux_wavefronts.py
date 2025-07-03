@@ -86,4 +86,4 @@ def central_value(arr: np.ndarray) -> float:
         return np.mean(arr[rows // 2 - 1:rows // 2 + 1, cols // 2])
     elif rows % 2 == 0 and cols % 2 == 0:
         return np.mean(arr[rows // 2 - 1:rows // 2 + 1, cols // 2 - 1:cols // 2 + 1])
-    
+        

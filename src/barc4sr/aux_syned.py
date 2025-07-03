@@ -159,7 +159,7 @@ def barc4sr_dictionary(light_source: object, magnetic_measurement: str,
     beamline['magnetic_measurement'] = magnetic_measurement
     # undulator        
     if light_source.MagneticStructure.CLASS_NAME.startswith("U"):
-        beamline['Class'] = 'und'
+        beamline['Class'] = 'u'
         beamline['NPeriods'] = light_source.MagneticStructure.number_of_periods
         beamline['PeriodID'] = light_source.MagneticStructure.period_length
 

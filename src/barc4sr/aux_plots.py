@@ -154,7 +154,7 @@ def plot_magnetic_field(eBeamTraj: dict, direction: str, **kwargs) -> None:
     plt.tight_layout()
     plt.show()
 
-def plot_wavefront(wfr: dict, cuts: bool = True, **kwargs) -> None:
+def plot_wavefront(wfr: dict, cuts: bool = True, phase: bool = True, **kwargs) -> None:
     """
     Plot wavefront intensity and optionally phase from a wavefront dictionary.
 
@@ -195,6 +195,26 @@ def plot_wavefront(wfr: dict, cuts: bool = True, **kwargs) -> None:
         ax.set_ylabel('y [mm]')
         ax.grid(True, linestyle=':', linewidth=0.5)
         cb = plt.colorbar(im, ax=ax, fraction=0.046 * 1, pad=0.04, format='%.0e')
+        plt.show()
+
+
+        phase = wfr['phase'][pol]
+        phase -=phase[phase.shape[0]//2, phase.shape[1]//2]
+        Rx = wfr['wfr'].Rx
+        Ry = wfr['wfr'].Ry
+        fig = plt.figure(figsize=(4.2*fctr, 4))
+        fig.suptitle(f"Residual phase ({pol}) - Rx = {Rx:.3f}m, Ry = {Ry:.3f}m", fontsize=16 * k, x=0.5)
+        ax = fig.add_subplot(111)
+        im = ax.pcolormesh(X, Y, phase, shading='auto', cmap='bwr')#, vmin=-np.pi, vmax=np.pi)
+        ax.set_aspect('equal')
+        ax.set_xlabel('x [mm]')
+        ax.set_ylabel('y [mm]')
+        ax.grid(True, linestyle=':', linewidth=0.5)
+        cb = plt.colorbar(im, ax=ax, fraction=0.046 * 1, pad=0.04)
+
+        # cb = plt.colorbar(im, ax=ax, fraction=0.046 * 1, pad=0.04, spacing='uniform',
+        # ticks=[-2*np.pi, -np.pi, 0, np.pi, 2*np.pi])
+        # cb.ax.set_yticklabels(['$-2\pi$', '$-\pi$', '0', '$\pi$', '$2\pi$'])
         plt.show()
 
         if cuts:

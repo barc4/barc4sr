@@ -14,9 +14,13 @@ __changed__ = '26/JUN/2025'
 import os
 import pickle
 from array import array
+from copy import copy
 
 import h5py as h5
 import numpy as np
+from skimage.restoration import unwrap_phase
+
+from barc4sr.aux_energy import energy_wavelength
 
 try:
     import srwpy.srwlib as srwlib
@@ -213,20 +217,46 @@ def write_wavefront(file_name: str, wfr: srwlib.SRWLWfr, selected_polarisations:
         print(">>>>> No valid polarisation found - defaulting to 'T'")
         return write_wavefront(file_name, wfr, selected_polarisations=['T'])
     
+    wfrDict.update({'energy':wfr.mesh.eStart})
     wfrDict.update({'intensity':{}})
+    wfrDict.update({'phase':{}})
+    wfrDict.update({'Rx':wfr.Rx, 'Ry':wfr.Ry})
 
     _inIntType = int(number_macro_electrons)
     _inDepType = 3
+
+    Rx, Ry = copy(wfr.Rx), copy(wfr.Ry)
+
+    X, Y = np.meshgrid(wfrDict['axis']['x'], wfrDict['axis']['y'])
+    shperical_phase = Rx - np.sqrt(Rx**2 - X**2 - (Rx/Ry)**2 * Y**2)
+    amplitude_transmission = np.ones((wfr.mesh.ny, wfr.mesh.nx), dtype='float64')
+    arTr = np.empty((2 * wfr.mesh.nx * wfr.mesh.ny), dtype=shperical_phase.dtype)
+    arTr[0::2] = np.reshape(amplitude_transmission,(wfr.mesh.nx*wfr.mesh.ny))
+    arTr[1::2] = np.reshape(-shperical_phase,(wfr.mesh.nx*wfr.mesh.ny))
+    spherical_wave = srwlib.SRWLOptT(wfr.mesh.nx, wfr.mesh.ny, 
+                                     wfrDict['axis']['x'][-1]-wfrDict['axis']['x'][0],
+                                     wfrDict['axis']['y'][-1]-wfrDict['axis']['y'][0],
+                                     _arTr=arTr, _extTr=1, _Fx=Rx, _Fy=Ry, _x=0, _y=0)
+    pp_spherical_wave =  [0, 0, 1.0, 1, 0, 1., 1., 1., 1., 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    OE = [spherical_wave]
+    PP = [pp_spherical_wave]
+    
+    optBL = srwlib.SRWLOptC(OE, PP)
+    srwlib.srwl.PropagElecField(wfr, optBL)
+
     for polarisation, index in zip(selected_polarisations, selected_indices):
         _inPol = index
+
         arInt = array('f', [0]*wfr.mesh.nx*wfr.mesh.ny)
         srwlib.srwl.CalcIntFromElecField(arInt, wfr, _inPol, _inIntType, _inDepType, wfr.mesh.eStart, 0, 0)
         wfrDict['intensity'].update({polarisation:np.asarray(arInt, dtype="float64").reshape((wfr.mesh.ny, wfr.mesh.nx))})
 
-    _inDepType = 4
-    arPh = array('d', [0]*wfr.mesh.nx*wfr.mesh.ny)
-    srwlib.srwl.CalcIntFromElecField(arPh, wfr, 6, _inIntType, _inDepType, wfr.mesh.eStart, 0, 0)
-    wfrDict.update({'phase':np.asarray(arPh, dtype="float64").reshape((wfr.mesh.ny, wfr.mesh.nx))})
+        arPh = array('d', [0]*wfr.mesh.nx*wfr.mesh.ny)
+        srwlib.srwl.CalcIntFromElecField(arPh, wfr, _inPol, 4, _inDepType, wfr.mesh.eStart, 0, 0)
+        phase = unwrap_phase(np.asarray(arPh, dtype="float64").reshape((wfr.mesh.ny, wfr.mesh.nx)))
+        wfrDict['phase'].update({polarisation:phase})
+
+    wfr.Rx, wfr.Ry = Rx, Ry
 
     if file_name is not None:
         with h5.File(f'{file_name}_undulator_wfr.h5', 'w') as f:
@@ -240,7 +270,8 @@ def write_wavefront(file_name: str, wfr: srwlib.SRWLWfr, selected_polarisations:
                 intensity_group.create_dataset(pol, data=img)
 
             phase_group = group.create_group('Phase')
-            phase_group.create_dataset('image_data', data=wfrDict['phase'])
+            for pol, img in wfrDict['phase'].items():
+                phase_group.create_dataset(pol, data=img)
 
             wfr_pickled = pickle.dumps(wfr)
             group.create_dataset('wfr', data=np.void(wfr_pickled))
@@ -258,8 +289,11 @@ def read_wavefront(file_name: str) -> dict:
         dict: Dictionary with keys:
             - 'wfr': the SRW wavefront object (unpickled).
             - 'axis': dict with 'x' and 'y' numpy arrays (in meters).
+            - 'energy': photon energy (float).
+            - 'Rx': curvature radius in x (float).
+            - 'Ry': curvature radius in y (float).
             - 'intensity': dict with polarisation labels as keys and 2D numpy arrays as values.
-            - 'phase': 2D numpy array of the phase image.
+            - 'phase': dict with polarisation labels as keys and 2D numpy arrays as values.
     """
     if not (file_name.endswith("h5") or file_name.endswith("hdf5")):
         raise ValueError("Only HDF5 format supported for this function.")
@@ -274,9 +308,16 @@ def read_wavefront(file_name: str) -> dict:
         for pol in group["Intensity"]:
             intensity[pol] = group["Intensity"][pol][()]
 
-        phase = group["Phase"]["image_data"][()]
+        phase = {}
+        for pol in group["Phase"]:
+            phase[pol] = group["Phase"][pol][()]
 
         wfr = pickle.loads(group["wfr"][()])
+
+    # Extract Rx, Ry, energy from wavefront object
+    Rx = getattr(wfr, "Rx", None)
+    Ry = getattr(wfr, "Ry", None)
+    energy = getattr(wfr.mesh, "eStart", None)
 
     return {
         "wfr": wfr,
@@ -284,6 +325,9 @@ def read_wavefront(file_name: str) -> dict:
             "x": x,
             "y": y,
         },
+        "energy": energy,
+        "Rx": Rx,
+        "Ry": Ry,
         "intensity": intensity,
         "phase": phase
     }
