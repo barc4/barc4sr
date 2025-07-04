@@ -373,8 +373,8 @@ def write_power_density(file_name: str, stks: srwlib.SRWLStokes, selected_polari
         print(">>>>> No valid polarisation found - defaulting to 'T'")
         return write_wavefront(file_name, stks, selected_polarisations=['T'])
     
-    dx = pwrDict['axis']['x'][1]-pwrDict['axis']['x'][0]*1E3
-    dy = pwrDict['axis']['y'][1]-pwrDict['axis']['y'][0]*1E3
+    dx = (pwrDict['axis']['x'][1]-pwrDict['axis']['x'][0])*1E3
+    dy = (pwrDict['axis']['y'][1]-pwrDict['axis']['y'][0])*1E3
 
     for polarisation, index in zip(selected_polarisations, selected_indices):
         _inPol = index
