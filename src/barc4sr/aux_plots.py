@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.integrate as integrate
 from matplotlib import rcParamsDefault
+from skimage.restoration import unwrap_phase
 
 
 def start_plotting(k: float = 1.0) -> None:
@@ -57,10 +58,12 @@ def plot_electron_trajectory(eBeamTraj: dict, direction: str, **kwargs) -> None:
         B = eBeamTraj['eTraj']['By']
         graph_title = 'Horizontal electron trajectory'
         axis = 'X'
+        label_B = 'By [T]'
     elif direction.lower() in ['y', 'v', 'ver', 'vertical']:
         B = eBeamTraj['eTraj']['Bx']
         graph_title = 'Vertical electron trajectory'
         axis = 'Y'
+        label_B = 'Bx [T]'
     elif direction.lower() in ['b', 'both']:
         plot_electron_trajectory(eBeamTraj, 'horizontal', **kwargs)
         plot_electron_trajectory(eBeamTraj, 'vertical', **kwargs)
@@ -77,7 +80,8 @@ def plot_electron_trajectory(eBeamTraj: dict, direction: str, **kwargs) -> None:
         eBeamTraj['eTraj'][axis] * 1e3,   # mm
         eBeamTraj['eTraj'][f'{axis}p'] * 1e3  # mrad
     ]
-    labels = ['B [T]', f'{axis.lower()} [mm]', f"{axis.lower()}' [mrad]"]
+
+    labels = [label_B, f'{axis.lower()} [mm]', f"{axis.lower()}' [mrad]"]
 
     for ax, y, color, label in zip(axes, ys, colors, labels):
         ax.set_facecolor('white')
@@ -112,11 +116,11 @@ def plot_magnetic_field(eBeamTraj: dict, direction: str, **kwargs) -> None:
 
     if direction.lower() in ['x', 'h', 'hor', 'horizontal']:
         B = eBeamTraj['eTraj']['By']
-        graph_title = 'Horizontal magnetic field'
+        graph_title = 'Vertical magnetic field'
         axis = 'X'
     elif direction.lower() in ['y', 'v', 'ver', 'vertical']:
         B = eBeamTraj['eTraj']['Bx']
-        graph_title = 'Vertical magnetic field'
+        graph_title = 'Horizontal magnetic field'
         axis = 'Y'
     elif direction.lower() in ['b', 'both']:
         plot_magnetic_field(eBeamTraj, 'horizontal', **kwargs)
@@ -154,23 +158,30 @@ def plot_magnetic_field(eBeamTraj: dict, direction: str, **kwargs) -> None:
     plt.tight_layout()
     plt.show()
 
-def plot_wavefront(wfr: dict, cuts: bool = True, phase: bool = True, **kwargs) -> None:
+def plot_wavefront(wfr: dict, cuts: bool = True, show_phase: bool = True, **kwargs) -> None:
     """
-    Plot wavefront intensity and optionally phase from a wavefront dictionary.
+    Plot wavefront intensity and optionally the phase from a wavefront dictionary.
 
     For each polarisation in the dictionary, this plots:
         - If cuts=True: 2D intensity map + horizontal (y=0) and vertical (x=0) cuts.
         - If cuts=False: Only the 2D intensity map.
-    Phase map is shown at the end if requested.
+    Phase map is shown at the end if requested, with optional unwrapping.
 
     Args:
         wfr (dict): Dictionary returned by `write_wavefront` or `read_wavefront`.
-        cuts (bool): Whether to include 1D cuts in the plot.
-        **kwargs: Optional keyword arguments, e.g., scaling factor `k`.
+        cuts (bool, optional): Whether to include 1D cuts in the plot (default: True).
+        show_phase (bool, optional): Whether to plot the phase maps (default: True).
+        **kwargs:
+            k (float, optional): Scaling factor for fonts and titles (default: 1).
+            vmin (float, optional): Minimum value for intensity color scale.
+            vmax (float, optional): Maximum value for intensity color scale.
+            unwrap (bool, optional): Whether to unwrap the phase before plotting (default: True).
     """
     k = kwargs.get('k', 1)
     vmin = kwargs.get('vmin', None)
     vmax = kwargs.get('vmax', None)
+    unwrap= kwargs.get('unwrap', True)
+    # mask_phase = kwargs.get('mask_phase', True)
 
     start_plotting(k)
 
@@ -197,26 +208,6 @@ def plot_wavefront(wfr: dict, cuts: bool = True, phase: bool = True, **kwargs) -
         cb = plt.colorbar(im, ax=ax, fraction=0.046 * 1, pad=0.04, format='%.0e')
         plt.show()
 
-
-        phase = wfr['phase'][pol]
-        phase -=phase[phase.shape[0]//2, phase.shape[1]//2]
-        Rx = wfr['wfr'].Rx
-        Ry = wfr['wfr'].Ry
-        fig = plt.figure(figsize=(4.2*fctr, 4))
-        fig.suptitle(f"Residual phase ({pol}) - Rx = {Rx:.3f}m, Ry = {Ry:.3f}m", fontsize=16 * k, x=0.5)
-        ax = fig.add_subplot(111)
-        im = ax.pcolormesh(X, Y, phase, shading='auto', cmap='bwr')#, vmin=-np.pi, vmax=np.pi)
-        ax.set_aspect('equal')
-        ax.set_xlabel('x [mm]')
-        ax.set_ylabel('y [mm]')
-        ax.grid(True, linestyle=':', linewidth=0.5)
-        cb = plt.colorbar(im, ax=ax, fraction=0.046 * 1, pad=0.04)
-
-        # cb = plt.colorbar(im, ax=ax, fraction=0.046 * 1, pad=0.04, spacing='uniform',
-        # ticks=[-2*np.pi, -np.pi, 0, np.pi, 2*np.pi])
-        # cb.ax.set_yticklabels(['$-2\pi$', '$-\pi$', '0', '$\pi$', '$2\pi$'])
-        plt.show()
-
         if cuts:
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4), sharey=True)
             ix0 = np.argmin(np.abs(x))
@@ -235,6 +226,49 @@ def plot_wavefront(wfr: dict, cuts: bool = True, phase: bool = True, **kwargs) -
             ax2.tick_params(direction='in', top=True, right=True)
             plt.tight_layout(rect=[0, 0, 1, 0.95])
             plt.show()      
+
+        if show_phase:
+            phase = wfr['phase'][pol]
+            if unwrap:
+                phase = unwrap_phase(phase)
+                phase -=phase[phase.shape[0]//2, phase.shape[1]//2]
+                cmapref = 'terrain'
+            else:
+                cmapref = 'coolwarm'                
+            # if mask_phase:
+            #     data /= np.max(data)
+            #     phase = np.ma.masked_where(data < 1E-4, phase)
+            Rx = wfr['wfr'].Rx
+            Ry = wfr['wfr'].Ry
+            fig = plt.figure(figsize=(4.2*fctr, 4))
+            fig.suptitle(f"Residual phase ({pol}) - Rx = {Rx:.3f}m, Ry = {Ry:.3f}m", fontsize=16 * k, x=0.5)
+            ax = fig.add_subplot(111)
+            im = ax.pcolormesh(X, Y, phase, shading='auto', cmap=cmapref)#, vmin=-np.pi, vmax=np.pi)
+            ax.set_aspect('equal')
+            ax.set_xlabel('x [mm]')
+            ax.set_ylabel('y [mm]')
+            ax.grid(True, linestyle=':', linewidth=0.5)
+            cb = plt.colorbar(im, ax=ax, fraction=0.046 * 1, pad=0.04)
+            plt.show()
+
+            if cuts:
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4), sharey=True)
+                ix0 = np.argmin(np.abs(x))
+                iy0 = np.argmin(np.abs(y))
+
+                ax1.plot(x, phase[iy0, :], color='darkred', lw=1.5)
+                ax1.set_title('Hor. cut (y=0)')
+                ax1.set_xlabel('x [mm]')
+                ax1.set_ylabel('rad')
+                ax1.grid(True, linestyle=':', linewidth=0.5)
+                ax1.tick_params(direction='in', top=True, right=True)
+                ax2.plot(y, phase[:, ix0], color='darkred', lw=1.5)
+                ax2.set_title('Ver. cut (x=0)')
+                ax2.set_xlabel('y [mm]')
+                ax2.grid(True, linestyle=':', linewidth=0.5)
+                ax2.tick_params(direction='in', top=True, right=True)
+                plt.tight_layout(rect=[0, 0, 1, 0.95])
+                plt.show() 
 
 def plot_power_density(pwr: dict, cuts: bool = True, **kwargs) -> None:
     """

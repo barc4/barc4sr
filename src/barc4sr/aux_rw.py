@@ -18,9 +18,6 @@ from copy import copy
 
 import h5py as h5
 import numpy as np
-from skimage.restoration import unwrap_phase
-
-from barc4sr.aux_energy import energy_wavelength
 
 try:
     import srwpy.srwlib as srwlib
@@ -253,7 +250,8 @@ def write_wavefront(file_name: str, wfr: srwlib.SRWLWfr, selected_polarisations:
 
         arPh = array('d', [0]*wfr.mesh.nx*wfr.mesh.ny)
         srwlib.srwl.CalcIntFromElecField(arPh, wfr, _inPol, 4, _inDepType, wfr.mesh.eStart, 0, 0)
-        phase = unwrap_phase(np.asarray(arPh, dtype="float64").reshape((wfr.mesh.ny, wfr.mesh.nx)))
+        # pahse = unwrap_phase(np.asarray(arPh, dtype="float64").reshape((wfr.mesh.ny, wfr.mesh.nx)))
+        phase = np.asarray(arPh, dtype="float64").reshape((wfr.mesh.ny, wfr.mesh.nx))
         wfrDict['phase'].update({polarisation:phase})
 
     wfr.Rx, wfr.Ry = Rx, Ry
