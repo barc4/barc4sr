@@ -18,6 +18,8 @@ from copy import copy
 
 import h5py as h5
 import numpy as np
+import scipy.integrate as integrate
+from scipy.constants import physical_constants
 
 try:
     import srwpy.srwlib as srwlib
@@ -27,6 +29,8 @@ except:
     USE_SRWLIB = True
 if USE_SRWLIB is False:
      raise AttributeError("SRW is not available")
+
+CHARGE = physical_constants["atomic unit of charge"][0]
 
 #***********************************************************************************
 # electron trajectory
@@ -184,7 +188,7 @@ def write_wavefront(file_name: str, wfr: srwlib.SRWLWfr, selected_polarisations:
         selected_polarisations (list or str): List of polarisations to export. Can be a single
                          string or a list of strings. Accepted values include: 'LH', 'LV', 
                          'L45', 'L135', 'CR', 'CL', 'T'.
-        number_macro_electrons (int): Number of macro electrons. Default is -1.
+        number_macro_electrons (int): Number of macro electrons.
 
     Returns:
         dict: A dictionary containing the wavefront object, computed axes, intensities for selected
@@ -212,7 +216,7 @@ def write_wavefront(file_name: str, wfr: srwlib.SRWLWfr, selected_polarisations:
 
     if not selected_indices:
         print(">>>>> No valid polarisation found - defaulting to 'T'")
-        return write_wavefront(file_name, wfr, selected_polarisations=['T'])
+        return write_wavefront(file_name, wfr, ['T'], number_macro_electrons)
     
     wfrDict.update({'energy':wfr.mesh.eStart})
     wfrDict.update({'intensity':{}})
@@ -225,15 +229,17 @@ def write_wavefront(file_name: str, wfr: srwlib.SRWLWfr, selected_polarisations:
     Rx, Ry = copy(wfr.Rx), copy(wfr.Ry)
 
     X, Y = np.meshgrid(wfrDict['axis']['x'], wfrDict['axis']['y'])
-    shperical_phase = Rx - np.sqrt(Rx**2 - X**2 - (Rx/Ry)**2 * Y**2)
+    spherical_phase = Rx - np.sqrt(Rx**2 - X**2 - (Rx/Ry)**2 * Y**2)
     amplitude_transmission = np.ones((wfr.mesh.ny, wfr.mesh.nx), dtype='float64')
-    arTr = np.empty((2 * wfr.mesh.nx * wfr.mesh.ny), dtype=shperical_phase.dtype)
+    arTr = np.empty((2 * wfr.mesh.nx * wfr.mesh.ny), dtype=spherical_phase.dtype)
     arTr[0::2] = np.reshape(amplitude_transmission,(wfr.mesh.nx*wfr.mesh.ny))
-    arTr[1::2] = np.reshape(-shperical_phase,(wfr.mesh.nx*wfr.mesh.ny))
+    arTr[1::2] = np.reshape(-spherical_phase,(wfr.mesh.nx*wfr.mesh.ny))
     spherical_wave = srwlib.SRWLOptT(wfr.mesh.nx, wfr.mesh.ny, 
                                      wfrDict['axis']['x'][-1]-wfrDict['axis']['x'][0],
                                      wfrDict['axis']['y'][-1]-wfrDict['axis']['y'][0],
                                      _arTr=arTr, _extTr=1, _Fx=Rx, _Fy=Ry, _x=0, _y=0)
+
+    # spherical_wave = srwlib.SRWLOptL(_Fx=Rx, _Fy=Ry)
     pp_spherical_wave =  [0, 0, 1.0, 1, 0, 1., 1., 1., 1., 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     OE = [spherical_wave]
     PP = [pp_spherical_wave]
@@ -437,6 +443,122 @@ def read_power_density(file_name: str) -> dict:
 
     return pwrDict
 
+#***********************************************************************************
+# spectrum
+#***********************************************************************************
+
+def write_spectrum(file_name: str, spectrum: dict) -> None:
+    """
+    Saves computed spectrum data to an HDF5 file and returns a processed spectrum dictionary.
+
+    This function processes the input `spectrum` dictionary to compute:
+        - Flux [ph/s/0.1%bw]
+        - Spectral power [W/eV]
+        - Cumulated power [W] (integrated from minimum energy up to each point)
+        - Integrated power [W] (total power over the entire spectrum)
+
+    The data is saved in an HDF5 file under the 'XOPPY_SPECTRUM/Spectrum' group, with one subgroup per polarisation
+    containing the computed arrays.
+
+    Parameters:
+        file_name (str): Base file path for saving the spectrum data. The data will be stored
+                         in a file named '<file_name>_spectrum.h5'.
+        spectrum (dict): Dictionary containing the simulated spectrum results with keys:
+            - 'energy': Energy axis array [eV].
+            - '<polarisation>': Data arrays per polarisation.
+
+    Returns:
+        dict: Processed spectrum dictionary with:
+            - 'energy': Energy axis array [eV].
+            - For each polarisation:
+                - 'flux': Flux array [ph/s/0.1%bw].
+                - 'spectral_power': Spectral power array [W/eV].
+                - 'cumulated_power': Cumulative integrated power array [W].
+                - 'integrated_power': Total integrated power scalar [W].
+
+    Example:
+        spectrumDict = write_spectrum("myfile", spectrum)
+    """
+
+    spectrumDict = {
+        'energy': spectrum['energy'],
+        'window': {
+            'dx': spectrum['axis']['x'],
+            'dy': spectrum['axis']['y'],
+        }
+    }
+
+    for polarisation, data in spectrum.items():
+        if polarisation in ['energy', 'axis']:
+            continue
+
+        flux = data.reshape(len(spectrum['energy']))
+        spectral_power = flux * CHARGE * 1E3
+        cumulated_power = integrate.cumulative_trapezoid(spectral_power, spectrum['energy'], initial=0)
+        integrated_power = integrate.trapezoid(spectral_power, spectrum['energy'])
+
+        spectrumDict[polarisation] = {
+            'flux': flux,
+            'spectral_power': spectral_power,
+            'cumulated_power': cumulated_power,
+            'integrated_power': integrated_power,
+        }
+
+    if file_name is not None:
+        with h5.File(f"{file_name}_spectrum.h5", "w") as f:
+            group = f.create_group("XOPPY_SPECTRUM")
+            spec_group = group.create_group("Spectrum")
+
+            spec_group.create_dataset("energy", data=spectrumDict['energy'])
+
+            window_group = spec_group.create_group("window")
+            window_group.create_dataset("dx", data=spectrumDict['window']['dx'])
+            window_group.create_dataset("dy", data=spectrumDict['window']['dy'])
+
+            for pol, pol_data in spectrumDict.items():
+                if pol in ["energy", "window"]:
+                    continue
+
+                pol_group = spec_group.create_group(pol)
+                for key, array in pol_data.items():
+                    pol_group.create_dataset(key, data=array)
+
+    return spectrumDict
+
+
+def read_spectrum(file_name: str) -> dict:
+    """
+    Reads a spectrum HDF5 file saved by write_spectrum and returns the dictionary.
+
+    Parameters:
+        file_name (str): Path to the spectrum HDF5 file (without '_spectrum.h5' extension).
+
+    Returns:
+        dict: Spectrum dictionary with energy and polarisation data.
+    """
+    spectrumDict = {}
+    with h5.File(f"{file_name}_spectrum.h5", "r") as f:
+        spec_group = f["XOPPY_SPECTRUM"]["Spectrum"]
+
+        spectrumDict["energy"] = spec_group["energy"][:]
+
+        # Read window group
+        window_group = spec_group["window"]
+        spectrumDict["window"] = {
+            "dx": window_group["dx"][:],
+            "dy": window_group["dy"][:],
+        }
+
+        for pol in spec_group:
+            if pol in ["energy", "window"]:
+                continue
+
+            pol_group = spec_group[pol]
+            spectrumDict[pol] = {}
+            for key in pol_group:
+                spectrumDict[pol][key] = pol_group[key][:]
+
+    return spectrumDict
 
 if __name__ == '__main__':
 

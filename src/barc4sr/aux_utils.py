@@ -21,7 +21,7 @@ import numpy as np
 from joblib import Parallel, delayed
 from scipy.constants import physical_constants
 
-from barc4sr.aux_energy import get_gamma
+from barc4sr.aux_energy import get_gamma, smart_split_energy
 
 try:
     import srwpy.srwlib as srwlib
@@ -256,13 +256,13 @@ def srwlCalcPartTraj(eBeam:srwlib.SRWLPartBeam,
 
     return partTraj
 
-def srwlibCalcElecFieldSR_2D(bl: dict, 
-                             eBeam: srwlib.SRWLPartBeam, 
-                             magFldCnt: srwlib.SRWLMagFldC, 
-                             energy: float,
-                             h_slit_points: int, 
-                             v_slit_points: int,
-                             id_type: str) -> srwlib.SRWLWfr:
+def srwlibCalcElecFieldSR(bl: dict, 
+                          eBeam: srwlib.SRWLPartBeam, 
+                          magFldCnt: srwlib.SRWLMagFldC, 
+                          energy: np.array,
+                          h_slit_points: int, 
+                          v_slit_points: int,
+                          id_type: str) -> srwlib.SRWLWfr:
     """
     Calculates the electric field for synchrotron radiation.
 
@@ -270,7 +270,7 @@ def srwlibCalcElecFieldSR_2D(bl: dict,
         bl (dict): Dictionary containing beamline parameters.
         eBeam (srwlib.SRWLPartBeam): Electron beam properties.
         magFldCnt (srwlib.SRWLMagFldC): Magnetic field container.
-        energy (float): Photon energy [eV].
+        energy (np.array): Photon energy array (np.array) or enerfy point (float) [eV].
         h_slit_points (int): Number of horizontal slit points.
         v_slit_points (int): Number of vertical slit points.
         id_type (str): Type of magnetic structure, can be undulator (u), wiggler (w), 
@@ -279,6 +279,7 @@ def srwlibCalcElecFieldSR_2D(bl: dict,
     Returns:
         srwlib.SRWLWfr: Object containing the calculated wavefront
     """
+    tzero = time()
     arPrecPar = [0]*7
     if id_type in ['bm', 'w', 'arb']:
         arPrecPar[0] = 2      # SR calculation method: 0- "manual", 1- "auto-undulator", 2- "auto-wiggler"
@@ -291,9 +292,18 @@ def srwlibCalcElecFieldSR_2D(bl: dict,
     arPrecPar[5] = 1     # Use "terminating terms" or not (1 or 0 respectively)
     arPrecPar[6] = 0     # sampling factor for adjusting nx, ny (effective if > 0)
 
-    mesh = srwlib.SRWLRadMesh(_eStart= energy,
-                              _eFin  = energy,
-                              _ne    = 1,
+    if isinstance(energy, int) or isinstance(energy, float):
+        eStart = energy
+        eFin = energy
+        ne = 1
+    else:
+        eStart = energy[0]
+        eFin = energy[-1]
+        ne = len(energy)
+
+    mesh = srwlib.SRWLRadMesh(_eStart= eStart,
+                              _eFin  = eFin,
+                              _ne    = ne,
                               _xStart= -bl['slitH']/2-bl['slitHcenter'],
                               _xFin  =  bl['slitH']/2-bl['slitHcenter'],
                               _nx    =  h_slit_points,
@@ -307,7 +317,235 @@ def srwlibCalcElecFieldSR_2D(bl: dict,
     wfr.mesh = mesh
     wfr.partBeam = eBeam
 
-    return srwlib.srwl.CalcElecFieldSR(wfr, 0, magFldCnt, arPrecPar)
+    return srwlib.srwl.CalcElecFieldSR(wfr, 0, magFldCnt, arPrecPar), time()-tzero
+
+def spectral_srwlibCalcElecFieldSR(bl: dict, 
+                                   eBeam: srwlib.SRWLPartBeam, 
+                                   magFldCnt: srwlib.SRWLMagFldC, 
+                                   energy: np.ndarray,
+                                   h_slit_points: int, 
+                                   v_slit_points: int,
+                                   id_type: str,
+                                   parallel: bool,
+                                   selected_polarisations: list,
+                                   number_macro_electrons: int,
+                                   verbose: bool = True
+                                   ):
+    
+    num_cores = mp.cpu_count() - 1
+
+    if parallel:
+        dE = np.diff(energy)    
+        dE1 = np.min(dE)
+        dE2 = np.max(dE)
+
+        wiggler_regime = bool(energy[-1]>21*energy[0])
+        if np.allclose(dE1, dE2) and wiggler_regime:
+            energy_chunks = smart_split_energy(energy, num_cores)
+        else:
+            energy_chunks = np.array_split(list(energy), num_cores)
+        
+        results = Parallel(n_jobs=num_cores, backend="loky")(delayed(srwlibCalcElecFieldSR)(
+            bl, eBeam, magFldCnt, list_pairs, h_slit_points, v_slit_points, id_type
+        ) for list_pairs in energy_chunks)
+        
+        # Unpack wavefronts and collect timing
+        wfrDicts = []
+        time_array = []
+        energy_array = []
+        energy_chunks_lens = []
+
+        for i, (wfr, dt) in enumerate(results):
+            wfrDict = unpack_srwlib_wfr(wfr, selected_polarisations, number_macro_electrons)
+            wfrDicts.append(wfrDict)
+            time_array.append(dt)
+            # Extract energy info
+            if isinstance(wfrDict['energy'], np.ndarray):
+                energy_array.append(wfrDict['energy'][0])
+                energy_chunks_lens.append(len(wfrDict['energy']))
+            else:
+                energy_array.append(wfrDict['energy'])
+                energy_chunks_lens.append(1)
+
+        spectrum = concatenate_wavefronts_energy(wfrDicts)
+
+        if verbose and not wiggler_regime:
+            print(">>> elapsed time:")
+            for i, (t, npts, e0) in enumerate(zip(time_array, energy_chunks_lens, energy_array)):
+                print(f" Core {i+1}: {t:.2f} s for {npts} pts (E0 = {e0:.1f} eV).")
+
+    else:
+        wfr, dt = srwlibCalcElecFieldSR(bl, eBeam, magFldCnt, energy,
+                                        h_slit_points, v_slit_points, id_type) 
+        spectrum = unpack_srwlib_wfr(wfr, selected_polarisations, number_macro_electrons)
+        if verbose:
+            print(f">>> elapsed time: {dt:.2f} s for {len(energy)} pts.")
+    
+    return spectrum
+
+def srwlibCalcStokesUR():
+    tzero = time()
+
+
+
+#     return srwlib.srwl.CalcStokesUR(stks, eBeam, und, arPrecPar)
+
+
+def spectral_srwlibCalcStokesUR(bl: dict, 
+                                eBeam: srwlib.SRWLPartBeam, 
+                                magFldCnt: srwlib.SRWLMagFldC, 
+                                energy: np.ndarray,
+                                h_slit_points: int, 
+                                v_slit_points: int,
+                                id_type: str,
+                                parallel: bool,
+                                selected_polarisations: list,
+                                number_macro_electrons: int,
+                                verbose: bool = True
+                                ):
+
+    pass
+
+
+def unpack_srwlib_wfr(wfr: srwlib.SRWLWfr, selected_polarisations: list, number_macro_electrons: int) -> dict:
+    """
+    Unpacks SRW wavefront data.
+
+    Parameters:
+        wfr (srwlib.SRWLWfr): The SRW wavefront object containing the simulated electric field.
+        selected_polarisations (list or str): List of polarisations to export. Can be a single
+                         string or a list of strings. Accepted values include: 'LH', 'LV', 
+                         'L45', 'L135', 'CR', 'CL', 'T'.
+        number_macro_electrons (int): Number of macro electrons. 
+
+    Returns:
+        dict: A dictionary containing the computed axes and intensities for selected
+              polarisations.
+    """
+    if isinstance(selected_polarisations, str):
+        selected_polarisations = [selected_polarisations]
+    elif not isinstance(selected_polarisations, list):
+        raise ValueError("Input should be a list of strings.")
+    
+    for i, s in enumerate(selected_polarisations):
+        if not s.isupper():
+            selected_polarisations[i] = s.upper()
+
+    if wfr.mesh.ne > 1:
+        wfrDict = {'energy': np.linspace(wfr.mesh.eStart, wfr.mesh.eFin, wfr.mesh.ne)}
+        energy_content = True
+    else:
+        wfrDict = {'energy': wfr.mesh.eStart}
+        energy_content = False
+
+    if wfr.mesh.nx > 1 or wfr.mesh.ny > 1:
+        wfrDict['axis'] = {'x': np.linspace(wfr.mesh.xStart, wfr.mesh.xFin, wfr.mesh.nx),
+                           'y': np.linspace(wfr.mesh.yStart, wfr.mesh.yFin, wfr.mesh.ny)}
+        spatial_distribution = True
+    else:
+        wfrDict['axis'] = {'x': 0, 'y': 0}
+        spatial_distribution = False
+    
+    if energy_content and spatial_distribution:
+        _inDepType = 6
+    elif energy_content and not spatial_distribution:
+        _inDepType = 0
+    elif not energy_content and spatial_distribution:
+        _inDepType = 3
+
+    all_polarisations = ['LH', 'LV', 'L45', 'L135', 'CR', 'CL', 'T']
+    pol_map = {pol: i for i, pol in enumerate(all_polarisations)}
+
+    selected_indices = [pol_map[pol] for pol in selected_polarisations if pol in pol_map]
+
+    if not selected_indices:
+        print(">>>>> No valid polarisation found - defaulting to 'T'")
+        return unpack_srwlib_wfr(wfr, ['T'], number_macro_electrons)
+    
+    _inIntType = int(number_macro_electrons)
+
+    for polarisation, index in zip(selected_polarisations, selected_indices):
+        _inPol = index
+        arInt = srwlib.array('f', [0]*wfr.mesh.nx*wfr.mesh.ny*wfr.mesh.ne)
+        srwlib.srwl.CalcIntFromElecField(arInt, wfr, _inPol, _inIntType, _inDepType,
+                                         wfr.mesh.eStart,
+                                        (wfr.mesh.xStart+wfr.mesh.xFin)/2,
+                                        (wfr.mesh.yStart+wfr.mesh.yFin)/2)
+        wfrDict.update({polarisation:np.asarray(arInt, dtype="float64").reshape((wfr.mesh.ne, wfr.mesh.ny, wfr.mesh.nx))})
+
+    return wfrDict
+
+def concatenate_wavefronts_energy(wfrDicts: list) -> dict:
+    """
+    Concatenate multiple wfrDict dictionaries along the energy axis.
+    
+    Parameters:
+        wfrDicts (list): List of wavefront dictionaries as returned by unpack_srwlib_wfr,
+                         computed over different energy ranges.
+
+    Returns:
+        dict: Concatenated dictionary with combined energy axis.
+    """
+    if not wfrDicts:
+        raise ValueError("Input list is empty.")
+
+    energy_all = np.concatenate([wfr['energy'] if np.ndim(wfr['energy']) else [wfr['energy']] for wfr in wfrDicts])
+    
+    concatenated = {
+        'energy': energy_all,
+        'axis': wfrDicts[0]['axis'],
+    }
+
+    polarisations = [k for k in wfrDicts[0].keys() if k not in ['energy', 'axis']]
+
+    for pol in polarisations:
+        concatenated[pol] = np.concatenate([wfr[pol] for wfr in wfrDicts], axis=0)
+
+    return concatenated
+
+def unpack_srwlib_stks(stks: srwlib.SRWLStokes, selected_polarisations: list) -> dict:
+    """
+    Unpacks SRW stokes data.
+
+    Parameters:
+        wfr (srwlib.SRWLStokes): The SRW stokes object containing the simulated electric field.
+        selected_polarisations (list or str): List of polarisations to export. Can be a single
+                         string or a list of strings. Accepted values include: 'LH', 'LV', 
+                         'L45', 'L135', 'CR', 'CL', 'T'.
+        number_macro_electrons (int): Number of macro electrons. 
+
+    Returns:
+        dict: A dictionary containing the computed axes and intensities for selected
+              polarisations.
+    """
+
+    if isinstance(selected_polarisations, str):
+        selected_polarisations = [selected_polarisations]
+    elif not isinstance(selected_polarisations, list):
+        raise ValueError("Input should be a list of strings.")
+    
+    for i, s in enumerate(selected_polarisations):
+        if not s.isupper():
+            selected_polarisations[i] = s.upper()
+
+    wfrDict = {'energy': np.linspace(stks.mesh.eStart, stks.mesh.eFin, stks.mesh.ne)}
+
+    wfrDict['axis'] = {'x': stks.mesh.xFin-stks.mesh.xStart,
+                       'y': stks.mesh.yFin-stks.mesh.yStart}
+
+    all_polarisations = ['LH', 'LV', 'L45', 'L135', 'CR', 'CL', 'T']
+    pol_map = {pol: i for i, pol in enumerate(all_polarisations)}
+
+    selected_indices = [pol_map[pol] for pol in selected_polarisations if pol in pol_map]
+
+    if not selected_indices:
+        print(">>>>> No valid polarisation found - defaulting to 'T'")
+        return unpack_srwlib_stks(stks, ['T'])
+    
+    for polarisation, index in zip(selected_polarisations, selected_indices):
+        _inPol = index
+        wfrDict.update({polarisation:np.asarray(stks.to_int(_inPol), dtype="float64")})
+
 
 # srwlibsrwl_wfr_emit_prop_multi_e_2D():
 
@@ -346,7 +584,7 @@ def srwlibCalcPowDenSR(bl: dict,
 
     return srwlib.srwl.CalcPowDenSR(stk, eBeam, 0, magFldCnt, arPrecPar)
 
-def srwlibCalcElecFieldSR(bl: dict, 
+def old_srwlibCalcElecFieldSR(bl: dict, 
                           eBeam: srwlib.SRWLPartBeam, 
                           magFldCnt: srwlib.SRWLMagFldC, 
                           energy_array: np.ndarray,
@@ -900,7 +1138,7 @@ def core_srwlibsrwl_wfr_emit_prop_multi_e(args: Tuple[np.ndarray,
     return (me_intensity, energy_array, time()-tzero)
 
 
-def srwlibCalcStokesUR(bl: dict, 
+def old_srwlibCalcStokesUR(bl: dict, 
                        eBeam: srwlib.SRWLPartBeam, 
                        magFldCnt: srwlib.SRWLMagFldC, 
                        energy_array: np.ndarray, 

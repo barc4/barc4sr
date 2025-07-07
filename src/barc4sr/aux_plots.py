@@ -9,7 +9,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '13/JUN/2025'
-__changed__ = '26/JUN/2025'
+__changed__ = '07/JUL/2025'
 
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
@@ -18,6 +18,9 @@ import scipy.integrate as integrate
 from matplotlib import rcParamsDefault
 from skimage.restoration import unwrap_phase
 
+#***********************************************************************************
+# General style
+#***********************************************************************************
 
 def start_plotting(k: float = 1.0) -> None:
     """
@@ -38,6 +41,9 @@ def start_plotting(k: float = 1.0) -> None:
     plt.rc('ytick', labelsize=13 * k)
     plt.rc('legend', fontsize=12 * k)
 
+#***********************************************************************************
+# Electron Trajectory
+#***********************************************************************************
 
 def plot_electron_trajectory(eBeamTraj: dict, direction: str, **kwargs) -> None:
     """
@@ -51,7 +57,7 @@ def plot_electron_trajectory(eBeamTraj: dict, direction: str, **kwargs) -> None:
     k = kwargs.get('k', 1)
     start_plotting(k)
 
-    colors = ['firebrick', 'olive', 'steelblue']
+    colors = ['darkred', 'olive', 'steelblue']
     s = eBeamTraj['eTraj']['Z']*1E3
 
     if direction.lower() in ['x', 'h', 'hor', 'horizontal']:
@@ -98,6 +104,9 @@ def plot_electron_trajectory(eBeamTraj: dict, direction: str, **kwargs) -> None:
     plt.tight_layout()
     plt.show()
             
+#***********************************************************************************
+# Magnetic field
+#***********************************************************************************
 
 def plot_magnetic_field(eBeamTraj: dict, direction: str, **kwargs) -> None:
     """
@@ -111,7 +120,7 @@ def plot_magnetic_field(eBeamTraj: dict, direction: str, **kwargs) -> None:
     k = kwargs.get('k', 1)
     start_plotting(k)
 
-    colors = ['firebrick', 'olive', 'steelblue']
+    colors = ['darkred', 'olive', 'steelblue']
     s = eBeamTraj['eTraj']['Z']*1E3
 
     if direction.lower() in ['x', 'h', 'hor', 'horizontal']:
@@ -158,6 +167,10 @@ def plot_magnetic_field(eBeamTraj: dict, direction: str, **kwargs) -> None:
     plt.tight_layout()
     plt.show()
 
+#***********************************************************************************
+# Wavefront
+#***********************************************************************************
+
 def plot_wavefront(wfr: dict, cuts: bool = True, show_phase: bool = True, **kwargs) -> None:
     """
     Plot wavefront intensity and optionally the phase from a wavefront dictionary.
@@ -198,7 +211,7 @@ def plot_wavefront(wfr: dict, cuts: bool = True, show_phase: bool = True, **kwar
 
         flux = np.sum(data*dx*1E3*dy*1E3)
         fig = plt.figure(figsize=(4.2*fctr, 4))
-        fig.suptitle(f"Intensity ({pol}) - integrated flux: {flux:.2e} ph/s/0.1%bw", fontsize=16 * k, x=0.5)
+        fig.suptitle(f"({pol}) | flux: {flux:.2e} ph/s/0.1%bw", fontsize=16 * k, x=0.5)
         ax = fig.add_subplot(111)
         im = ax.pcolormesh(X, Y, data, shading='auto', cmap='turbo', vmin=vmin, vmax=vmax)
         ax.set_aspect('equal')
@@ -241,7 +254,7 @@ def plot_wavefront(wfr: dict, cuts: bool = True, show_phase: bool = True, **kwar
             Rx = wfr['wfr'].Rx
             Ry = wfr['wfr'].Ry
             fig = plt.figure(figsize=(4.2*fctr, 4))
-            fig.suptitle(f"Residual phase ({pol}) - Rx = {Rx:.3f}m, Ry = {Ry:.3f}m", fontsize=16 * k, x=0.5)
+            fig.suptitle(f"({pol}) | residual phase - Rx = {Rx:.2f}m, Ry = {Ry:.2f}m", fontsize=16 * k, x=0.5)
             ax = fig.add_subplot(111)
             im = ax.pcolormesh(X, Y, phase, shading='auto', cmap=cmapref)#, vmin=-np.pi, vmax=np.pi)
             ax.set_aspect('equal')
@@ -269,6 +282,10 @@ def plot_wavefront(wfr: dict, cuts: bool = True, show_phase: bool = True, **kwar
                 ax2.tick_params(direction='in', top=True, right=True)
                 plt.tight_layout(rect=[0, 0, 1, 0.95])
                 plt.show() 
+
+#***********************************************************************************
+# Power Density
+#***********************************************************************************
 
 def plot_power_density(pwr: dict, cuts: bool = True, **kwargs) -> None:
     """
@@ -301,7 +318,7 @@ def plot_power_density(pwr: dict, cuts: bool = True, **kwargs) -> None:
         peak = pwr[pol]['peak']
 
         fig = plt.figure(figsize=(4.2 * fctr, 4))
-        fig.suptitle(f"{pol} - Total: {integrated:.3e} W | Peak: {peak:.2f} W/mm²",
+        fig.suptitle(f"({pol}) | power: {integrated:.3e} W | peak: {peak:.2f} W/mm²",
                      fontsize=16 * k, x=0.5)
 
         ax = fig.add_subplot(111)
@@ -310,8 +327,8 @@ def plot_power_density(pwr: dict, cuts: bool = True, **kwargs) -> None:
         ax.set_xlabel('x [mm]')
         ax.set_ylabel('y [mm]')
         ax.grid(True, linestyle=':', linewidth=0.5)
-        cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, format='%.1e')
-        cb.set_label('Power Density [W/mm²]')
+        cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)#, format='%.1e')
+        cb.set_label('power density [W/mm²]')
         plt.show()
 
         if cuts:
@@ -322,7 +339,7 @@ def plot_power_density(pwr: dict, cuts: bool = True, **kwargs) -> None:
             ax1.plot(x, data[iy0, :], color='darkred', lw=1.5)
             ax1.set_title('Hor. cut (y=0)')
             ax1.set_xlabel('x [mm]')
-            ax1.set_ylabel('Power density [W/mm²]')
+            ax1.set_ylabel('power density [W/mm²]')
             ax1.grid(True, linestyle=':', linewidth=0.5)
             ax1.tick_params(direction='in', top=True, right=True)
 
@@ -334,3 +351,176 @@ def plot_power_density(pwr: dict, cuts: bool = True, **kwargs) -> None:
 
             plt.tight_layout(rect=[0, 0, 1, 0.95])
             plt.show()
+
+#***********************************************************************************
+# spectrum
+#***********************************************************************************
+
+def plot_spectrum(spectrum: dict, logy: bool = True, spectral_power: bool = False, **kwargs) -> None:
+    """
+    Plot flux vs energy for each polarisation in a spectrum dictionary.
+
+    Optionally, also plots spectral power (linear x linear) and cumulated power
+    sharing the same x-axis as flux, in a subplot layout.
+
+    Args:
+        spectrum (dict): Spectrum dictionary as returned by write_spectrum or read_spectrum.
+        logy (bool, optional): If True, plot flux with logarithmic y-axis (default: True).
+        spectral_power (bool, optional): If True, plot spectral power and cumulated power (default: False).
+        **kwargs: Optional keyword arguments, e.g., scaling factor `k`.
+    """
+    k = kwargs.get('k', 1)
+    start_plotting(k)
+
+    energy = spectrum['energy']
+
+    for pol in spectrum:
+        if pol in ["energy", "window"]:
+            continue
+
+        flux = spectrum[pol]['flux']
+
+        if spectral_power:
+            fig, (ax, ax1) = plt.subplots(
+                nrows=2, ncols=1,
+                sharex=True,
+                figsize=(8, 8),
+                gridspec_kw={'height_ratios': [1, 1]}
+            )
+        else:
+            fig, ax = plt.subplots(figsize=(8, 6))
+
+        fig.suptitle(f"({pol}) | spectral flux", fontsize=16 * k, x=0.5)
+        ax.plot(energy, flux, color='darkred', lw=1.5)
+        ax.set_ylabel('flux [ph/s/0.1%bw]')
+        ax.grid(True, which='both', linestyle=':', linewidth=0.5)
+        ax.tick_params(direction='in', top=True, right=True)
+        if logy:
+            ax.set_yscale('log')
+
+        if spectral_power:
+            spower = spectrum[pol]['spectral_power']
+            cum_power = spectrum[pol]['cumulated_power']
+            color1 = 'olive'
+            ax1.plot(energy, spower, color=color1, lw=1.5, label='Spectral power')
+            ax1.set_ylabel('spectral power [W/eV]', color=color1)
+            ax1.tick_params(axis='y', labelcolor=color1)
+            ax1.grid(True, linestyle=':', linewidth=0.5)
+            ax1.tick_params(direction='in', top=True, right=True)
+            ax2 = ax1.twinx()
+            color2 = 'steelblue'
+            ax2.plot(energy, cum_power, color=color2, lw=1.5, linestyle='-', label='Cumulated power')
+            ax2.set_ylabel('cumulated power [W]', color=color2)
+            ax2.tick_params(axis='y', labelcolor=color2)
+            ax2.tick_params(direction='in', top=True, right=True)
+            ax1.set_xlabel('energy [eV]')
+
+        else:
+            ax.set_xlabel('energy [eV]')
+
+        plt.tight_layout()
+        plt.show()
+
+
+def plot_beamline_acceptance_scan(results: dict, observation_point: float, measurement: str, **kwargs) -> None:
+    """
+    Plots integrated flux and/or power vs slit size with twin y-axes if both are present.
+
+    The lower x-axis is slit size [mm], the secondary bottom x-axis is divergence [mrad].
+
+    Parameters:
+        results (dict): Dictionary returned by integrate_flux_and_power_over_slits.
+        observation_point (float): Observation point distance [m].
+        **kwargs:
+            k (float, optional): Scaling factor for fonts and titles (default: 1).
+    """
+    k = kwargs.get('k', 1)
+    start_plotting(k)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    x_mm = results['axis'] * 1e3
+
+    has_flux = 'flux' in results
+    has_power = 'power' in results
+
+    if has_flux and not has_power:
+        ax.plot(
+            x_mm,
+            results['flux'],
+            marker='s',
+            linestyle=':',
+            linewidth=1.5,
+            color='darkred',
+            markerfacecolor='white',
+            markeredgecolor='darkred',
+            markeredgewidth=1.5,
+        )
+        ax.set_ylabel('integrated flux [ph/s/0.1%bw]')
+        ax.tick_params(axis='y')
+
+    elif has_power and not has_flux:
+        ax.plot(
+            x_mm,
+            results['power'],
+            marker='o',
+            linestyle='--',
+            linewidth=1.5,
+            color='steelblue',
+            markerfacecolor='white',
+            markeredgecolor='steelblue',
+            markeredgewidth=1.5,
+        )
+        ax.set_ylabel('integrated power [W]')
+        ax.tick_params(axis='y')
+
+    elif has_flux and has_power:
+        ax.plot(
+            x_mm,
+            results['flux'],
+            marker='s',
+            linestyle=':',
+            linewidth=1.5,
+            color='darkred',
+            markerfacecolor='white',
+            markeredgecolor='darkred',
+            markeredgewidth=1.5,
+            label='flux'
+        )
+        ax.set_ylabel('integrated flux [ph/s/0.1%bw]', color='darkred')
+        ax.tick_params(axis='y', labelcolor='darkred')
+
+        ax2 = ax.twinx()
+        ax2.plot(
+            x_mm,
+            results['power'],
+            marker='o',
+            linestyle='--',
+            linewidth=1.5,
+            color='steelblue',
+            markerfacecolor='white',
+            markeredgecolor='steelblue',
+            markeredgewidth=1.5,
+            label='power'
+        )
+        ax2.set_ylabel('integrated power [W]', color='steelblue')
+        ax2.tick_params(axis='y', labelcolor='steelblue')
+
+    else:
+        raise ValueError("No 'flux' or 'power' entries in results dictionary.")
+
+    ax.set_xlabel("slit acceptance [mm]")
+    ax.set_title(f"({measurement}) | beamline acceptance scan\n")
+    ax.grid(True, linestyle=':', color='gray', linewidth=0.5)
+    ax.tick_params(direction='in', top=True, right=True)
+    ax.spines['top'].set_visible(True)
+    ax.spines['right'].set_visible(True)
+
+    secax_bottom = ax.secondary_xaxis(-0.2)
+    secax_bottom.set_xlabel('[mrad]')
+    mrad_ticks = np.arange(0, 2.1, 0.1)
+    mm_ticks = 2 * observation_point * np.tan(mrad_ticks / 2)
+    secax_bottom.set_xticks(mm_ticks)
+    secax_bottom.set_xticklabels([f"{tick:.2f}" for tick in mrad_ticks])
+
+    plt.tight_layout()
+    plt.show()

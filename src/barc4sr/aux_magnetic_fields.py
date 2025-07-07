@@ -11,6 +11,8 @@ __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
 __changed__ = '26/JUL/2025'
 
+import os
+
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
@@ -124,4 +126,8 @@ def treat_periodic_signal(signal, axis, threshold=0.5):
 
     return periodic_signal_properties
     
-       
+if __name__ == '__main__':
+
+    file_name = os.path.basename(__file__)
+
+    print(f"This is the barc4sr.{file_name} module!")

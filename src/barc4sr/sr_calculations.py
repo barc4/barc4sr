@@ -9,20 +9,28 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '17/JUN/2025'
-__changed__ = '26/JUN/2025'
+__changed__ = '04/JUL/2025'
 
 import time
 
+import numpy as np
+
+from barc4sr.aux_energy import (
+    generate_logarithmic_energy_array,
+    get_undulator_emission_energy,
+)
 from barc4sr.aux_rw import (
     write_electron_trajectory,
     write_power_density,
+    write_spectrum,
     write_wavefront,
 )
 from barc4sr.aux_syned import barc4sr_dictionary, syned_dictionary
 from barc4sr.aux_time import print_elapsed_time
 from barc4sr.aux_utils import (
     set_light_source,
-    srwlibCalcElecFieldSR_2D,
+    spectral_srwlibCalcElecFieldSR,
+    srwlibCalcElecFieldSR,
     srwlibCalcPowDenSR,
 )
 
@@ -38,7 +46,7 @@ def electron_trajectory(**kwargs) -> dict:
         file_name (str): The name of the output file.
         json_file (optional): The path to the SYNED JSON configuration file.
         light_source (optional): barc4sr.aux_utils.SynchrotronSource or inheriting class
-
+        verbose (bool): If True, print log information
     Returns:
         Dict: A dictionary containing arrays of photon energy and flux.
     """
@@ -128,6 +136,7 @@ def wavefront(photon_energy: float,
         parallel (bool): Whether to use parallel computation. Default is False.
         num_cores (int, optional): Number of CPU cores to use for parallel computation. 
                                     If not specified, it defaults to the number of available CPU cores.
+        verbose (bool): If True, print log information
 
     Returns:
         Dict: A dictionary intensity, phase, horizontal axis, and vertical axis.
@@ -196,13 +205,13 @@ def wavefront(photon_energy: float,
         if verbose: print(f'{calc_txt} ... ', end='')
 
     if number_macro_electrons < 2:
-        wfr = srwlibCalcElecFieldSR_2D(bl, 
+        wfr, dt = srwlibCalcElecFieldSR(bl, 
                                 eBeam, 
                                 magFldCnt,
                                 photon_energy,
-                                h_slit_points=hor_slit_n,
-                                v_slit_points=ver_slit_n,
-                                id_type = bl['Class']) 
+                                hor_slit_n,
+                                ver_slit_n,
+                                bl['Class']) 
     else:
         # TODO reimplement ME calculation
         pass
@@ -326,3 +335,141 @@ def power_density(observation_point: float,
 # spectrum
 #***********************************************************************************
 
+def spectrum(energy_min: float,
+             energy_max: float,
+             num_points: int,
+             observation_point: float,
+             hor_slit: float, 
+             ver_slit: float,
+             **kwargs) -> dict:
+    
+    
+    t0 = time.time()
+
+    verbose = kwargs.get('verbose', True)
+    json_file = kwargs.get('json_file', None)
+    light_source = kwargs.get('light_source', None)
+    file_name = kwargs.get('file_name', None)
+    energy_sampling = kwargs.get('energy_sampling', 0)
+    parallel = kwargs.get('parallel', False)
+
+    if json_file is None and light_source is None:
+        raise ValueError("Please, provide either json_file or light_source (see function docstring)")
+    if json_file is not None and light_source is not None:
+        raise ValueError("Please, provide either json_file or light_source - not both (see function docstring)")
+
+    hor_slit_cen = kwargs.get('hor_slit_cen', 0)
+    ver_slit_cen = kwargs.get('ver_slit_cen', 0)
+
+    if json_file is not None:
+        bl = syned_dictionary(json_file, None, observation_point, 
+                              hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
+    if light_source is not None:
+        bl = barc4sr_dictionary(light_source, None, observation_point, 
+                                hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
+        
+    if bl['Class'] == 'bm':
+        source_type = 'bending magnet'
+    elif bl['Class'] == 'u':
+        source_type = 'undulator'
+    elif bl['Class'] == 'w':
+        source_type = 'wiggler'
+    elif bl['Class'] == 'arb':
+        source_type = 'arbitrary magnetic field'
+        
+    function_txt = f"{source_type} spectrum using SRW:"
+
+    if verbose: print(f"{function_txt} please wait...")
+
+    radiation_polarisation = kwargs.get('radiation_polarisation', 'T')
+    number_macro_electrons = kwargs.get('number_macro_electrons', 0)
+
+    parallel = kwargs.get('parallel', False)
+    num_cores = kwargs.get('num_cores', None)
+
+    magfield_central_position = kwargs.get('magfield_central_position', 0)
+    ebeam_initial_position = kwargs.get('ebeam_initial_position', 0)
+
+    eBeam, magFldCnt, eTraj = set_light_source(bl, False, bl['Class'],
+                                               ebeam_initial_position=ebeam_initial_position,
+                                               magfield_central_position=magfield_central_position,
+                                               verbose=verbose)
+    
+    # ---------------------------------------------------------
+    # Energy sampling
+    if energy_sampling == 0:
+        energy_array = np.linspace(energy_min, energy_max, num_points)
+    else:
+        if bl['Class'] == 'u':
+            resonant_energy = get_undulator_emission_energy(
+                                    bl['PeriodID'], 
+                                    np.sqrt(bl['Kv']**2 + bl['Kh']**2),
+                                    bl['ElectronEnergy'], verbose=verbose)
+        else:
+            resonant_energy = kwargs.get('resonant_energy', None)
+        if resonant_energy is None:
+            raise ValueError("Please, provide resonant_energy for the logarithmic energy sampling (see function docstring)")
+            
+        stepsize = np.log(energy_max/resonant_energy)/num_points
+        energy_array = generate_logarithmic_energy_array(energy_min,
+                                                         energy_max,
+                                                         resonant_energy,
+                                                         stepsize,
+                                                         verbose)
+        
+    calc_txt = "> Performing ___CALC___ spectrum"
+
+    # ---------------------------------------------------------
+    # On-Axis Spectrum 
+
+    if hor_slit < 1e-6 and ver_slit < 1e-6:
+        if parallel:
+            if verbose: print('> Performing on-axis spectrum in parallel ... ')
+        else:
+            if verbose: print('> Performing on-axis spectrum ... ', end='')
+
+        if bl['Class'] == 'u' and number_macro_electrons > 0:
+            # spectrum = srwlibCalcStokesUR
+            pass
+        else:
+            spectrum = spectral_srwlibCalcElecFieldSR(bl, 
+                                    eBeam, 
+                                    magFldCnt,
+                                    energy_array,
+                                    1,
+                                    1,
+                                    bl['Class'],
+                                    parallel,
+                                    radiation_polarisation,
+                                    0) 
+
+    if verbose: print('completed')
+
+    spectrumDict = write_spectrum(file_name, spectrum)
+
+    if verbose: print(f"{function_txt} finished.")
+    if verbose: print_elapsed_time(t0)
+
+    return spectrumDict
+#***********************************************************************************
+# coherent modes
+#***********************************************************************************
+
+def coherent_modes():
+    pass
+
+
+#***********************************************************************************
+# spectral wavefront calculation - 3D datasets
+#***********************************************************************************
+
+def emitted_radiation():
+    pass
+
+
+#***********************************************************************************
+# tuning curves
+#***********************************************************************************
+
+def tuning_curves():
+    pass
