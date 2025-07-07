@@ -19,6 +19,8 @@ __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
 __changed__ = '24/JUN/2025'
 
+import os
+
 import numpy as np
 import scipy.optimize as opt
 from numba import njit, prange
@@ -1401,3 +1403,10 @@ def fit_gaussian(x, fx):
     p0 = [np.max(fx), x[np.argmax(fx)], np.std(x)]
     popt, _ = opt.curve_fit(gaussian, x, fx, p0=p0)
     return popt
+
+
+if __name__ == '__main__':
+
+    file_name = os.path.basename(__file__)
+
+    print(f"This is the barc4sr.{file_name} module!")
