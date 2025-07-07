@@ -425,7 +425,6 @@ def spectrum(energy_min: float,
     
     # ---------------------------------------------------------
     # Energy sampling
-
     if bl['Class'] == 'u':
         resonant_energy = get_undulator_emission_energy(
                                 bl['PeriodID'], 
@@ -446,8 +445,6 @@ def spectrum(energy_min: float,
                                                          stepsize,
                                                          verbose)
         
-    calc_txt = "> Performing ___CALC___ spectrum"
-
     # ---------------------------------------------------------
     # On-Axis Spectrum 
     if bl['slitH'] < 1e-6 or bl['slitV'] < 1e-6:
@@ -482,6 +479,10 @@ def spectrum(energy_min: float,
                                     0,
                                     verbose) 
     elif number_macro_electrons == 1:
+        if parallel:
+            if verbose: print('> Performing (simplified) spectrum through slit in parallel ... ')
+        else:
+            if verbose: print('> Performing (simplified) spectrum through slit ... ', end='')
 
         if bl['Class'] == 'u':
             spectrum = spectral_srwlibCalcStokesUR(bl,
@@ -495,7 +496,23 @@ def spectrum(energy_min: float,
                                                    radiation_polarisation,
                                                    verbose)
 
+    else:
+        if parallel:
+            if verbose: print('> Performing (accurate) spectrum through slit in parallel ... ')
+        else:
+            if verbose: print('> Performing (accurate) spectrum through slit ... ', end='')
 
+        if bl['Class'] == 'u':
+            spectrum = spectral_srwlibCalcStokesUR(bl,
+                                                   eBeam,
+                                                   magFldCnt,
+                                                   energy_array,
+                                                   resonant_energy,
+                                                   1,
+                                                   1,
+                                                   parallel,
+                                                   radiation_polarisation,
+                                                   verbose)
 
     if verbose: print('completed')
 
