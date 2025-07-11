@@ -11,11 +11,13 @@ __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '13/JUN/2025'
 __changed__ = '07/JUL/2025'
 
+import matplotlib.colors as mcolors
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.integrate as integrate
-from matplotlib import rcParamsDefault
+from matplotlib import cm, rcParamsDefault
+from matplotlib.colors import LinearSegmentedColormap
 from skimage.restoration import unwrap_phase
 
 #***********************************************************************************
@@ -213,7 +215,7 @@ def plot_wavefront(wfr: dict, cuts: bool = True, show_phase: bool = True, **kwar
         fig = plt.figure(figsize=(4.2*fctr, 4))
         fig.suptitle(f"({pol}) | flux: {flux:.2e} ph/s/0.1%bw", fontsize=16 * k, x=0.5)
         ax = fig.add_subplot(111)
-        im = ax.pcolormesh(X, Y, data, shading='auto', cmap='turbo', vmin=vmin, vmax=vmax)
+        im = ax.pcolormesh(X, Y, data, shading='auto', cmap='terrain', vmin=vmin, vmax=vmax)
         ax.set_aspect('equal')
         ax.set_xlabel('x [mm]')
         ax.set_ylabel('y [mm]')
@@ -420,6 +422,81 @@ def plot_spectrum(spectrum: dict, logy: bool = True, spectral_power: bool = Fals
 
         plt.tight_layout()
         plt.show()
+
+def plot_multiple_spectra(scans: list, polarisation: str, logy: bool = True, **kwargs) -> None:
+    """
+    Plots flux vs energy for a list of spectrum dictionaries (different window sizes) on the same graph.
+
+    Parameters:
+        scans (list): List of spectrum dictionaries (each as returned by write_spectrum).
+        polarisation (str): The polarisation to plot ('total', 'horizontal', 'vertical', etc.).
+        logy (bool, optional): If True, uses logarithmic y-axis (default: True).
+        **kwargs: Additional keyword arguments passed to start_plotting (e.g. scaling factor 'k').
+
+    Notes:
+        Only first, middle (or before middle if even), and last scans are labelled with window size.
+    """
+    k = kwargs.get('k', 1)
+    observation_point = kwargs.get('observation_point', None)
+    start_plotting(k)
+
+    # my_cmap = LinearSegmentedColormap.from_list('my_cmap', 
+    #                                             [(0.0, mcolors.to_rgb('orangered')),
+    #                                              (1.0, mcolors.to_rgb('cornflowerblue'))])
+
+    my_cmap = LinearSegmentedColormap.from_list('my_cmap', 
+                                                [(0.00, ( 14/255,  14/255, 120/255, 1)),
+                                                 (0.17, ( 62/255, 117/255, 207/255, 1)),
+                                                 (0.30, ( 91/255, 190/255, 243/255, 1)),
+                                                 (0.43, (100/255, 200/255, 150/255, 1)),
+                                                 (0.59, (244/255, 213/255, 130/255, 1)),
+                                                 (0.71, (237/255, 158/255,  80/255, 1)),
+                                                 (0.85, (204/255,  90/255,  41/255, 1)),
+                                                 (1.00, (150/255,  20/255,  30/255, 1))])
+
+    colors = my_cmap(np.linspace(0, 1, len(scans)))
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.set_title(f"({polarisation}) | spectral flux", fontsize=16*k)
+
+    # indices_to_label = [0, len(scans)-1]
+    indices_to_label = [0, (len(scans)-1)//2, len(scans)-1] if len(scans)%2 else [0, (len(scans)//2)-1, len(scans)-1]
+
+    if len(scans)>=5:
+        lw = 1
+    else:
+        lw = 1.5
+
+    for idx, (scan, color) in enumerate(zip(scans, colors)):
+
+        energy = scan['energy']
+        flux = scan[polarisation]['flux']
+        window_dx = scan['window']['dx']
+        window_dy = scan['window']['dy']
+        label = None
+        if idx in indices_to_label:
+            if observation_point is None:
+                label = f"{window_dx*1e3:.2f} x {window_dy*1e3:.2f} mm²"
+            else:
+                window_dx_rmad = 2*np.arctan(window_dx/2/observation_point)
+                window_dy_rmad = 2*np.arctan(window_dy/2/observation_point)
+                label = f"{window_dx_rmad*1e3:.2f} x {window_dy_rmad*1e3:.2f} mrad²"
+
+        ax.plot(energy, flux, color=color, lw=lw, label=label)
+
+    ax.set_xlabel('energy [eV]')
+    ax.set_ylabel('flux [ph/s/0.1%bw]')
+    if logy:
+        ax.set_yscale('log')
+
+    ax.grid(True, linestyle=':', linewidth=0.5)
+    ax.tick_params(direction='in', top=True, right=True)
+
+    if indices_to_label:
+        ax.legend()
+
+    plt.tight_layout()
+    plt.show()
 
 
 def plot_beamline_acceptance_scan(results: dict, observation_point: float, measurement: str, **kwargs) -> None:
