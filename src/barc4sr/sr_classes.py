@@ -8,6 +8,7 @@ This module provides the barc4sr classes:
 - SynchrotronSource
 - UndulatorSource(SynchrotronSource)
 - BendingMagnetSource(SynchrotronSource)
+- ArbitraryMagnetSource(SynchrotronSource)
 
 """
 
@@ -16,7 +17,9 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
-__changed__ = '18/FEB/2025'
+__changed__ = '24/JUN/2025'
+
+import os
 
 import numpy as np
 import scipy.optimize as opt
@@ -233,7 +236,6 @@ class ElectronBeam(object):
         for i in (vars(self)):
             print("{0:10}: {1}".format(i, vars(self)[i]))
 
-
 class MagneticStructure(object):
     """
     Class for defining magnetic structure parameters, including undulators, wigglers, and bending magnets.
@@ -247,14 +249,17 @@ class MagneticStructure(object):
         Initializes the MagneticStructure class with parameters representing the magnetic field and geometry.
 
         Args:
-            B_vertical (float): Vertical magnetic field component (in Tesla).
-            B_horizontal (float): Horizontal magnetic field component (in Tesla).
-            mag_structure (str): Type of magnetic structure, which can be:
-                - "u", "und", "undulator" for undulator (default).
-                - "w", "wig", "wiggler" for wiggler.
-                - "bm", "bending magnet", "bending_magnet" for bending magnet.
+            B_vertical (float): Vertical magnetic field (T).
+            B_horizontal (float): Horizontal magnetic field (T).
+            mag_structure (str): One of:
+                - Undulator: 'u', 'und', 'undulator'
+                - Wiggler: 'w', 'wig', 'wiggler'
+                - Bending magnet: 'bm', 'bending magnet', 'bending_magnet'
+                - Arbitrary field: 'a', 'arb', 'arbitrary', 'measured'
+
             **kwargs: Additional optional parameters based on the magnetic structure type:
                 - centre (float): centre of the mag. structure (in meters) in relation to where the electron beam moments are calculated. Defaults to 0.
+
                 For undulators and wigglers:
                     - K_vertical (float): Vertical deflection parameter (K-value).
                     - B_vertical_phase (float): Phase offset for the vertical magnetic field in radians. Defaults to 0.
@@ -269,6 +274,7 @@ class MagneticStructure(object):
                     - harmonic (int): Harmonic number. Defaults to 1.
                     - period_length (float): Length of one period (in meters).
                     - number_of_periods (int): Number of periods.
+
                 For bending magnets:
                     - radius (float): Radius of curvature (in meters). Effective if > 0.
                     - length (float): Effective length of the magnet (in meters). Effective if > 0.
@@ -278,6 +284,9 @@ class MagneticStructure(object):
                     - extraction_angle (float):
                     - critical_energy (float):
 
+                For arbitrary magnet fields:
+                    - 
+
         Raises:
             ValueError: If an invalid magnetic structure type is provided.
         """
@@ -285,7 +294,9 @@ class MagneticStructure(object):
         und = ['u', 'und', 'undulator']
         wig = ['w', 'wig', 'wiggler']
         bm = ['bm', 'bending magnet', 'bending_magnet']
-        allowed_mag_structure = [ms for group in [und, wig, bm] for ms in group]
+        arb = ['a', 'arb', 'arbitrary', 'measured']
+
+        allowed_mag_structure = [ms for group in [und, wig, bm, arb] for ms in group]
 
         if mag_structure not in allowed_mag_structure:
             raise ValueError(f"Invalid magnetic structure: {mag_structure}. Must be one of {allowed_mag_structure}")
@@ -309,12 +320,16 @@ class MagneticStructure(object):
 
         if mag_structure in bm:
             self.CLASS_NAME = "BendingMagnet"
-            self.magnetic_field = self.B_vertical
+            self.magnetic_field = kwargs.get("magnetic_field", self.B_vertical)
             self.radius = kwargs.get("radius", None)
             self.length = kwargs.get("length", None)
             self.length_edge = kwargs.get("length_edge", 0)
             self.extraction_angle = kwargs.get("extraction_angle", None)
             self.critical_energy = kwargs.get("critical_energy", None)
+
+        if mag_structure in arb:
+            self.CLASS_NAME = "Arbitrary"
+            self.magnetic_field = kwargs.get("magnetic_field", None)
 
     def print_attributes(self) -> None:
         """
@@ -322,7 +337,6 @@ class MagneticStructure(object):
         """
         for i in (vars(self)):
             print("{0:10}: {1}".format(i, vars(self)[i]))
-
 
 class SynchrotronSource(object):
     """
@@ -372,19 +386,6 @@ class SynchrotronSource(object):
 
         write_syned_file(json_file, light_source_name, self.ElectronBeam, self.MagneticStructure)
 
-    # def write_spectra_config(self, json_file: str, light_source_name: str=None):
-    #     """
-    #     Writes a SPECTRA JSON configuration file.
-
-    #     Parameters:
-    #         json_file (str): The path to the JSON file where the dictionary will be written.
-    #         light_source_name (str): The name of the light source.
-    #     """
-    #     if light_source_name is None:
-    #         light_source_name = json_file.split('/')[-1].replace('.json','')
-
-    #     write_spectra_file(json_file, light_source_name, self.ElectronBeam, self.MagneticStructure)
-
     def print_attributes(self) -> None:
         """
         Prints all attribute of object
@@ -408,7 +409,6 @@ class UndulatorSource(SynchrotronSource):
                class representing the magnetic structure parameters.
         """
 
-        # initializes attributes for a frozen object
         self.wavelength = None
         self.sigma_u = None
         self.sigma_up = None
@@ -816,8 +816,8 @@ class UndulatorSource(SynchrotronSource):
         if mth == 0:
             sigma_x = np.sqrt(self.sigma_u**2 + self.e_x**2)
             sigma_y = np.sqrt(self.sigma_u**2 + self.e_y**2)
-            sigma_x_div = np.sqrt(self.sigma_up**2 + self.e_xp**2)
-            sigma_y_div = np.sqrt(self.sigma_up**2 + self.e_yp**2)
+            sigma_xp = np.sqrt(self.sigma_up**2 + self.e_xp**2)
+            sigma_yp = np.sqrt(self.sigma_up**2 + self.e_yp**2)
 
         # Tanaka & Kitamura - doi:10.1107/S0909049509009479
         elif mth == 1:
@@ -837,8 +837,8 @@ class UndulatorSource(SynchrotronSource):
             
             sigma_x = np.sqrt(self.sigma_u**2*_qs(self.energy_spread) + self.e_x**2)
             sigma_y = np.sqrt(self.sigma_u**2*_qs(self.energy_spread) + self.e_y**2)
-            sigma_x_div = np.sqrt(self.sigma_up**2*_qa(self.energy_spread) + self.e_xp**2)
-            sigma_y_div = np.sqrt(self.sigma_up**2*_qa(self.energy_spread) + self.e_yp**2)
+            sigma_xp = np.sqrt(self.sigma_up**2*_qa(self.energy_spread) + self.e_xp**2)
+            sigma_yp = np.sqrt(self.sigma_up**2*_qa(self.energy_spread) + self.e_yp**2)
 
         else:
             raise ValueError("Not a valid method for emittance calculation.")
@@ -855,13 +855,13 @@ class UndulatorSource(SynchrotronSource):
 
         # self.sigma_x = sigma_x
         # self.sigma_y = sigma_y
-        self.sigma_x_div = sigma_x_div
-        self.sigma_y_div = sigma_y_div
+        self.sigma_xp = sigma_xp
+        self.sigma_yp = sigma_yp
 
         if verbose :        
             print("convolved photon beam:")
-            print(f"\t>> x/xp = {sigma_x*1e6:0.2f} um vs. {sigma_x_div*1e6:0.2f} urad")
-            print(f"\t>> y/yp = {sigma_y*1e6:0.2f} um vs. {sigma_y_div*1e6:0.2f} urad")
+            print(f"\t>> x/xp = {sigma_x*1e6:0.2f} um vs. {sigma_xp*1e6:0.2f} urad")
+            print(f"\t>> y/yp = {sigma_y*1e6:0.2f} um vs. {sigma_yp*1e6:0.2f} urad")
 
     def set_on_axis_flux(self, verbose: bool=False) -> float:
         """ 
@@ -918,7 +918,7 @@ class UndulatorSource(SynchrotronSource):
             nsigma = kwargs.get("nsigma", 6)
             dtn = kwargs.get("off_res_wavelength", self.wavelength)
 
-            divergence = np.amax([self.sigma_x_div, self.sigma_y_div])
+            divergence = np.amax([self.sigma_xp, self.sigma_yp])
             # natural undulator divergence
             theta = np.linspace(0, nsigma/2, 1001)*divergence
             natural_divergence_1d = np.sinc(0.5*self.harmonic*(theta/divergence)**2 
@@ -952,7 +952,7 @@ class UndulatorSource(SynchrotronSource):
         """
         if self.central_cone_flux is None:
             self.get_central_cone_flux(verbose=verbose)
-        self.brilliance = self.central_cone_flux/(self.sigma_x*self.sigma_x_div*self.sigma_y*self.sigma_y_div*1E12)
+        self.brilliance = self.central_cone_flux/(self.sigma_x*self.sigma_xp*self.sigma_y*self.sigma_yp*1E12)
 
         if verbose:
             print("brilliance:")
@@ -989,8 +989,8 @@ class UndulatorSource(SynchrotronSource):
         Args:
             verbose (bool): If True, prints the coherent fraction estimation.
         """
-        CF_x = self.sigma_u * self.sigma_up / (self.sigma_x * self.sigma_x_div)
-        CF_y = self.sigma_u * self.sigma_up / (self.sigma_y * self.sigma_y_div)
+        CF_x = self.sigma_u * self.sigma_up / (self.sigma_x * self.sigma_xp)
+        CF_y = self.sigma_u * self.sigma_up / (self.sigma_y * self.sigma_yp)
 
         self.coherent_fraction = CF_x*CF_y*100
 
@@ -1038,8 +1038,8 @@ class UndulatorSource(SynchrotronSource):
 
         npix = kwargs.get("npix", 251)
         nsigma = kwargs.get("nsigma", 6)
-        hor_slit= kwargs.get("hor_slit", nsigma*self.sigma_x_div)
-        ver_slit= kwargs.get("ver_slit", nsigma*self.sigma_y_div)
+        hor_slit= kwargs.get("hor_slit", nsigma*self.sigma_xp)
+        ver_slit= kwargs.get("ver_slit", nsigma*self.sigma_yp)
 
         K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
 
@@ -1083,7 +1083,6 @@ class UndulatorSource(SynchrotronSource):
             print(f"\t>> {CumPow:.3f} W")
 
         self.power_though_slit = {'power': CumPow, 'slit': {'dh':hor_slit, 'dv':ver_slit}}
-
 
 class BendingMagnetSource(SynchrotronSource):
     """
@@ -1239,6 +1238,89 @@ class BendingMagnetSource(SynchrotronSource):
             print(f">> {(0.5*self.length - zpos):.3f} m from the BM entrance.")
         return zpos
 
+class ArbitraryMagnetSource(SynchrotronSource):
+    """
+    Class representing an arbitrary magnetic source, which combines an electron beam and 
+    a magnetic structure.
+    """
+    def __init__(self, **kwargs) -> None:
+        """
+        Initializes an instance of the ArbitraryMagnetSource class.
+
+        Args:
+            electron_beam (ElectronBeam): An instance of the ElectronBeam class 
+               representing the electron beam parameters.
+            magnetic_structure (MagneticStructure): An instance of the MagneticStructure 
+               class representing the magnetic structure parameters.
+        """
+        super().__init__(**kwargs)  
+
+    def set_arb_mag_field(self, **kwargs) -> None:
+        """
+        Sets a user-defined arbitrary magnetic field.
+
+        Keyword Args:
+            magnetic_field (dict): Dictionary with keys 's' and 'B', where:
+                's' (np.ndarray): Longitudinal positions [m].
+                'B' (np.ndarray): Magnetic field vectors of shape (N, 3) in Tesla.
+            recenter (float): If provided, recenters the field profile such that its center is at this position.
+            si (float): Start position [m] for field trimming. Default is -1e23 (no trimming).
+            sf (float): End position [m] for field trimming. Default is 1e23 (no trimming).
+
+        Raises:
+            ValueError: If no magnetic field is provided or if its format is invalid.
+        """
+        recenter = kwargs.get('recenter', None)
+        si = kwargs.get('si', -1e23)
+        sf = kwargs.get('sf', 1e23)
+
+        magnetic_field = kwargs.get("magnetic_field", None)
+
+        piloting = [magnetic_field, self.magnetic_field]
+
+        if all(param is None for param in piloting):
+            raise ValueError("Please, provide the magnetic field dictionary {'s': np.asarray(ns), 'B': np.asarray(Bx, By, Bz)}")
+        
+        if magnetic_field is not None:
+            if self.check_magnetic_field_dictionary(magnetic_field) is False:
+                raise ValueError("Expected dictionary format: {'s': np.asarray(ns), 'B': np.asarray(Bx, By, Bz)}")
+            self.MagneticStructure.magnetic_field = magnetic_field
+        else:
+            if self.check_magnetic_field_dictionary(self.MagneticStructure.magnetic_field) is False:
+                raise ValueError("Expected dictionary format: {'s': np.asarray(ns), 'B': np.asarray(Bx, By, Bz)}")
+
+        if recenter is not None:
+            s = self.MagneticStructure.magnetic_field['s']
+            ds = (s[-1]-s[0])/2
+            self.MagneticStructure.magnetic_field['s'] = s - (ds + recenter)
+
+        s = self.MagneticStructure.magnetic_field['s']
+        B = self.MagneticStructure.magnetic_field['B']  # shape (N, 3)
+        mask = (s >= si) & (s <= sf)
+        self.MagneticStructure.magnetic_field['s'] = s[mask]
+        self.MagneticStructure.magnetic_field['B'] = B[mask, :]
+
+    def check_magnetic_field_dictionary(self, magnetic_field_dictionary):
+        """
+        Checks whether the magnetic field dictionary is valid.
+
+        Args:
+            magnetic_field_dictionary (dict): Dictionary to validate.
+
+        Returns:
+            bool: True if the dictionary is valid, False otherwise.
+        """
+        if not isinstance(magnetic_field_dictionary, dict):
+            return False
+        if set(magnetic_field_dictionary.keys()) != {'s', 'B'}:
+            return False
+        s, B = magnetic_field_dictionary['s'], magnetic_field_dictionary['B']
+        if not (isinstance(s, np.ndarray) and s.ndim == 1):
+            return False
+        if not (isinstance(B, np.ndarray) and B.shape == (len(s), 3)):
+            return False
+        return True
+    
 #***********************************************************************************
 # **planar undulator** auxiliary functions 
 # K. J. Kim, "Optical and power characteristics of synchrotron radiation sources" 
@@ -1305,6 +1387,12 @@ def Fn(K, n):
     return arg_mult*(Jnp1 - Jnm1)**2
 
 #***********************************************************************************
+# **elliptical** auxiliary functions 
+# K. J. Kim, "Optical and power characteristics of synchrotron radiation sources" 
+# [also Erratum 34(4)1243(Apr1995)],  Opt. Eng 34(2), 342 (1995)
+#***********************************************************************************
+
+#***********************************************************************************
 # **other** auxiliary functions 
 #***********************************************************************************
 
@@ -1315,3 +1403,10 @@ def fit_gaussian(x, fx):
     p0 = [np.max(fx), x[np.argmax(fx)], np.std(x)]
     popt, _ = opt.curve_fit(gaussian, x, fx, p0=p0)
     return popt
+
+
+if __name__ == '__main__':
+
+    file_name = os.path.basename(__file__)
+
+    print(f"This is the barc4sr.{file_name} module!")

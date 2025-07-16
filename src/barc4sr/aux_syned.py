@@ -9,10 +9,9 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
-__changed__ = '25/NOV/2024'
+__changed__ = '26/JUN/2025'
 
 import json
-from typing import Any, Dict, Union
 
 import numpy as np
 
@@ -43,7 +42,7 @@ def write_syned_file(json_file: str, light_source_name: str, ElectronBeamClass: 
         json.dump(data, file, indent=4)
 
 
-def read_syned_file(json_file: str) -> Dict[str, Any]:
+def read_syned_file(json_file: str) -> dict:
     """
     Reads a SYNED JSON configuration file and returns its contents as a dictionary.
 
@@ -58,14 +57,14 @@ def read_syned_file(json_file: str) -> Dict[str, Any]:
     return data
 
 
-def syned_dictionary(json_file: str, magnetic_measurement: Union[str, None], observation_point: float, 
+def syned_dictionary(json_file: str, magnetic_measurement: str, observation_point: float, 
                      hor_slit: float, ver_slit: float, hor_slit_cen: float, ver_slit_cen: float) -> dict:
     """
     Generate beamline parameters based on a SYNED JSON configuration file and additional input parameters.
 
     Args:
         json_file (str): Path to the SYNED JSON configuration file.
-        magnetic_measurement (Union[str, None]): Path to the file containing magnetic measurement data.
+        magnetic_measurement (str): Path to the file containing magnetic measurement data.
             Overrides SYNED undulator data if provided.
         observation_point (float): Distance to the observation point in meters.
         hor_slit (float): Horizontal slit size in meters.
@@ -94,6 +93,7 @@ def syned_dictionary(json_file: str, magnetic_measurement: Union[str, None], obs
     beamline['magnetic_measurement'] = magnetic_measurement
     # undulator        
     if data["magnetic_structure"]["CLASS_NAME"].startswith("U"):
+        beamline['Class'] = 'u'
         beamline['NPeriods'] = data["magnetic_structure"]["number_of_periods"]
         beamline['PeriodID'] = data["magnetic_structure"]["period_length"]
 
@@ -106,6 +106,7 @@ def syned_dictionary(json_file: str, magnetic_measurement: Union[str, None], obs
         beamline['MagFieldSymmetryV'] = data["magnetic_structure"]["B_vertical_symmetry"]
     # bending magnet        
     if data["magnetic_structure"]["CLASS_NAME"].startswith("B"):
+        beamline['Class'] = 'bm'
         beamline['Bh'] = data["magnetic_structure"]["B_horizontal"]
         beamline['Bv'] = data["magnetic_structure"]["B_vertical"]
         beamline['B'] = data["magnetic_structure"]["magnetic_field"]
@@ -123,7 +124,7 @@ def syned_dictionary(json_file: str, magnetic_measurement: Union[str, None], obs
     return beamline
 
 
-def barc4sr_dictionary(light_source: object, magnetic_measurement: Union[str, None], 
+def barc4sr_dictionary(light_source: object, magnetic_measurement: str, 
                        observation_point: float, hor_slit: float, ver_slit: float, 
                        hor_slit_cen: float, ver_slit_cen: float) -> dict:
     """
@@ -131,7 +132,7 @@ def barc4sr_dictionary(light_source: object, magnetic_measurement: Union[str, No
 
     Args:
         light_source (SynchrotronSource): Instance of SynchrotronSource or any object that inherits from it.
-        magnetic_measurement (Union[str, None]): Path to the file containing magnetic measurement data.
+        magnetic_measurement (str): Path to the file containing magnetic measurement data.
             Overrides SYNED undulator data if provided.
         observation_point (float): Distance to the observation point in meters.
         hor_slit (float): Horizontal slit size in meters.
@@ -158,6 +159,7 @@ def barc4sr_dictionary(light_source: object, magnetic_measurement: Union[str, No
     beamline['magnetic_measurement'] = magnetic_measurement
     # undulator        
     if light_source.MagneticStructure.CLASS_NAME.startswith("U"):
+        beamline['Class'] = 'u'
         beamline['NPeriods'] = light_source.MagneticStructure.number_of_periods
         beamline['PeriodID'] = light_source.MagneticStructure.period_length
 
@@ -170,6 +172,7 @@ def barc4sr_dictionary(light_source: object, magnetic_measurement: Union[str, No
         beamline['MagFieldSymmetryV'] = light_source.MagneticStructure.B_vertical_symmetry
     # bending magnet        
     if light_source.MagneticStructure.CLASS_NAME.startswith("B"):
+        beamline['Class'] = 'bm'
         beamline['Bh'] = light_source.MagneticStructure.B_horizontal
         beamline['Bv'] = light_source.MagneticStructure.B_vertical
         beamline['B'] = light_source.MagneticStructure.magnetic_field
@@ -177,6 +180,10 @@ def barc4sr_dictionary(light_source: object, magnetic_measurement: Union[str, No
         beamline['Leff'] = light_source.MagneticStructure.length
         beamline['Ledge'] = light_source.MagneticStructure.length_edge
         beamline['ExtAng'] = light_source.MagneticStructure.extraction_angle
+    # bending magnet        
+    if light_source.MagneticStructure.CLASS_NAME.startswith("A"):
+        beamline['Class'] = 'arb'
+        beamline['MagFieldDict'] = light_source.MagneticStructure.magnetic_field
 
     # radiation observation
     beamline['distance'] = observation_point
