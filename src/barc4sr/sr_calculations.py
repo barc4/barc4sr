@@ -9,7 +9,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '17/JUN/2025'
-__changed__ = '04/JUL/2025'
+__changed__ = '16/JUL/2025'
 
 import os
 import time
@@ -21,6 +21,7 @@ from barc4sr.aux_energy import (
     get_undulator_emission_energy,
 )
 from barc4sr.aux_rw import (
+    write_cmd,
     write_electron_trajectory,
     write_power_density,
     write_spectrum,
@@ -34,7 +35,11 @@ from barc4sr.aux_utils import (
     spectral_srwlibCalcStokesUR,
     srwlibCalcElecFieldSR,
     srwlibCalcPowDenSR,
+    wofrySlitCMD,
+    wofrySourceCMD,
 )
+
+PI = np.pi
 
 #***********************************************************************************
 # electron trajectory
@@ -527,8 +532,81 @@ def spectrum(energy_min: float,
 # coherent modes
 #***********************************************************************************
 
-def coherent_modes():
-    pass
+def coherent_modes(photon_energy: float,
+                   observation_point: float,
+                   hor_slit: float, 
+                   ver_slit: float,
+                   **kwargs) -> dict:
+    """
+    Calculates the 1D coherent mode decomposition (CMD) for an undulator source using WOFRY.
+
+    Args:
+        photon_energy (float): Photon energy [eV].
+        observation_point (float): Distance to the observation point [m].
+        hor_slit (float): Horizontal slit size [m].
+        ver_slit (float): Vertical slit size [m].
+
+    Optional Args (kwargs):
+        file_name (str): The name of the output file.
+        json_file (str): Path to the SYNED JSON configuration file.
+        light_source (optional): barc4sr.aux_utils.UndulatorSource object.
+        verbose (bool): If True, print log information. Default is True.
+
+    Returns:
+        dict: Dictionary containing:
+            - 'energy': Photon energy [eV].
+            - 'source': For each direction ('H', 'V'):
+                - 'eigenvalues': Array of eigenvalues.
+                - 'axis': Array of abscissas.
+                - 'occupation': Normalised occupation array.
+                - 'cumulated': Cumulative sum of occupation.
+                - 'CF': Coherent fraction (first mode occupation).
+                - 'CSD': Cross-spectral density matrix.
+    """
+
+    t0 = time.time()
+
+    verbose = kwargs.get('verbose', True)
+    json_file = kwargs.get('json_file', None)
+    light_source = kwargs.get('light_source', None)
+    file_name = kwargs.get('file_name', None)
+
+    if json_file is None and light_source is None:
+        raise ValueError("Please, provide either json_file or light_source (see function docstring)")
+    if json_file is not None and light_source is not None:
+        raise ValueError("Please, provide either json_file or light_source - not both (see function docstring)")
+
+    hor_slit_cen = 0 # kwargs.get('hor_slit_cen', 0)
+    ver_slit_cen = 0 # kwargs.get('ver_slit_cen', 0)
+
+    if json_file is not None:
+        bl = syned_dictionary(json_file, None, observation_point, 
+                              hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
+    if light_source is not None:
+        bl = barc4sr_dictionary(light_source, None, observation_point, 
+                                hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
+
+    if bl['Class'] != 'u':
+        raise ValueError("This function is only valid for ideal undulators (sr_classes.UndulatorSource)")
+
+    source_type = 'undulator'
+    function_txt = f"{source_type} 1D CMD for a fixed energy using WOFRY:"
+
+    if verbose: print(f"{function_txt} please wait...")
+
+    src_h_cmd = wofrySourceCMD(bl, photon_energy, 'H')
+    src_v_cmd = wofrySourceCMD(bl, photon_energy, 'V')
+
+    # slit_h_cmd = wofrySlitCMD(src_h_cmd, hor_slit, observation_point)
+
+    if verbose: print('completed')
+
+    cmdDict = write_cmd(file_name, {'src_h_cmd':src_h_cmd, 'src_v_cmd':src_v_cmd, 'energy': photon_energy})
+
+    if verbose: print(f"{function_txt} finished.")
+    if verbose: print_elapsed_time(t0)
+
+    return cmdDict
 
 
 #***********************************************************************************
@@ -536,7 +614,8 @@ def coherent_modes():
 #***********************************************************************************
 
 def emitted_radiation():
-    pass
+    raise NotImplementedError('Ohhh ohhh we are half way there! Ohhh ohhh living on a prayer! - this function is not implemented yet!')
+
 
 
 #***********************************************************************************
@@ -544,7 +623,7 @@ def emitted_radiation():
 #***********************************************************************************
 
 def tuning_curves():
-    pass
+    raise NotImplementedError('Ohhh ohhh we are half way there! Ohhh ohhh living on a prayer! - this function is not implemented yet!')
 
 
 if __name__ == '__main__':

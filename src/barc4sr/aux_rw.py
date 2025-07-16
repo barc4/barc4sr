@@ -9,7 +9,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '26/JAN/2024'
-__changed__ = '26/JUN/2025'
+__changed__ = '16/JUL/2025'
 
 import os
 import pickle
@@ -36,7 +36,7 @@ CHARGE = physical_constants["atomic unit of charge"][0]
 # electron trajectory
 #***********************************************************************************
 
-def write_electron_trajectory(file_name:str, eTraj: srwlib.SRWLPrtTrj) -> None:
+def write_electron_trajectory(file_name:str, eTraj: srwlib.SRWLPrtTrj) -> dict:
     """
     Saves electron trajectory data to an HDF5 file and returns a dictionary containing the trajectory data.
 
@@ -340,7 +340,7 @@ def read_wavefront(file_name: str) -> dict:
 # Power density
 #***********************************************************************************
 
-def write_power_density(file_name: str, stks: srwlib.SRWLStokes, selected_polarisations: list):
+def write_power_density(file_name: str, stks: srwlib.SRWLStokes, selected_polarisations: list) -> dict:
     """
     Writes power density data () to an HDF5 file.
 
@@ -447,7 +447,7 @@ def read_power_density(file_name: str) -> dict:
 # spectrum
 #***********************************************************************************
 
-def write_spectrum(file_name: str, spectrum: dict) -> None:
+def write_spectrum(file_name: str, spectrum: dict) -> dict:
     """
     Saves computed spectrum data to an HDF5 file and returns a processed spectrum dictionary.
 
@@ -559,6 +559,102 @@ def read_spectrum(file_name: str) -> dict:
                 spectrumDict[pol][key] = pol_group[key][:]
 
     return spectrumDict
+
+#***********************************************************************************
+# coherent mode decomposition
+#***********************************************************************************
+
+def write_cmd(file_name: str, cmd: dict) -> dict:
+    """
+    Saves coherent mode decomposition (CMD) data to an HDF5 file and returns a processed CMD dictionary.
+
+    Parameters:
+        file_name (str): Base file path for saving the CMD data. The data will be stored
+                         in a file named '<file_name>_cmd.h5'.
+        cmd (dict): Dictionary containing the CMD results with keys:
+            - 'energy': photon energy [eV].
+            - 'src_h_cmd' and 'src_v_cmd': CMD objects with attributes 'eigenvalues', 'abscissas', 'CSD'.
+
+    Returns:
+        dict: Processed CMD dictionary with energy and, for each direction ('H', 'V'):
+            - 'eigenvalues': Eigenvalues array.
+            - 'axis': Abscissas array.
+            - 'occupation': Normalised occupation array.
+            - 'cumulated': Cumulative sum of occupation array.
+            - 'CF': Coherent fraction (first mode occupation).
+            - 'CSD': Cross-spectral density matrix (absolute value).
+    """
+    cmdDict = {'energy': cmd['energy'], 'source': {}}
+
+    for direction in ['h', 'v']:
+        eigenvalues = cmd[f'src_{direction}_cmd'].eigenvalues
+        axis = cmd[f'src_{direction}_cmd'].abscissas 
+        occupation = eigenvalues / eigenvalues.sum()
+        cumulated = np.cumsum(occupation)
+        CF = occupation[0]
+        CSD = np.abs(cmd[f'src_{direction}_cmd'].CSD)
+
+        cmdDict['source'].update({
+            f'{direction.upper()}': {
+                'eigenvalues': eigenvalues,
+                'axis': axis,
+                'occupation': occupation,
+                'cumulated': cumulated,
+                'CF': CF,
+                'CSD': CSD
+            }
+        })
+
+    if file_name is not None:
+        with h5.File(f"{file_name}_cmd.h5", "w") as f:
+            group = f.create_group("XOPPY_CMD")
+            group.attrs["energy"] = cmdDict['energy']
+
+            for direction in ['H', 'V']:
+                dir_group = group.create_group(direction)
+                dir_group.create_dataset("eigenvalues", data=cmdDict['source'][direction]['eigenvalues'])
+                dir_group.create_dataset("axis", data=cmdDict['source'][direction]['axis'])
+                dir_group.create_dataset("occupation", data=cmdDict['source'][direction]['occupation'])
+                dir_group.create_dataset("cumulated", data=cmdDict['source'][direction]['cumulated'])
+                dir_group.attrs["CF"] = cmdDict['source'][direction]['CF']
+                dir_group.create_dataset("CSD", data=cmdDict['source'][direction]['CSD'])
+
+    return cmdDict
+
+def read_cmd(file_name: str) -> dict:
+    """
+    Reads CMD data from an HDF5 file and reconstructs the CMD dictionary.
+
+    Parameters:
+        file_name (str): Path to the HDF5 file containing CMD data (ending with '_cmd.h5').
+
+    Returns:
+        dict: CMD dictionary with energy and, for each direction ('H', 'V'):
+            - 'eigenvalues': Eigenvalues array.
+            - 'axis': Abscissas array.
+            - 'occupation': Normalised occupation array.
+            - 'cumulated': Cumulative sum of occupation array.
+            - 'CF': Coherent fraction (first mode occupation).
+            - 'CSD': Cross-spectral density matrix.
+    """
+    cmdDict = {'source': {}}
+
+    with h5.File(file_name, "r") as f:
+        group = f["XOPPY_CMD"]
+        cmdDict['energy'] = group.attrs["energy"]
+
+        for direction in ['H', 'V']:
+            dir_group = group[direction]
+            cmdDict['source'][direction] = {
+                'eigenvalues': dir_group["eigenvalues"][:],
+                'axis': dir_group["axis"][:],
+                'occupation': dir_group["occupation"][:],
+                'cumulated': dir_group["cumulated"][:],
+                'CF': dir_group.attrs["CF"],
+                'CSD': dir_group["CSD"][:]
+            }
+
+    return cmdDict
 
 if __name__ == '__main__':
 

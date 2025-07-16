@@ -423,6 +423,109 @@ def plot_spectrum(spectrum: dict, logy: bool = True, spectral_power: bool = Fals
         plt.tight_layout()
         plt.show()
 
+#***********************************************************************************
+# CMD
+#***********************************************************************************
+
+def plot_csd(cmdDict: dict, cuts: bool = True, **kwargs) -> None:
+    """
+    Plot cross-spectral density (CSD) and occupation/cumulative plots from a coherent mode decomposition dictionary.
+
+    For each direction ('H', 'V'), this plots:
+        - The 2D CSD map with optional horizontal and vertical cuts.
+        - The eigenmode occupation vs mode number, with cumulative sum on a secondary y-axis.
+
+    Args:
+        cmdDict (dict): CMD dictionary as returned by write_cmd or read_cmd.
+        cuts (bool, optional): Whether to include 1D cuts in the CSD plots (default: True).
+        **kwargs:
+            k (float, optional): Scaling factor for fonts and titles (default: 1).
+            nmode_max (int, optional): Maximum mode number to plot. If None, plot all modes.
+    """
+    k = kwargs.get('k', 1)
+    nmode_max = kwargs.get('nmodes', None)
+    start_plotting(k)
+
+    for direction, data in cmdDict['source'].items():
+        axis = data['axis'] * 1e3  # convert to mm
+        CSD = data['CSD']
+        occupation = data['occupation']
+        cumulative = data['cumulated']
+        CF = data['CF']
+
+        X, Y = np.meshgrid(axis, axis)
+
+        fctr = (axis[-1] - axis[0]) / (axis[-1] - axis[0])
+
+        # CSD 2D plot
+        fig = plt.figure(figsize=(4.2 * fctr, 4))
+        fig.suptitle(f"({direction}) | cross spectral density", fontsize=16 * k, x=0.5)
+        ax = fig.add_subplot(111)
+        im = ax.pcolormesh(X, Y, CSD, shading='auto', cmap='terrain')
+        ax.set_aspect('equal')
+        ax.set_xlabel(f'{direction.lower()}$_1$ [mm]')
+        ax.set_ylabel(f'{direction.lower()}$_2$ [mm]')
+        ax.grid(True, linestyle=':', linewidth=0.5)
+        cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, format='%.0e')
+        plt.show()
+
+        if cuts:
+            ix0 = np.argmin(np.abs(axis))
+            iy0 = np.argmin(np.abs(axis))
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4), sharey=True)
+
+            ax1.plot(axis, CSD[iy0, :], color='darkred', lw=1.5)
+            ax1.set_title('Hor. cut (y=0)')
+            ax1.set_xlabel(f'{direction.lower()}$_1$ [mm]')
+            ax1.set_ylabel('CSD')
+            ax1.grid(True, linestyle=':', linewidth=0.5)
+            ax1.tick_params(direction='in', top=True, right=True)
+            
+            ax2.plot(axis, CSD[:, ix0], color='darkred', lw=1.5)
+            ax2.set_title('Ver. cut (x=0)')
+            ax2.set_xlabel(f'{direction.lower()}$_2$ [mm]')
+            ax2.grid(True, linestyle=':', linewidth=0.5)
+            ax2.tick_params(direction='in', top=True, right=True)
+
+            plt.tight_layout(rect=[0, 0, 1, 0.95])
+            plt.show()
+
+        # occupation vs cumulative plot
+        mode_numbers = np.arange(1, len(data['eigenvalues']) + 1)
+
+        if nmode_max is not None:
+            mode_numbers = mode_numbers[:nmode_max]
+            occupation = occupation[:nmode_max]
+            cumulative = cumulative[:nmode_max]
+
+        fig, ax1 = plt.subplots(figsize=(8, 4))
+        color1 = 'darkred'
+        ax1.plot(mode_numbers, occupation, color=color1, marker='o', linestyle='--', 
+                 markerfacecolor='white', markeredgecolor=color1, markeredgewidth=1.5, 
+                 lw=1.5, label='Occupation')
+        ax1.set_xlabel('mode number')
+        ax1.set_ylabel('occupation', color=color1)
+        ax1.set_ylim(bottom=-0.05, top=1.05)
+        ax1.tick_params(axis='y', labelcolor=color1)
+        ax1.grid(True, linestyle=':', linewidth=0.5)
+        ax1.tick_params(direction='in', top=True, right=True)
+
+        ax2 = ax1.twinx()
+        color2 = 'steelblue'
+        ax2.plot(mode_numbers, cumulative, color=color2, marker='s', linestyle='--', 
+                 markerfacecolor='white', markeredgecolor=color2, markeredgewidth=1.5,
+                 lw=1.5, label='Cumulative')
+        ax2.set_ylabel('cumulative', color=color2)
+        ax2.tick_params(axis='y', labelcolor=color2)
+        ax2.tick_params(direction='in', top=True, right=True)
+
+        fig.suptitle(f"({direction}) | modes | CF {CF*100:.1f}%", fontsize=16 * k, x=0.5)
+        plt.tight_layout()
+        plt.show()
+#***********************************************************************************
+# scans
+#***********************************************************************************
+
 def plot_multiple_spectra(scans: list, polarisation: str, logy: bool = True, **kwargs) -> None:
     """
     Plots flux vs energy for a list of spectrum dictionaries (different window sizes) on the same graph.
@@ -440,10 +543,6 @@ def plot_multiple_spectra(scans: list, polarisation: str, logy: bool = True, **k
     observation_point = kwargs.get('observation_point', None)
     start_plotting(k)
 
-    # my_cmap = LinearSegmentedColormap.from_list('my_cmap', 
-    #                                             [(0.0, mcolors.to_rgb('orangered')),
-    #                                              (1.0, mcolors.to_rgb('cornflowerblue'))])
-
     my_cmap = LinearSegmentedColormap.from_list('my_cmap', 
                                                 [(0.00, ( 14/255,  14/255, 120/255, 1)),
                                                  (0.17, ( 62/255, 117/255, 207/255, 1)),
@@ -453,14 +552,14 @@ def plot_multiple_spectra(scans: list, polarisation: str, logy: bool = True, **k
                                                  (0.71, (237/255, 158/255,  80/255, 1)),
                                                  (0.85, (204/255,  90/255,  41/255, 1)),
                                                  (1.00, (150/255,  20/255,  30/255, 1))])
-
     colors = my_cmap(np.linspace(0, 1, len(scans)))
+    # colors = cm.jet(np.linspace(0, 1, len(scans)))
 
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.set_title(f"({polarisation}) | spectral flux", fontsize=16*k)
 
-    # indices_to_label = [0, len(scans)-1]
-    indices_to_label = [0, (len(scans)-1)//2, len(scans)-1] if len(scans)%2 else [0, (len(scans)//2)-1, len(scans)-1]
+    indices_to_label = [0, len(scans)-1]
+    # indices_to_label = [0, (len(scans)-1)//2, len(scans)-1] if len(scans)%2 else [0, (len(scans)//2)-1, len(scans)-1]
 
     if len(scans)>=5:
         lw = 1

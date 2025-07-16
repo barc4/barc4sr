@@ -816,8 +816,8 @@ class UndulatorSource(SynchrotronSource):
         if mth == 0:
             sigma_x = np.sqrt(self.sigma_u**2 + self.e_x**2)
             sigma_y = np.sqrt(self.sigma_u**2 + self.e_y**2)
-            sigma_x_div = np.sqrt(self.sigma_up**2 + self.e_xp**2)
-            sigma_y_div = np.sqrt(self.sigma_up**2 + self.e_yp**2)
+            sigma_xp = np.sqrt(self.sigma_up**2 + self.e_xp**2)
+            sigma_yp = np.sqrt(self.sigma_up**2 + self.e_yp**2)
 
         # Tanaka & Kitamura - doi:10.1107/S0909049509009479
         elif mth == 1:
@@ -837,8 +837,8 @@ class UndulatorSource(SynchrotronSource):
             
             sigma_x = np.sqrt(self.sigma_u**2*_qs(self.energy_spread) + self.e_x**2)
             sigma_y = np.sqrt(self.sigma_u**2*_qs(self.energy_spread) + self.e_y**2)
-            sigma_x_div = np.sqrt(self.sigma_up**2*_qa(self.energy_spread) + self.e_xp**2)
-            sigma_y_div = np.sqrt(self.sigma_up**2*_qa(self.energy_spread) + self.e_yp**2)
+            sigma_xp = np.sqrt(self.sigma_up**2*_qa(self.energy_spread) + self.e_xp**2)
+            sigma_yp = np.sqrt(self.sigma_up**2*_qa(self.energy_spread) + self.e_yp**2)
 
         else:
             raise ValueError("Not a valid method for emittance calculation.")
@@ -855,13 +855,13 @@ class UndulatorSource(SynchrotronSource):
 
         # self.sigma_x = sigma_x
         # self.sigma_y = sigma_y
-        self.sigma_x_div = sigma_x_div
-        self.sigma_y_div = sigma_y_div
+        self.sigma_xp = sigma_xp
+        self.sigma_yp = sigma_yp
 
         if verbose :        
             print("convolved photon beam:")
-            print(f"\t>> x/xp = {sigma_x*1e6:0.2f} um vs. {sigma_x_div*1e6:0.2f} urad")
-            print(f"\t>> y/yp = {sigma_y*1e6:0.2f} um vs. {sigma_y_div*1e6:0.2f} urad")
+            print(f"\t>> x/xp = {sigma_x*1e6:0.2f} um vs. {sigma_xp*1e6:0.2f} urad")
+            print(f"\t>> y/yp = {sigma_y*1e6:0.2f} um vs. {sigma_yp*1e6:0.2f} urad")
 
     def set_on_axis_flux(self, verbose: bool=False) -> float:
         """ 
@@ -918,7 +918,7 @@ class UndulatorSource(SynchrotronSource):
             nsigma = kwargs.get("nsigma", 6)
             dtn = kwargs.get("off_res_wavelength", self.wavelength)
 
-            divergence = np.amax([self.sigma_x_div, self.sigma_y_div])
+            divergence = np.amax([self.sigma_xp, self.sigma_yp])
             # natural undulator divergence
             theta = np.linspace(0, nsigma/2, 1001)*divergence
             natural_divergence_1d = np.sinc(0.5*self.harmonic*(theta/divergence)**2 
@@ -952,7 +952,7 @@ class UndulatorSource(SynchrotronSource):
         """
         if self.central_cone_flux is None:
             self.get_central_cone_flux(verbose=verbose)
-        self.brilliance = self.central_cone_flux/(self.sigma_x*self.sigma_x_div*self.sigma_y*self.sigma_y_div*1E12)
+        self.brilliance = self.central_cone_flux/(self.sigma_x*self.sigma_xp*self.sigma_y*self.sigma_yp*1E12)
 
         if verbose:
             print("brilliance:")
@@ -989,8 +989,8 @@ class UndulatorSource(SynchrotronSource):
         Args:
             verbose (bool): If True, prints the coherent fraction estimation.
         """
-        CF_x = self.sigma_u * self.sigma_up / (self.sigma_x * self.sigma_x_div)
-        CF_y = self.sigma_u * self.sigma_up / (self.sigma_y * self.sigma_y_div)
+        CF_x = self.sigma_u * self.sigma_up / (self.sigma_x * self.sigma_xp)
+        CF_y = self.sigma_u * self.sigma_up / (self.sigma_y * self.sigma_yp)
 
         self.coherent_fraction = CF_x*CF_y*100
 
@@ -1038,8 +1038,8 @@ class UndulatorSource(SynchrotronSource):
 
         npix = kwargs.get("npix", 251)
         nsigma = kwargs.get("nsigma", 6)
-        hor_slit= kwargs.get("hor_slit", nsigma*self.sigma_x_div)
-        ver_slit= kwargs.get("ver_slit", nsigma*self.sigma_y_div)
+        hor_slit= kwargs.get("hor_slit", nsigma*self.sigma_xp)
+        ver_slit= kwargs.get("ver_slit", nsigma*self.sigma_yp)
 
         K = np.sqrt(self.K_vertical**2 + self.K_horizontal**2)
 
