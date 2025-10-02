@@ -169,6 +169,131 @@ def plot_magnetic_field(eBeamTraj: dict, direction: str, **kwargs) -> None:
     plt.tight_layout()
     plt.show()
 
+def plot_field_and_twiss(data: dict, **kwargs) -> None:
+    """
+    Plot magnetic field components and Twiss parameters vs s.
+
+    Parameters
+    ----------
+    data : dict
+        Dictionary with:
+        - 's' : array, positions [m], shape (N,)
+        - 'B' : array, magnetic field vectors [T], shape (N, 3) for (Bx, By, Bz)
+        - 'Twiss' : dict with:
+            * 'beta_x' : array, horizontal beta [m], shape (N,)
+            * 'beta_y' : array, vertical beta [m], shape (N,)
+            * 'eta_x' or 'eta' : array, horizontal dispersion [m], shape (N,)
+    **kwargs
+        k : float, optional
+            Global scaling factor for fonts (default matches aux_plots).
+
+    Returns
+    -------
+    None
+        The function only generates the plots.
+
+    Raises
+    ------
+    KeyError
+        If required keys are missing in `data` or `data['Twiss']`.
+    ValueError
+        If array shapes are inconsistent, dimensions are incorrect,
+        or any values are non-finite.
+    """
+    k = kwargs.get('k', 1)
+    try:
+        start_plotting(k)  
+    except NameError:
+        pass 
+
+    if 's' not in data or 'B' not in data or 'Twiss' not in data:
+        raise KeyError("Missing required keys: 's', 'B', and 'Twiss' must be present.")
+
+    s = np.asarray(data['s'], dtype=float)
+    B = np.asarray(data['B'], dtype=float)
+
+    if s.ndim != 1:
+        raise ValueError("'s' must be 1D.")
+    if B.ndim != 2 or B.shape[1] != 3 or B.shape[0] != s.size:
+        raise ValueError("'B' must have shape (N, 3) with N == len(s).")
+    if not (np.isfinite(s).all() and np.isfinite(B).all()):
+        raise ValueError("'s' and 'B' must be finite.")
+
+    tw = data['Twiss']
+    for key in ('beta_x', 'beta_y'):
+        if key not in tw:
+            raise KeyError(f"Missing Twiss key: '{key}'.")
+    eta_key = 'eta_x' if 'eta_x' in tw else ('eta' if 'eta' in tw else None)
+    if eta_key is None:
+        raise KeyError("Missing Twiss key: 'eta_x' (or 'eta').")
+
+    beta_x = np.asarray(tw['beta_x'], dtype=float)
+    beta_y = np.asarray(tw['beta_y'], dtype=float)
+    eta = np.asarray(tw[eta_key], dtype=float)
+
+    for arr, name in ((beta_x, 'beta_x'), (beta_y, 'beta_y'), (eta, eta_key)):
+        if arr.ndim != 1 or arr.size != s.size:
+            raise ValueError(f"'{name}' must be 1D with len == len(s).")
+        if not np.isfinite(arr).all():
+            raise ValueError(f"'{name}' must be finite.")
+
+    color_Bx = 'darkred'
+    color_By = 'olive'
+    color_Bz = 'steelblue'
+    color_beta_x = 'teal'
+    color_beta_y = 'peru'
+    color_eta = 'slategray'
+
+    fig, (axB, axTw) = plt.subplots(
+        nrows=2, ncols=1, sharex=True, figsize=(9, 7),
+        gridspec_kw={'height_ratios': [1, 1]}
+    )
+    fig.subplots_adjust(hspace=0.25)
+    fig.suptitle("Magnetic field and Twiss parameters vs s", fontsize=16 * k, x=0.5)
+
+    def style_axis(ax):
+        ax.set_facecolor('white')
+        ax.grid(True, which='both', color='gray', linestyle=':', linewidth=0.5)
+        ax.tick_params(direction='in', top=True, right=True)
+        for spine in ('top', 'right', 'bottom', 'left'):
+            ax.spines[spine].set_visible(True)
+            ax.spines[spine].set_color('black')
+
+    style_axis(axB)
+    labels = []
+    comps = [
+        (B[:, 0], 'Bx', color_Bx),
+        (B[:, 1], 'By', color_By),
+        (B[:, 2], 'Bz', color_Bz),
+    ]
+    for y, lbl, col in comps:
+        if np.any(y != 0):
+            axB.plot(s, y, color=col, lw=1.5, label=lbl)
+            axB.fill_between(s, y, 0.0, facecolor=col, alpha=0.5)
+            labels.append(lbl)
+    if labels:
+        axB.legend(loc='upper right', frameon=True)
+    axB.set_ylabel('B [T]')
+
+    # 2) Twiss with shared x, twin y-axes: betas on left, eta on right
+    style_axis(axTw)
+    axTw.plot(s, beta_x, color=color_beta_x, lw=1.5, label=r'$\beta_x$')
+    axTw.plot(s, beta_y, color=color_beta_y, lw=1.5, label=r'$\beta_y$')
+    axTw.set_ylabel(r'$\beta$ [m]', color='black')
+    axTw.legend(loc='upper left', frameon=True)
+
+    axTw2 = axTw.twinx()
+    axTw2.tick_params(direction='in', top=True, right=True)
+    axTw2.plot(s, eta, color=color_eta, lw=1.5, label=r'$\eta_x$')
+    axTw2.set_ylabel(r'$\eta_x$ [m]', color=color_eta)
+    # optional: separate legend for right axis if you prefer
+    # axTw2.legend(loc='upper right', frameon=True)
+
+    axTw.set_xlabel('s [m]')
+
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.show()
+    
 #***********************************************************************************
 # Wavefront
 #***********************************************************************************

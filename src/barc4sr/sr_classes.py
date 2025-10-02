@@ -17,7 +17,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '25/NOV/2024'
-__changed__ = '24/JUN/2025'
+__changed__ = '02/NOV/2025'
 
 import os
 
@@ -30,7 +30,8 @@ from scipy.signal import fftconvolve
 from scipy.special import erf, jv
 
 from barc4sr.aux_energy import energy_wavelength, get_gamma
-from barc4sr.aux_syned import read_syned_file, write_syned_file  #, write_spectra_file
+from barc4sr.aux_magnetic_fields import check_magnetic_field_dictionary
+from barc4sr.aux_syned import read_syned_file, write_syned_file
 
 ALPHA =  physical_constants["fine-structure constant"][0]
 CHARGE = physical_constants["atomic unit of charge"][0]
@@ -222,8 +223,8 @@ class ElectronBeam(object):
         Prints electron beam rms sizes and divergences 
         """
         print("electron beam:")
-        print(f"\t>> x/xp = {self.e_x*1e6:0.2f} um vs. {self.e_xp*1e6:0.2f} µrad")
-        print(f"\t>> y/yp = {self.e_y*1e6:0.2f} um vs. {self.e_yp*1e6:0.2f} µrad")
+        print(f"\t>> x/xp = {self.e_x*1e6:0.2f} µm vs. {self.e_xp*1e6:0.2f} µrad")
+        print(f"\t>> y/yp = {self.e_y*1e6:0.2f} µm vs. {self.e_yp*1e6:0.2f} µrad")
             
     def get_gamma(self) -> float:
         """Calculate the Lorentz factor (γ) based on the energy of electrons in GeV."""
@@ -328,8 +329,13 @@ class MagneticStructure(object):
             self.critical_energy = kwargs.get("critical_energy", None)
 
         if mag_structure in arb:
+
             self.CLASS_NAME = "Arbitrary"
             self.magnetic_field = kwargs.get("magnetic_field", None)
+
+            if self.magnetic_field is not None:
+                if self.check_magnetic_field_dictionary() is False:
+                    raise ValueError("Expected dictionary format: {'s': np.asarray(ns), 'B': np.asarray(Bx, By, Bz)}")
 
     def print_attributes(self) -> None:
         """
@@ -337,6 +343,36 @@ class MagneticStructure(object):
         """
         for i in (vars(self)):
             print("{0:10}: {1}".format(i, vars(self)[i]))
+
+    def check_magnetic_field_dictionary(self) -> bool:
+        """
+        Validate a magnetic field dictionary.
+
+        Parameters
+        ----------
+        magnetic_field_dictionary : dict
+            Magnetic field definition with at least the following keys:
+            - 's' : 1D array-like, positions [m], shape (N,)
+            - 'B' : 2D array-like, magnetic field vectors [T], shape (N, 3)
+            Extra keys are allowed.
+
+        Returns
+        -------
+        bool
+            True if the dictionary is valid, False otherwise.
+
+        Raises
+        ------
+        TypeError
+            If `magnetic_field_dictionary` is not a dict.
+        KeyError
+            If `magnetic_field_dictionary` does not contain keys 's' and 'B'.
+        ValueError
+            If 's' is not 1D, if 'B' is not 2D with shape (N, 3),
+            or if any values in 's' or 'B' are non-finite.
+        """
+
+        return check_magnetic_field_dictionary(self.magnetic_field)
 
 class SynchrotronSource(object):
     """
@@ -860,8 +896,8 @@ class UndulatorSource(SynchrotronSource):
 
         if verbose :        
             print("convolved photon beam:")
-            print(f"\t>> x/xp = {sigma_x*1e6:0.2f} um vs. {sigma_xp*1e6:0.2f} urad")
-            print(f"\t>> y/yp = {sigma_y*1e6:0.2f} um vs. {sigma_yp*1e6:0.2f} urad")
+            print(f"\t>> x/xp = {sigma_x*1e6:0.2f} µm vs. {sigma_xp*1e6:0.2f} µrad")
+            print(f"\t>> y/yp = {sigma_y*1e6:0.2f} µm vs. {sigma_yp*1e6:0.2f} µrad")
 
     def set_on_axis_flux(self, verbose: bool=False) -> float:
         """ 
@@ -1257,69 +1293,82 @@ class ArbitraryMagnetSource(SynchrotronSource):
 
     def set_arb_mag_field(self, **kwargs) -> None:
         """
-        Sets a user-defined arbitrary magnetic field.
+        Sets a user-defined arbitrary magnetic field and trims/recenters all s-aligned data.
 
-        Keyword Args:
-            magnetic_field (dict): Dictionary with keys 's' and 'B', where:
-                's' (np.ndarray): Longitudinal positions [m].
-                'B' (np.ndarray): Magnetic field vectors of shape (N, 3) in Tesla.
-            recenter (float): If provided, recenters the field profile such that its center is at this position.
-            si (float): Start position [m] for field trimming. Default is -1e23 (no trimming).
-            sf (float): End position [m] for field trimming. Default is 1e23 (no trimming).
+        Keyword Args
+        ------------
+        magnetic_field : dict
+            Dictionary with at least:
+            - 's' : (N,) float array, longitudinal coordinate [m]
+            - 'B' : (N, 3) float array, magnetic field vectors [T]
+            Extra keys are allowed. Any extra value that is array-like with a first
+            dimension N (same length as 's') will be trimmed consistently. This is
+            intended to catch Twiss arrays when present, e.g.:
+            beta_x, beta_y, eta_x, eta_y, alpha_x, alpha_y, etap_x, etap_y, ...
+        recenter : float | None
+            If provided, shift the final 's' so that its midpoint is at `-recenter`
+            (i.e., s := s - (mid + recenter)). If None, no recentering is done.
+        si : float
+            Start position for trimming. Default: -1e23 (no lower cut).
+        sf : float
+            End position for trimming. Default:  1e23 (no upper cut).
 
-        Raises:
-            ValueError: If no magnetic field is provided or if its format is invalid.
+        Raises
+        ------
+        ValueError
+            If the magnetic field dictionary is missing or invalid, or if trimming
+            results in an empty interval.
         """
         recenter = kwargs.get('recenter', None)
         si = kwargs.get('si', -1e23)
-        sf = kwargs.get('sf', 1e23)
+        sf = kwargs.get('sf',  1e23)
 
-        magnetic_field = kwargs.get("magnetic_field", None)
+        mf = kwargs.get("magnetic_field", self.MagneticStructure.magnetic_field)
+        self.MagneticStructure.magnetic_field = mf
 
-        piloting = [magnetic_field, self.magnetic_field]
+        if self.check_magnetic_field_dictionary() is False:
+            raise ValueError("Expected dictionary format: {'s': np.asarray(ns), 'B': np.asarray(Bx, By, Bz)}")
 
-        if all(param is None for param in piloting):
-            raise ValueError("Please, provide the magnetic field dictionary {'s': np.asarray(ns), 'B': np.asarray(Bx, By, Bz)}")
-        
-        if magnetic_field is not None:
-            if self.check_magnetic_field_dictionary(magnetic_field) is False:
-                raise ValueError("Expected dictionary format: {'s': np.asarray(ns), 'B': np.asarray(Bx, By, Bz)}")
-            self.MagneticStructure.magnetic_field = magnetic_field
-        else:
-            if self.check_magnetic_field_dictionary(self.MagneticStructure.magnetic_field) is False:
-                raise ValueError("Expected dictionary format: {'s': np.asarray(ns), 'B': np.asarray(Bx, By, Bz)}")
+        s = np.asarray(self.MagneticStructure.magnetic_field['s'], dtype=float)
+        B = np.asarray(self.MagneticStructure.magnetic_field['B'], dtype=float)
+
+        if s.ndim != 1:
+            raise ValueError("'s' must be 1D")
+        if B.ndim != 2 or B.shape[1] != 3 or B.shape[0] != s.shape[0]:
+            raise ValueError("'B' must be shape (N,3) and match len(s)")
+
+        if si > sf:
+            si, sf = sf, si
+        mask = (s >= si) & (s <= sf)
+        if not np.any(mask):
+            raise ValueError(f"Trimming produced empty interval: [{si}, {sf}]")
+
+        s_trim = s[mask]
+        B_trim = B[mask, :]
+
+        for k, v in list(self.MagneticStructure.magnetic_field.items()):
+            print(k, v)
+            if k in ('s', 'B'):
+                continue
+            try:
+                arr = np.asarray(v)
+            except Exception:
+                continue
+
+            # if arr.ndim >= 1 and arr.shape[0] == s.shape[0]:
+            #     if arr.ndim == 1:
+            #         self.MagneticStructure.magnetic_field[k] = arr[mask]
+            #     else:
+            #         self.MagneticStructure.magnetic_field[k] = arr[mask, ...]
 
         if recenter is not None:
-            s = self.MagneticStructure.magnetic_field['s']
-            ds = (s[-1]-s[0])/2
-            self.MagneticStructure.magnetic_field['s'] = s - (ds + recenter)
+            mid = 0.5 * (s_trim[-1] + s_trim[0])
+            s_trim = s_trim - (mid + recenter)
 
-        s = self.MagneticStructure.magnetic_field['s']
-        B = self.MagneticStructure.magnetic_field['B']  # shape (N, 3)
-        mask = (s >= si) & (s <= sf)
-        self.MagneticStructure.magnetic_field['s'] = s[mask]
-        self.MagneticStructure.magnetic_field['B'] = B[mask, :]
+        self.MagneticStructure.magnetic_field['s'] = s_trim
+        self.MagneticStructure.magnetic_field['B'] = B_trim
 
-    def check_magnetic_field_dictionary(self, magnetic_field_dictionary):
-        """
-        Checks whether the magnetic field dictionary is valid.
 
-        Args:
-            magnetic_field_dictionary (dict): Dictionary to validate.
-
-        Returns:
-            bool: True if the dictionary is valid, False otherwise.
-        """
-        if not isinstance(magnetic_field_dictionary, dict):
-            return False
-        if set(magnetic_field_dictionary.keys()) != {'s', 'B'}:
-            return False
-        s, B = magnetic_field_dictionary['s'], magnetic_field_dictionary['B']
-        if not (isinstance(s, np.ndarray) and s.ndim == 1):
-            return False
-        if not (isinstance(B, np.ndarray) and B.shape == (len(s), 3)):
-            return False
-        return True
     
 #***********************************************************************************
 # **planar undulator** auxiliary functions 
