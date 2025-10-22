@@ -340,7 +340,7 @@ def plot_wavefront(wfr: dict, cuts: bool = True, show_phase: bool = True, **kwar
         fig = plt.figure(figsize=(4.2*fctr, 4))
         fig.suptitle(f"({pol}) | flux: {flux:.2e} ph/s/0.1%bw", fontsize=16 * k, x=0.5)
         ax = fig.add_subplot(111)
-        im = ax.pcolormesh(X, Y, data, shading='auto', cmap='terrain', vmin=vmin, vmax=vmax)
+        im = ax.pcolormesh(X, Y, data, shading='auto', cmap='jet', vmin=vmin, vmax=vmax)
         ax.set_aspect('equal')
         ax.set_xlabel('x [mm]')
         ax.set_ylabel('y [mm]')

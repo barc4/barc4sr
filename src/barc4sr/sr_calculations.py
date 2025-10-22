@@ -70,9 +70,9 @@ def electron_trajectory(**kwargs) -> dict:
         raise ValueError("Please, provide either json_file or light_source - not both (see function docstring)")
 
     if json_file is not None:
-        bl = syned_dictionary(json_file, None, 10, 1e-3, 1e-3, 0, 0)
+        bl = syned_dictionary(json_file, 100, 1e-3, 1e-3, 0, 0)
     if light_source is not None:
-        bl = barc4sr_dictionary(light_source, None, 10, 1e-3, 1e-3, 0, 0)
+        bl = barc4sr_dictionary(light_source, 100, 1e-3, 1e-3, 0, 0)
 
     if bl['Class'] == 'bm':
         source_type = 'bending magnet'
@@ -87,13 +87,12 @@ def electron_trajectory(**kwargs) -> dict:
 
     if verbose: print(f"{function_txt} please wait...")
 
-    magfield_central_position = kwargs.get('magfield_central_position', 0)
-    ebeam_initial_position = kwargs.get('ebeam_initial_position', 0)
+    ebeam_initial_condition = kwargs.get('ebeam_initial_condition', 6*[0])
 
-    eBeam, magFldCnt, eTraj = set_light_source(bl, True, bl['Class'],
-                                               ebeam_initial_position=ebeam_initial_position,
-                                               magfield_central_position=magfield_central_position,
-                                               verbose=verbose)
+    eBeam, magFldCnt, eTraj = set_light_source(bl,
+                                               True,
+                                               ebeam_initial_condition,
+                                               verbose)
 
     if verbose: print('completed')
     if verbose: print_elapsed_time(t0)

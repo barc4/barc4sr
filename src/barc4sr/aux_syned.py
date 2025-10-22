@@ -57,15 +57,13 @@ def read_syned_file(json_file: str) -> dict:
     return data
 
 
-def syned_dictionary(json_file: str, magnetic_measurement: str, observation_point: float, 
+def syned_dictionary(json_file: str, observation_point: float, 
                      hor_slit: float, ver_slit: float, hor_slit_cen: float, ver_slit_cen: float) -> dict:
     """
     Generate beamline parameters based on a SYNED JSON configuration file and additional input parameters.
 
     Args:
         json_file (str): Path to the SYNED JSON configuration file.
-        magnetic_measurement (str): Path to the file containing magnetic measurement data.
-            Overrides SYNED undulator data if provided.
         observation_point (float): Distance to the observation point in meters.
         hor_slit (float): Horizontal slit size in meters.
         ver_slit (float): Vertical slit size in meters.
@@ -90,7 +88,7 @@ def syned_dictionary(json_file: str, magnetic_measurement: str, observation_poin
     beamline['ElectronBeamDivergenceH'] = np.sqrt(data["electron_beam"]["moment_xpxp"])
     beamline['ElectronBeamDivergenceV'] = np.sqrt(data["electron_beam"]["moment_ypyp"])
     # magnetic structure
-    beamline['magnetic_measurement'] = magnetic_measurement
+    beamline['MagFieldCenter'] = 0
     # undulator        
     if data["magnetic_structure"]["CLASS_NAME"].startswith("U"):
         beamline['Class'] = 'u'
@@ -124,16 +122,13 @@ def syned_dictionary(json_file: str, magnetic_measurement: str, observation_poin
     return beamline
 
 
-def barc4sr_dictionary(light_source: object, magnetic_measurement: str, 
-                       observation_point: float, hor_slit: float, ver_slit: float, 
-                       hor_slit_cen: float, ver_slit_cen: float) -> dict:
+def barc4sr_dictionary(light_source: object, observation_point: float,
+                       hor_slit: float, ver_slit: float, hor_slit_cen: float, ver_slit_cen: float) -> dict:
     """
     Generate beamline parameters based on a SYNED JSON configuration file and additional input parameters.
 
     Args:
         light_source (SynchrotronSource): Instance of SynchrotronSource or any object that inherits from it.
-        magnetic_measurement (str): Path to the file containing magnetic measurement data.
-            Overrides SYNED undulator data if provided.
         observation_point (float): Distance to the observation point in meters.
         hor_slit (float): Horizontal slit size in meters.
         ver_slit (float): Vertical slit size in meters.
@@ -156,7 +151,7 @@ def barc4sr_dictionary(light_source: object, magnetic_measurement: str,
     beamline['ElectronBeamDivergenceH'] = np.sqrt(light_source.ElectronBeam.moment_xpxp)
     beamline['ElectronBeamDivergenceV'] = np.sqrt(light_source.ElectronBeam.moment_ypyp)
     # magnetic structure
-    beamline['magnetic_measurement'] = magnetic_measurement
+    beamline['MagFieldCenter'] = light_source.MagneticStructure.center
     # undulator        
     if light_source.MagneticStructure.CLASS_NAME.startswith("U"):
         beamline['Class'] = 'u'
@@ -173,12 +168,12 @@ def barc4sr_dictionary(light_source: object, magnetic_measurement: str,
     # bending magnet        
     if light_source.MagneticStructure.CLASS_NAME.startswith("B"):
         beamline['Class'] = 'bm'
-        beamline['Bh'] = light_source.MagneticStructure.B_horizontal
-        beamline['Bv'] = light_source.MagneticStructure.B_vertical
+        beamline['Bh'] = None
+        beamline['Bv'] = None
         beamline['B'] = light_source.MagneticStructure.magnetic_field
         beamline['R'] = light_source.MagneticStructure.radius
-        beamline['Leff'] = light_source.MagneticStructure.length
-        beamline['Ledge'] = light_source.MagneticStructure.length_edge
+        beamline['Leff'] = light_source.MagneticStructure.field_length
+        beamline['Ledge'] = light_source.MagneticStructure.edge_length
         beamline['ExtAng'] = light_source.MagneticStructure.extraction_angle
     # bending magnet        
     if light_source.MagneticStructure.CLASS_NAME.startswith("A"):
