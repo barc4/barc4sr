@@ -17,7 +17,7 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '2024.11.25'
-__changed__ = '2025.10.20'
+__changed__ = '2025.10.23'
 
 import os
 
@@ -1196,10 +1196,10 @@ class BendingMagnetSource(SynchrotronSource):
         if extraction_angle is not None:
             self.set_B_central_position(extraction_angle=extraction_angle, verbose=verbose)
 
-        if self.MagneticStructure.center is not None:
+        if self.MagneticStructure.center is not None and (center is None and extraction_angle is None):
             self.set_B_central_position(center=self.MagneticStructure.center, verbose=verbose)
 
-        if self.MagneticStructure.extraction_angle is not None:
+        if self.MagneticStructure.extraction_angle is not None and (center is None and extraction_angle is None):
             self.set_B_central_position(extraction_angle=self.MagneticStructure.extraction_angle, verbose=verbose)
 
     def set_B_from_critical_energy(self, energy: float, verbose: bool=False) -> None:
@@ -1235,7 +1235,7 @@ class BendingMagnetSource(SynchrotronSource):
         self.set_critical_energy(False)
         gamma = self.gamma()
         e_speed = LIGHT * np.sqrt(1-1/gamma)
-        self.MagneticStructure.radius = gamma * MASS * e_speed /(CHARGE * magnetic_field)
+        self.MagneticStructure.radius = gamma * MASS * e_speed /(CHARGE * np.abs(magnetic_field))
         if verbose:
             print(f"Bending magnet critial energy energy set to {self.critical_energy:.3f} eV with:")
             print(f"\t>> B: {self.magnetic_field:.6f} T")
@@ -1371,54 +1371,56 @@ class ArbitraryMagnetSource(SynchrotronSource):
             If the magnetic field dictionary is missing or invalid, or if trimming
             results in an empty interval.
         """
-        recenter = kwargs.get('recenter', None)
-        si = kwargs.get('si', -1e23)
-        sf = kwargs.get('sf',  1e23)
 
-        mf = kwargs.get("magnetic_field", self.MagneticStructure.magnetic_field)
-        self.MagneticStructure.magnetic_field = mf
+        verbose = kwargs.get('verbose', False)
+        center = kwargs.get('center', None)
+        si      = kwargs.get('si', -1e23)
+        sf      = kwargs.get('sf',  1e23)
 
-        if self.check_magnetic_field_dictionary() is False:
-            raise ValueError("Expected dictionary format: {'s': np.asarray(ns), 'B': np.asarray(Bx, By, Bz)}")
-
-        s = np.asarray(self.MagneticStructure.magnetic_field['s'], dtype=float)
-        B = np.asarray(self.MagneticStructure.magnetic_field['B'], dtype=float)
+        mf = self.MagneticStructure.magnetic_field
+        s  = np.asarray(mf['s'], dtype=float)
+        B  = np.asarray(mf['B'], dtype=float)
 
         if s.ndim != 1:
-            raise ValueError("'s' must be 1D")
-        if B.ndim != 2 or B.shape[1] != 3 or B.shape[0] != s.shape[0]:
-            raise ValueError("'B' must be shape (N,3) and match len(s)")
+            raise ValueError("'s' must be 1D.")
+        if B.ndim != 2 or B.shape[1] != 3 or B.shape[0] != s.size:
+            raise ValueError("'B' must be (N,3) and match len(s).")
 
         if si > sf:
             si, sf = sf, si
+
         mask = (s >= si) & (s <= sf)
         if not np.any(mask):
-            raise ValueError(f"Trimming produced empty interval: [{si}, {sf}]")
+            raise ValueError(f"Trimming produced empty interval: [{si}, {sf}] yielded no samples.")
 
         s_trim = s[mask]
-        B_trim = B[mask, :]
 
-        for k, v in list(self.MagneticStructure.magnetic_field.items()):
-            if k in ('s', 'B'):
+        mf_trim = {}
+        for k, v in mf.items():
+            if k == 's':
+                mf_trim['s'] = s_trim
                 continue
-            try:
-                arr = np.asarray(v)
-            except Exception:
-                continue
+            arr = np.asarray(v)
+            if arr.shape[:1] == (s.size,):
+                mf_trim[k] = arr[mask, ...]
+            else:
+                mf_trim[k] = v
 
-            # if arr.ndim >= 1 and arr.shape[0] == s.shape[0]:
-            #     if arr.ndim == 1:
-            #         self.MagneticStructure.magnetic_field[k] = arr[mask]
-            #     else:
-            #         self.MagneticStructure.magnetic_field[k] = arr[mask, ...]
+        mid = 0.5 * (s_trim[0] + s_trim[-1])
+        center_val = mid if center is None else float(center)
 
-        if recenter is not None:
-            mid = 0.5 * (s_trim[-1] + s_trim[0])
-            s_trim = s_trim - (mid + recenter)
+        delta = center_val - mid
+        if delta != 0.0:
+            mf_trim['s'] = mf_trim['s'] + delta
 
-        self.MagneticStructure.magnetic_field['s'] = s_trim
-        self.MagneticStructure.magnetic_field['B'] = B_trim
+        self.MagneticStructure.magnetic_field = mf_trim
+        self.MagneticStructure.center = center_val
 
+        if verbose:
+            s_out = mf_trim['s']
+            print(f"Grid center (array midpoint): s = {center_val:.6f} m")
+            print(f"Grid span: [{s_out[0]:.6f}, {s_out[-1]:.6f}] m")
+            print(f"Step_size: {s[1]-s[0]:.6g} m; N = {s_out.size}")
 
     
 #***********************************************************************************

@@ -260,8 +260,7 @@ def srwlibCalcElecFieldSR(bl: dict,
                           magFldCnt: srwlib.SRWLMagFldC, 
                           energy: np.array,
                           h_slit_points: int, 
-                          v_slit_points: int,
-                          id_type: str) -> srwlib.SRWLWfr:
+                          v_slit_points: int) -> srwlib.SRWLWfr:
     """
     Calculates the electric field for synchrotron radiation.
 
@@ -272,7 +271,6 @@ def srwlibCalcElecFieldSR(bl: dict,
         energy (np.array): Photon energy array (np.array) or enerfy point (float) [eV].
         h_slit_points (int): Number of horizontal slit points.
         v_slit_points (int): Number of vertical slit points.
-        id_type (str): Type of magnetic structure, can be undulator (u), wiggler (w), 
         bending magnet (bm) or arbitrary (arb).
 
     Returns:
@@ -280,7 +278,7 @@ def srwlibCalcElecFieldSR(bl: dict,
     """
     tzero = time()
     arPrecPar = [0]*7
-    if id_type in ['bm', 'w', 'arb']:
+    if bl['Class'] in ['bm', 'w', 'arb']:
         arPrecPar[0] = 2      # SR calculation method: 0- "manual", 1- "auto-undulator", 2- "auto-wiggler"
     else:
         arPrecPar[0] = 1
