@@ -325,6 +325,102 @@ def multi_bm_magnetic_field(
     B_vec = np.column_stack([np.zeros_like(s), By_total, np.zeros_like(s)])
     return {'s': s, 'B': B_vec}
 
+def multi_arb_magnetic_field(
+    magnets: list,
+    fringe: float = 0.0,
+    step_size: float = 1e-3,
+    gaussian_kernel: float = 0.0,
+    verbose: bool = False,
+) -> dict:
+    """
+    Assemble several arbitrary magnetic-field profiles (from text files or
+    other sources) into one composite field along a shared global axis.
+
+    Each element defines its own 1D field array and center position.
+    All fields are resampled onto a common, symmetric grid and summed.
+
+    Parameters
+    ----------
+    magnets : list of dict
+        Each dict represents one magnetic element with:
+          - 's'  : ndarray, local coordinate axis [m], typically centered at 0.
+          - 'B'  : ndarray, (N,) or (N,3); vertical field in By or column 1.
+          - 's0' : float,  center position on the global axis [m].
+
+    fringe : float, optional
+        Extra padding [m] on both sides of the global grid. Default is 0.
+    step_size : float, optional
+        Step size [m] for the uniform global grid. Default is 1e-3.
+    gaussian_kernel : float, optional
+        Gaussian σ [m] for optional smoothing of the *composite* field.
+        If 0, no smoothing. Default is 0.
+    verbose : bool, optional
+        If True, prints per-element diagnostics and global summary.
+
+    Returns
+    -------
+    dict
+        {
+            's': np.ndarray,  # uniform, centered at 0 [m]
+            'B': np.ndarray,  # (N,3) composite field (Bx=0, By, Bz=0)
+        }
+    """
+    if step_size <= 0:
+        raise ValueError("step_size must be positive.")
+    if fringe < 0:
+        raise ValueError("fringe must be non-negative.")
+    if gaussian_kernel < 0:
+        raise ValueError("gaussian_kernel must be non-negative.")
+    if not magnets:
+        raise ValueError("magnets list is empty.")
+
+    s_all = []
+    for m in magnets:
+        if not all(k in m for k in ("s", "B", "s0")):
+            raise ValueError("Each magnet must have keys 's', 'B', and 's0'.")
+        s_local = np.asarray(m["s"], float)
+        s_all.append(s_local + float(m["s0"]))
+    s_all = np.concatenate(s_all)
+    s_min_raw, s_max_raw = s_all.min() - fringe, s_all.max() + fringe
+    half_span = max(abs(s_min_raw), abs(s_max_raw))
+    s = np.arange(-half_span, half_span + step_size/2, step_size)
+
+    By_total = np.zeros_like(s, float)
+
+    for i, m in enumerate(magnets, start=1):
+        s_local = np.asarray(m["s"], float)
+        s0 = float(m["s0"])
+        B_local = np.asarray(m["B"], float)
+        if B_local.ndim == 2:
+            B_local = B_local[:, 1]
+        order = np.argsort(s_local)
+        s_local, B_local = s_local[order], B_local[order]
+        s_shift = s_local + s0
+
+        By_interp = np.interp(s, s_shift, B_local, left=0.0, right=0.0)
+        By_total += By_interp
+
+        if verbose:
+            ds = np.median(np.diff(s_local))
+            print(f"[Magnet {i}]")
+            print(f"  Center: s0 = {s0:+.6f} m")
+            print(f"  Points: N = {s_local.size}, Δs ≈ {ds:.3e} m")
+            print(f"  s-range (shifted): [{s_shift.min():+.3f}, {s_shift.max():+.3f}] m")
+            print(f"  B-range: [{B_local.min():+.3e}, {B_local.max():+.3e}] T\n")
+
+    if gaussian_kernel > 0:
+        sigma_samples = gaussian_kernel / step_size
+        By_total = gaussian_filter1d(By_total, sigma=sigma_samples, mode="nearest")
+
+    B_vec = np.column_stack([np.zeros_like(By_total), By_total, np.zeros_like(By_total)])
+
+    if verbose:
+        print(f"Global grid: [{s[0]:+.3f}, {s[-1]:+.3f}] m")
+        print(f"  step_size = {step_size:.3e} m, total N = {s.size}")
+        print(f"  Gaussian σ = {gaussian_kernel:.3e} m\n")
+
+    return {"s": s, "B": B_vec}
+
 #***********************************************************************************
 # periodic signal treatment
 #***********************************************************************************

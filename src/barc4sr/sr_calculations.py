@@ -74,6 +74,8 @@ def electron_trajectory(**kwargs) -> dict:
     if light_source is not None:
         bl = barc4sr_dictionary(light_source, 100, 1e-3, 1e-3, 0, 0)
 
+    calc_etraj = True
+
     if bl['Class'] == 'bm':
         source_type = 'bending magnet'
     elif bl['Class'] == 'u':
@@ -90,7 +92,7 @@ def electron_trajectory(**kwargs) -> dict:
     ebeam_initial_condition = kwargs.get('ebeam_initial_condition', 6*[0])
 
     eBeam, magFldCnt, eTraj = set_light_source(bl,
-                                               True,
+                                               calc_etraj,
                                                ebeam_initial_condition,
                                                verbose)
 
@@ -166,6 +168,8 @@ def wavefront(photon_energy: float,
         bl = barc4sr_dictionary(light_source, observation_point, 
                                 hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
 
+    calc_etraj = False
+
     if bl['Class'] == 'bm':
         source_type = 'bending magnet'
     elif bl['Class'] == 'u':
@@ -187,7 +191,7 @@ def wavefront(photon_energy: float,
     ebeam_initial_condition = kwargs.get('ebeam_initial_condition', 6*[0])
 
     eBeam, magFldCnt, eTraj = set_light_source(bl,
-                                               False, 
+                                               calc_etraj, 
                                                ebeam_initial_condition,
                                                verbose=verbose)
     
@@ -211,19 +215,22 @@ def wavefront(photon_energy: float,
                                 magFldCnt,
                                 photon_energy,
                                 hor_slit_n,
-                                ver_slit_n) 
+                                ver_slit_n,
+                                0) 
     else:
         # TODO reimplement ME calculation
         pass
 
     if verbose: print('completed')
 
-    wfrDict = write_wavefront(file_name, wfr, radiation_polarisation, number_macro_electrons)
+    wfrDict = write_wavefront(file_name, wfr, radiation_polarisation,
+                              number_macro_electrons, observation_point)
     
     if verbose: print(f"{function_txt} finished.")
     if verbose: print_elapsed_time(t0)
 
     return wfrDict
+
 
 #***********************************************************************************
 # power distribution

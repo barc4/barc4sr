@@ -260,7 +260,8 @@ def srwlibCalcElecFieldSR(bl: dict,
                           magFldCnt: srwlib.SRWLMagFldC, 
                           energy: np.array,
                           h_slit_points: int, 
-                          v_slit_points: int) -> srwlib.SRWLWfr:
+                          v_slit_points: int,
+                          partTraj: srwlib.SRWLPrtTrj) -> srwlib.SRWLWfr:
     """
     Calculates the electric field for synchrotron radiation.
 
@@ -314,7 +315,7 @@ def srwlibCalcElecFieldSR(bl: dict,
     wfr.mesh = mesh
     wfr.partBeam = eBeam
 
-    return srwlib.srwl.CalcElecFieldSR(wfr, 0, magFldCnt, arPrecPar), time()-tzero
+    return srwlib.srwl.CalcElecFieldSR(wfr, partTraj, magFldCnt, arPrecPar), time()-tzero
 
 def spectral_srwlibCalcElecFieldSR(bl: dict, 
                                    eBeam: srwlib.SRWLPartBeam, 
