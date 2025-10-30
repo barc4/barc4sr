@@ -89,60 +89,50 @@ def check_magnetic_field_dictionary(magnetic_field_dictionary: dict) -> bool:
 #***********************************************************************************
 
 def bm_magnetic_field(
-    B: float,
-    length: float,
-    fringe: float,
-    step_size: float,
-    gaussian_kernel: float,
-    center: float = None,
+    magnet: dict,
+    *,
+    fringe: float = 0.0,
+    step_size: float = 1e-3,
+    gaussian_kernel: float = 0.0,
     verbose: bool = False,
 ) -> dict:
     """
     Generate the 1D magnetic field profile of a single bending magnet.
 
-    The profile is aligned along the `s` axis and consists of a flat By region
-    (field = `B`) of length `length`, padded symmetrically by `fringe` on each side.
-    Optionally, the field edges can be smoothed with a Gaussian kernel.
-
     Parameters
     ----------
-    B : float
-        Magnetic field amplitude [T].
-    length : float
-        Effective field length [m] of the bending region.
-    fringe : float
-        Additional zero-field padding [m] added on both sides of the magnet.
-    step_size : float
-        Step size [m] for the discretized s-axis.
-    gaussian_kernel : float
-        Standard deviation [m] of the Gaussian kernel for smoothing.
-        If 0, no smoothing is applied.
-    center : float or None, optional
-        Center position [m] of the bending magnet.
-        If None, the grid is symmetric around zero. Default is None.
+    magnet : dict
+        Dictionary defining the bending magnet with:
+          - 'B' : float
+              Magnetic field amplitude [T].
+          - 'length' : float
+              Effective magnetic length [m].
+          - 's0' : float, optional
+              Center position [m]. Defaults to 0 if omitted.
+    fringe : float, optional
+        Zero-field padding [m] added on both sides of the magnet. Default 0.
+    step_size : float, optional
+        Sampling step [m]. Default 1e-3.
+    gaussian_kernel : float, optional
+        Gaussian σ [m] for smoothing. 0 disables smoothing.
     verbose : bool, optional
-        If True, prints additional information about grid configuration.
+        Print magnet info if True.
 
     Returns
     -------
-    dict of str : np.ndarray
-        Magnetic field dictionary with:
-          - 's' : ndarray, shape (N,)
-              1D coordinate axis [m].
-          - 'B' : ndarray, shape (N, 3)
-              Magnetic field vectors [T], with components (Bx=0, By, Bz=0).
-
-    Raises
-    ------
-    ValueError
-        If any of `length`, `step_size` ≤ 0, or `fringe`, `gaussian_kernel` < 0.
-
-    Notes
-    -----
-    - The magnet center is positioned at `center` (default 0).
-    - Use `multi_bm_magnetic_field` to assemble several bending magnets
-      along a common global axis.
+    dict
+        {
+            's': np.ndarray,  # 1D coordinate [m]
+            'B': np.ndarray,  # (N,3), with (Bx=0, By, Bz=0)
+        }
     """
+
+    if not isinstance(magnet, dict):
+        raise TypeError("magnet must be a dictionary with keys 'B', 'length', and optionally 's0'.")
+
+    B = float(magnet["B"])
+    length = float(magnet["length"])
+    center = float(magnet.get("s0", 0.0))
 
     if length <= 0:
         raise ValueError("length must be positive.")
@@ -155,23 +145,16 @@ def bm_magnetic_field(
 
     half_active = 0.5 * length
     half_total = half_active + fringe
-
-    if center is None:
-        s_min = -half_total
-        s_max = +half_total
-        center_val = 0.0
-    else:
-        center_val = float(center)
-        s_min = center_val - half_total
-        s_max = center_val + half_total
+    s_min = center - half_total
+    s_max = center + half_total
 
     total_span = s_max - s_min
     n_steps = max(1, int(round(total_span / step_size)))
     s_max = s_min + n_steps * step_size
     s = np.linspace(s_min, s_max, n_steps + 1)
 
-    left = center_val - half_active
-    right = center_val + half_active
+    left = center - half_active
+    right = center + half_active
 
     By = np.zeros_like(s, dtype=float)
     mask = (s >= left) & (s <= right)
@@ -184,20 +167,19 @@ def bm_magnetic_field(
     B_vec = np.column_stack([np.zeros_like(s), By, np.zeros_like(s)])
 
     if verbose:
-        print(f"Grid center (array midpoint): s = {center_val:.6f} m")
+        print(f"Grid center (array midpoint): s = {center:.6f} m")
         print(f"Grid span: [{s[0]:.6f}, {s[-1]:.6f}] m")
         print(f"Active BM region: [{left:.6f}, {right:.6f}] m  (length = {length:.6f} m)")
         print(f"Padding per side: {fringe:.6f} m; step_size: {step_size:.6g} m; N = {s.size}\n")
 
     return {'s': s, 'B': B_vec}
 
-
 def multi_bm_magnetic_field(
-    magnets: dict,
+    magnets: list,
     fringe: float = 0.0,
     step_size: float = 1e-3,
     gaussian_kernel: float = 0.0,
-    verbose: bool = False
+    verbose: bool = False,
 ) -> dict:
     """
     Construct a composite magnetic field from multiple bending magnet elements.
@@ -208,22 +190,14 @@ def multi_bm_magnetic_field(
 
     Parameters
     ----------
-    magnets : dict
-        Dictionary defining the bending magnets.
-        Required keys:
-          - 'B' : array_like of float
-              List of plateau field amplitudes [T].
-          - 'length' : array_like of float
-              List of magnetic lengths [m].
-          - 's0' : array_like of float
-              List of center positions [m].
-        Optional keys:
-          - 'gaussian_kernel' : float or array_like of float
-              Per-magnet Gaussian sigma [m] for smoothing edges.
-              Defaults to the global `gaussian_kernel` value.
-          - 'fringe' : float or array_like of float
-              Per-magnet padding [m] on both sides.
-              Defaults to the global `fringe` value.
+    magnets : list of dict
+        Each dictionary defines one bending magnet with:
+          - 'B' : float, field amplitude [T]
+          - 'length' : float, magnetic length [m]
+          - 's0' : float, center position [m]
+          Optional:
+          - 'fringe' : float, per-magnet padding [m]
+          - 'gaussian_kernel' : float, per-magnet σ [m]
     fringe : float, optional
         Global padding [m] at both ends of the assembled field. Default is 0.
     step_size : float, optional
@@ -241,89 +215,45 @@ def multi_bm_magnetic_field(
               Global s-axis centered at 0 [m].
           - 'B' : ndarray, shape (N, 3)
               Superimposed magnetic field vectors [T], with (Bx=0, By, Bz=0).
-
-    Raises
-    ------
-    ValueError
-        If required keys are missing, array lengths mismatch, or invalid parameters
-        (negative `fringe`, `step_size`, or `gaussian_kernel`).
-
-    Notes
-    -----
-    - Internally calls `bm_magnetic_field` for each magnet.
-    - The global grid covers the entire range of all magnets plus
-      the specified `fringe`.
     """
-
     import numpy as np
 
-    for key in ['B', 'length', 's0']:
-        if key not in magnets:
-            raise ValueError(f"Missing required key '{key}' in bends dictionary.")
+    if not isinstance(magnets, (list, tuple)) or not magnets:
+        raise ValueError("magnets must be a non-empty list of dictionaries.")
 
-    B_list  = np.atleast_1d(magnets['B']).astype(float)
-    L_list  = np.atleast_1d(magnets['length']).astype(float)
-    s0_list = np.atleast_1d(magnets['s0']).astype(float)
+    s_min_all, s_max_all = np.inf, -np.inf
+    for m in magnets:
+        if not all(k in m for k in ("B", "length", "s0")):
+            raise ValueError("Each magnet must have 'B', 'length', and 's0'.")
+        L, s0 = float(m["length"]), float(m["s0"])
+        s_min_all = min(s_min_all, s0 - L / 2)
+        s_max_all = max(s_max_all, s0 + L / 2)
 
-    if not (len(B_list) == len(L_list) == len(s0_list)):
-        raise ValueError("'B', 'L', and 's0' lists must have the same length.")
-
-    N = len(B_list)
-
-    if 'gaussian_kernel' in magnets:
-        gk = magnets['gaussian_kernel']
-        gk_list = (np.full(N, float(gk)) if np.isscalar(gk)
-                   else np.atleast_1d(gk).astype(float))
-        if len(gk_list) != N:
-            raise ValueError("'gaussian_kernel' list must match length of 'B'.")
-    else:
-        gk_list = np.full(N, float(gaussian_kernel))
-
-    if 'fringe' in magnets:
-        frg = magnets['fringe']
-        frg_list = (np.full(N, float(frg)) if np.isscalar(frg)
-                   else np.atleast_1d(frg).astype(float))
-        if len(frg_list) != N:
-            raise ValueError("'fringe' list must match length of 'B'.")
-    else:
-        frg_list = np.full(N, float(fringe))
-
-    lefts  = s0_list - L_list/2
-    rights = s0_list + L_list/2
-    s_min_raw = np.min(lefts)  - abs(fringe)
-    s_max_raw = np.max(rights) + abs(fringe)
+    s_min_raw = s_min_all - abs(fringe)
+    s_max_raw = s_max_all + abs(fringe)
     half_span = max(abs(s_min_raw), abs(s_max_raw))
-    s_min, s_max = -half_span, +half_span
-
-    n_steps = int(np.floor((s_max - s_min) / step_size))
-    s = np.linspace(s_min, s_min + n_steps * step_size, n_steps + 1)
+    s = np.arange(-half_span, half_span + step_size / 2, step_size)
 
     By_total = np.zeros_like(s, dtype=float)
 
-    def accumulate_local(local_s, local_By, shift):
-        sl = local_s + shift
-        idx = np.round((sl - s_min) / step_size).astype(int)
+    for m in magnets:
+        bm = bm_magnetic_field(
+            magnet=m,
+            fringe=m.get("fringe", fringe),
+            step_size=step_size,
+            gaussian_kernel=m.get("gaussian_kernel", gaussian_kernel),
+            verbose=verbose,
+        )
+
+        local_s = bm["s"]
+        local_By = bm["B"][:, 1]
+        idx = np.round((local_s - s[0]) / step_size).astype(int)
         good = (idx >= 0) & (idx < s.size)
         np.add.at(By_total, idx[good], local_By[good])
 
-    for B_val, L_val, s0_val, gk_val, frg_val in zip(B_list, L_list, s0_list, gk_list, frg_list):
-
-        bm = bm_magnetic_field(
-            B=B_val,
-            length=L_val,
-            fringe=frg_val,
-            step_size=step_size,
-            gaussian_kernel=gk_val,
-            center=s0_val,
-            verbose=verbose
-        )
-
-        local_s = bm['s']
-        local_By = bm['B'][:, 1]
-        accumulate_local(local_s, local_By, shift=0)
-
     B_vec = np.column_stack([np.zeros_like(s), By_total, np.zeros_like(s)])
-    return {'s': s, 'B': B_vec}
+
+    return {"s": s, "B": B_vec}
 
 def multi_arb_magnetic_field(
     magnets: list,
