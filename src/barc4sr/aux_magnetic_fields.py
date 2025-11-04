@@ -9,14 +9,13 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '2024.11.25'
-__changed__ = '2025.10.23'
+__changed__ = '2025.11.04'
 
 import os
+from typing import List
 
 import numpy as np
-from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
-
 
 #***********************************************************************************
 # Arbitrary magnetic fields
@@ -91,132 +90,265 @@ def check_magnetic_field_dictionary(magnetic_field_dictionary: dict) -> bool:
 def bm_magnetic_field(
     magnet: dict,
     *,
-    fringe: float = 0.0,
+    padding: float = 0.0,
     step_size: float = 1e-3,
-    gaussian_kernel: float = 0.0,
     verbose: bool = False,
 ) -> dict:
     """
-    Generate the 1D magnetic field profile of a single bending magnet.
+    Generate the 1D magnetic-field profile of a single bending magnet with analytic soft edges.
 
     Parameters
     ----------
     magnet : dict
-        Dictionary defining the bending magnet with:
-          - 'B' : float
-              Magnetic field amplitude [T].
-          - 'length' : float
-              Effective magnetic length [m].
-          - 's0' : float, optional
-              Center position [m]. Defaults to 0 if omitted.
-    fringe : float, optional
-        Zero-field padding [m] added on both sides of the magnet. Default 0.
+        Magnet specification:
+            {
+                "B": float,           # plateau field [T]
+                "length": float,      # effective magnetic length [m]
+                "s0": float, optional # center position [m] (default 0.0)
+                "soft_edge": {        # optional, see below
+                    "mode": {"none","tanh","erf","arctan","gompertz","srw"},
+                    "edge_length": float,               # 10–90% rise distance [m]
+                    "center_on": {"midpoint","left","right"}  # default "midpoint"
+                }
+            }
+        Notes on modes:
+        - "tanh": symmetric Bashmakov-like edge (tanh in dimensional x; no explicit gap h).
+        - "erf" : Gaussian CDF edge (equivalent to Gaussian-convolved step).
+        - "arctan": smooth with slightly longer far tails than erf.
+        - "gompertz": flipped Gompertz with directional asymmetry:
+            rising 0→1 has long left tail; falling 1 to 0 has long right tail.
+        - "srw": SRW default - super-Lorentzian (order 2) CDF.
+                 S(u) = 1/2 + (1/pi)[ arctan(u) + u/(1+u^2) ], u = x/d.
+                 We map d from the requested 10–90% edge_length.
+
+    padding : float, optional
+        Zero-field padding [m] added on both sides of the magnet (default 0).
     step_size : float, optional
-        Sampling step [m]. Default 1e-3.
-    gaussian_kernel : float, optional
-        Gaussian σ [m] for smoothing. 0 disables smoothing.
+        Sampling step [m] (default 1e-3).
     verbose : bool, optional
-        Print magnet info if True.
+        If True, prints a short summary.
 
     Returns
     -------
     dict
         {
-            's': np.ndarray,  # 1D coordinate [m]
-            'B': np.ndarray,  # (N,3), with (Bx=0, By, Bz=0)
+            "s": np.ndarray,      # 1D axis [m]
+            "B": np.ndarray,      # shape (N,3): (Bx=0, By, Bz=0)
         }
+
+    Raises
+    ------
+    TypeError
+        If `magnet` is not a dict with required keys.
+    ValueError
+        If parameters are invalid (e.g., non-positive length/step) or soft_edge fails validation.
     """
 
     if not isinstance(magnet, dict):
-        raise TypeError("magnet must be a dictionary with keys 'B', 'length', and optionally 's0'.")
+        raise TypeError("magnet must be a dictionary with keys 'B', 'length', and optionally 's0'/'soft_edge'.")
+    try:
+        B = float(magnet["B"])
+        length = float(magnet["length"])
+    except Exception as e:
+        raise TypeError("magnet['B'] and magnet['length'] must be provided and castable to float.") from e
 
-    B = float(magnet["B"])
-    length = float(magnet["length"])
     center = float(magnet.get("s0", 0.0))
-
     if length <= 0:
         raise ValueError("length must be positive.")
     if step_size <= 0:
         raise ValueError("step_size must be positive.")
-    if fringe < 0:
-        raise ValueError("fringe must be non-negative.")
-    if gaussian_kernel < 0:
-        raise ValueError("gaussian_kernel must be non-negative.")
+    if padding < 0:
+        raise ValueError("padding must be non-negative.")
+
+    soft_edge = magnet.get("soft_edge", None)
+
+    def _validate_soft_edge(se: dict | None) -> dict:
+        if not se:
+            return {"mode": "none"}
+        if not isinstance(se, dict):
+            raise ValueError("magnet['soft_edge'] must be a dict.")
+        mode = str(se.get("mode", "none")).lower()
+        if mode not in {"none","tanh","erf","arctan","gompertz","srw"}:
+            raise ValueError("soft_edge['mode'] must be one of {'none','tanh','erf','arctan','gompertz','srw'}.")
+        if mode == "none":
+            return {"mode": "none"}
+        if "edge_length" not in se:
+            raise ValueError("soft_edge requires 'edge_length' when mode != 'none'.")
+        edge_length = float(se["edge_length"])
+        if edge_length <= 0:
+            # treat as hard edge for robustness
+            return {"mode": "none"}
+        center_on = str(se.get("center_on", "midpoint")).lower()
+        if center_on not in {"midpoint","left","right"}:
+            raise ValueError("soft_edge['center_on'] must be 'midpoint', 'left', or 'right'.")
+        return {"mode": mode, "edge_length": edge_length, "center_on": center_on}
+
+    se = _validate_soft_edge(soft_edge)
 
     half_active = 0.5 * length
-    half_total = half_active + fringe
+    half_total = half_active + padding
     s_min = center - half_total
     s_max = center + half_total
-
     total_span = s_max - s_min
     n_steps = max(1, int(round(total_span / step_size)))
     s_max = s_min + n_steps * step_size
     s = np.linspace(s_min, s_max, n_steps + 1)
 
-    left = center - half_active
-    right = center + half_active
+    L_edge = center - half_active
+    R_edge = center + half_active
+
+    # -------------------------
+    # Soft-edge constants (edge_length is the 10–90 width for a centered edge)
+    # -------------------------
+    C_TANH = 2.197224        # tanh      : edge_length = C_TANH * lam
+    C_ERF  = 2.563103        # erf       : edge_length = C_ERF  * sigma
+    C_ATAN = 6.155367        # arctan    : edge_length = C_ATAN * a
+    C_GOMP = 3.085323        # Gompertz  : edge_length = C_GOMP / c  (flipped)
+    C_SRW  = 1.89110428694   # SRW CDF   : edge_length = C_SRW  * d
+    LN2    = float(np.log(2.0))
+
+    # -------------------------
+    # Edge factories: return (S_rise, S_fall)
+    # -------------------------
+    def _sigmoid_factory_pair(mode: str, edge_length_val: float):
+        """
+        Return two vectorized callables mapping R -> [0,1]:
+          S_rise(x): increasing  0→1 with the given 10–90 width when centered at x=0
+          S_fall(x): decreasing 1→0 with mirrored asymmetry (important for Gompertz)
+        """
+        delta = float(edge_length_val)
+        m = mode.lower()
+        if m == "none" or delta <= 0:
+            return None, None
+
+        if m == "tanh":
+            lam = delta / C_TANH
+            S_rise = lambda x: 0.5 * (1.0 + np.tanh(x / lam))
+            S_fall = lambda x: 0.5 * (1.0 + np.tanh(-x / lam))
+            return S_rise, S_fall
+
+        if m == "erf":
+            sigma = delta / C_ERF
+            denom = sigma * np.sqrt(2.0)
+            S_rise = lambda x: 0.5 * (1.0 + np.erf(x / denom))
+            S_fall = lambda x: 0.5 * (1.0 + np.erf(-x / denom))
+            return S_rise, S_fall
+
+        if m == "arctan":
+            a = delta / C_ATAN
+            S_rise = lambda x: 0.5 + (1.0 / np.pi) * np.arctan(x / a)
+            S_fall = lambda x: 0.5 + (1.0 / np.pi) * np.arctan(-x / a)
+            return S_rise, S_fall
+
+        if m == "gompertz":
+            # Flipped Gompertz with correct opposite asymmetry on fall:
+            #   rise: S↑(x) = 1 - exp(-ln2 * exp(+c x))  → long left, short right
+            #   fall: S↓(x) = 1 - exp(-ln2 * exp(-c x))  → short left, long right
+            c = C_GOMP / delta
+            S_rise = lambda x: 1.0 - np.exp(-LN2 * np.exp(+c * x))
+            S_fall = lambda x: 1.0 - np.exp(-LN2 * np.exp(-c * x))
+            return S_rise, S_fall
+
+        if m == "srw":
+            # SRW default: super-Lorentzian (order 2) CDF
+            d = delta / C_SRW
+            def S_cdf(x):
+                u = x / d
+                return 0.5 + (1.0 / np.pi) * (np.arctan(u) + u / (1.0 + u * u))
+            S_rise = lambda x: S_cdf(x)
+            S_fall = lambda x: S_cdf(-x)
+            return S_rise, S_fall
+
+        raise ValueError(f"Unknown soft-edge mode: {mode}")
 
     By = np.zeros_like(s, dtype=float)
-    mask = (s >= left) & (s <= right)
-    By[mask] = B
 
-    if gaussian_kernel > 0:
-        sigma_samples = gaussian_kernel / step_size
-        By = gaussian_filter1d(By, sigma=sigma_samples, mode='nearest')
+    if se["mode"] == "none":
+        By[(s >= L_edge) & (s <= R_edge)] = B
+    else:
+        S_rise, S_fall = _sigmoid_factory_pair(se["mode"], se["edge_length"])
+        if S_rise is None or S_fall is None:
+            By[(s >= L_edge) & (s <= R_edge)] = B
+        else:
+            delta = se["edge_length"]
+            center_on = se["center_on"]
+            if center_on == "midpoint":
+                cL, cR = L_edge, R_edge                       # 50% at nominal edges
+            elif center_on == "left":
+                cL, cR = L_edge + 0.5 * delta, R_edge + 0.5 * delta   # 10% at nominal edges
+            else:  # "right"
+                cL, cR = L_edge - 0.5 * delta, R_edge - 0.5 * delta   # 90% at nominal edges
+
+            FL = S_rise(s - cL)   # left edge: 0 to 1
+            FR = S_fall(s - cR)   # right edge: 1 to 0 (mirrored asymmetry for gompertz)
+            By = B * FL * FR
 
     B_vec = np.column_stack([np.zeros_like(s), By, np.zeros_like(s)])
 
     if verbose:
-        print(f"Grid center (array midpoint): s = {center:.6f} m")
-        print(f"Grid span: [{s[0]:.6f}, {s[-1]:.6f}] m")
-        print(f"Active BM region: [{left:.6f}, {right:.6f}] m  (length = {length:.6f} m)")
-        print(f"Padding per side: {fringe:.6f} m; step_size: {step_size:.6g} m; N = {s.size}\n")
+        print(f"s-center: {center:.6f} m | span: [{s[0]:.6f}, {s[-1]:.6f}] m | N={s.size}")
+        print(f"Nominal BM length: [{L_edge:.6f}, {R_edge:.6f}] m | length={length:.6f} m")
+        print(f"padding={padding:.6f} m | step_size={step_size:.6g} m")
+        print(f"soft_edge: {se}")
 
-    return {'s': s, 'B': B_vec}
+    return {"s": s, "B": B_vec}
 
 def multi_bm_magnetic_field(
-    magnets: list,
-    fringe: float = 0.0,
+    magnets: List[dict],
+    padding: float = 0.0,
     step_size: float = 1e-3,
-    gaussian_kernel: float = 0.0,
     verbose: bool = False,
 ) -> dict:
     """
-    Construct a composite magnetic field from multiple bending magnet elements.
+    Construct a composite magnetic field from multiple bending-magnet elements.
 
-    Each bending magnet is specified by its magnetic field amplitude, effective length,
-    and center position along a shared global axis. The total field is the superposition
-    of all bending magnet contributions.
+    Each magnet is defined like in `bm_magnetic_field`, including an optional
+    per-magnet soft-edge specification nested inside the magnet dict.
 
     Parameters
     ----------
     magnets : list of dict
-        Each dictionary defines one bending magnet with:
-          - 'B' : float, field amplitude [T]
-          - 'length' : float, magnetic length [m]
-          - 's0' : float, center position [m]
-          Optional:
-          - 'fringe' : float, per-magnet padding [m]
-          - 'gaussian_kernel' : float, per-magnet σ [m]
-    fringe : float, optional
-        Global padding [m] at both ends of the assembled field. Default is 0.
+        Each dictionary defines one bending magnet:
+          {
+            "B": float,            # plateau field [T]
+            "length": float,       # effective magnetic length [m]
+            "s0": float,           # center position [m]
+            # optional:
+            "padding": float,       # per-magnet padding [m] (defaults to global `padding`)
+            "soft_edge": {         # OPTIONAL, same structure as in bm_magnetic_field
+               "mode": "none" | "tanh" | "erf" | "arctan" | "gompertz" | "srw",
+               "edge_length": float,             # 10–90 width [m] (required if mode != "none")
+               "center_on": "midpoint" | "left" | "right"
+            }
+          }
+
+        Notes
+        -----
+        - "tanh" is a symmetric Bashmakov-like edge (dimensional tanh; no gap h).
+        - "srw" uses the super-Lorentzian (order 2) CDF (SRW default padding family).
+        - For preserving the full plateau length, set `soft_edge.center_on="right"`.
+
+    padding : float, optional
+        Global zero-field padding [m] added at both ends of *each* magnet's local grid
+        unless a per-magnet "padding" overrides it. Default 0.
     step_size : float, optional
-        Sampling step along the global s-axis [m]. Default is 1e-3.
-    gaussian_kernel : float, optional
-        Default Gaussian sigma [m] if not defined per magnet. Default is 0.
+        Sampling step along the global s-axis [m]. Default 1e-3.
     verbose : bool, optional
-        If True, prints individual magnet parameters during assembly.
+        If True, prints per-magnet summaries from `bm_magnetic_field`.
 
     Returns
     -------
-    dict of str : np.ndarray
-        Composite magnetic field dictionary:
-          - 's' : ndarray, shape (N,)
-              Global s-axis centered at 0 [m].
-          - 'B' : ndarray, shape (N, 3)
-              Superimposed magnetic field vectors [T], with (Bx=0, By, Bz=0).
+    dict
+        {
+            "s": np.ndarray,      # global axis [m], symmetric around 0
+            "B": np.ndarray,      # shape (N,3): (Bx=0, By, Bz=0), composite field
+        }
+
+    Raises
+    ------
+    ValueError
+        If input list is empty or malformed.
     """
-    import numpy as np
 
     if not isinstance(magnets, (list, tuple)) or not magnets:
         raise ValueError("magnets must be a non-empty list of dictionaries.")
@@ -224,42 +356,43 @@ def multi_bm_magnetic_field(
     s_min_all, s_max_all = np.inf, -np.inf
     for m in magnets:
         if not all(k in m for k in ("B", "length", "s0")):
-            raise ValueError("Each magnet must have 'B', 'length', and 's0'.")
-        L, s0 = float(m["length"]), float(m["s0"])
-        s_min_all = min(s_min_all, s0 - L / 2)
-        s_max_all = max(s_max_all, s0 + L / 2)
+            raise ValueError("Each magnet must define 'B', 'length', and 's0'.")
+        L = float(m["length"])
+        s0 = float(m["s0"])
+        f_loc = float(m.get("padding", padding))
+        half_total = 0.5 * L + max(f_loc, 0.0)
+        s_min_all = min(s_min_all, s0 - half_total)
+        s_max_all = max(s_max_all, s0 + half_total)
 
-    s_min_raw = s_min_all - abs(fringe)
-    s_max_raw = s_max_all + abs(fringe)
+    s_min_raw = s_min_all
+    s_max_raw = s_max_all
     half_span = max(abs(s_min_raw), abs(s_max_raw))
-    s = np.arange(-half_span, half_span + step_size / 2, step_size)
+    s = np.arange(-half_span, half_span + 0.5 * step_size, step_size)
 
     By_total = np.zeros_like(s, dtype=float)
 
     for m in magnets:
+        f_loc = float(m.get("padding", padding))
         bm = bm_magnetic_field(
             magnet=m,
-            fringe=m.get("fringe", fringe),
+            padding=f_loc,
             step_size=step_size,
-            gaussian_kernel=m.get("gaussian_kernel", gaussian_kernel),
             verbose=verbose,
         )
-
         local_s = bm["s"]
         local_By = bm["B"][:, 1]
+
         idx = np.round((local_s - s[0]) / step_size).astype(int)
         good = (idx >= 0) & (idx < s.size)
         np.add.at(By_total, idx[good], local_By[good])
 
     B_vec = np.column_stack([np.zeros_like(s), By_total, np.zeros_like(s)])
-
     return {"s": s, "B": B_vec}
 
 def multi_arb_magnetic_field(
     magnets: list,
-    fringe: float = 0.0,
+    padding: float = 0.0,
     step_size: float = 1e-3,
-    gaussian_kernel: float = 0.0,
     verbose: bool = False,
 ) -> dict:
     """
@@ -277,13 +410,10 @@ def multi_arb_magnetic_field(
           - 'B'  : ndarray, (N,) or (N,3); vertical field in By or column 1.
           - 's0' : float,  center position on the global axis [m].
 
-    fringe : float, optional
+    padding : float, optional
         Extra padding [m] on both sides of the global grid. Default is 0.
     step_size : float, optional
         Step size [m] for the uniform global grid. Default is 1e-3.
-    gaussian_kernel : float, optional
-        Gaussian σ [m] for optional smoothing of the *composite* field.
-        If 0, no smoothing. Default is 0.
     verbose : bool, optional
         If True, prints per-element diagnostics and global summary.
 
@@ -297,10 +427,8 @@ def multi_arb_magnetic_field(
     """
     if step_size <= 0:
         raise ValueError("step_size must be positive.")
-    if fringe < 0:
-        raise ValueError("fringe must be non-negative.")
-    if gaussian_kernel < 0:
-        raise ValueError("gaussian_kernel must be non-negative.")
+    if padding < 0:
+        raise ValueError("padding must be non-negative.")
     if not magnets:
         raise ValueError("magnets list is empty.")
 
@@ -311,7 +439,7 @@ def multi_arb_magnetic_field(
         s_local = np.asarray(m["s"], float)
         s_all.append(s_local + float(m["s0"]))
     s_all = np.concatenate(s_all)
-    s_min_raw, s_max_raw = s_all.min() - fringe, s_all.max() + fringe
+    s_min_raw, s_max_raw = s_all.min() - padding, s_all.max() + padding
     half_span = max(abs(s_min_raw), abs(s_max_raw))
     s = np.arange(-half_span, half_span + step_size/2, step_size)
 
@@ -338,16 +466,11 @@ def multi_arb_magnetic_field(
             print(f"  s-range (shifted): [{s_shift.min():+.3f}, {s_shift.max():+.3f}] m")
             print(f"  B-range: [{B_local.min():+.3e}, {B_local.max():+.3e}] T\n")
 
-    if gaussian_kernel > 0:
-        sigma_samples = gaussian_kernel / step_size
-        By_total = gaussian_filter1d(By_total, sigma=sigma_samples, mode="nearest")
-
     B_vec = np.column_stack([np.zeros_like(By_total), By_total, np.zeros_like(By_total)])
 
     if verbose:
         print(f"Global grid: [{s[0]:+.3f}, {s[-1]:+.3f}] m")
         print(f"  step_size = {step_size:.3e} m, total N = {s.size}")
-        print(f"  Gaussian σ = {gaussian_kernel:.3e} m\n")
 
     return {"s": s, "B": B_vec}
 
