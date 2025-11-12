@@ -107,7 +107,7 @@ def bm_magnetic_field(
                 "s0": float, optional # center position [m] (default 0.0)
                 "soft_edge": {        # optional, see below
                     "mode": {"none","tanh","erf","arctan","gompertz","srw"},
-                    "edge_length": float,               # 10–90% rise distance [m]
+                    "edge_length": float,  # 10-90% rise distance [m]
                     "center_on": {"midpoint","left","right"}  # default "midpoint"
                 }
             }
@@ -119,7 +119,7 @@ def bm_magnetic_field(
             rising 0→1 has long left tail; falling 1 to 0 has long right tail.
         - "srw": SRW default - super-Lorentzian (order 2) CDF.
                  S(u) = 1/2 + (1/pi)[ arctan(u) + u/(1+u^2) ], u = x/d.
-                 We map d from the requested 10–90% edge_length.
+                 We map d from the requested 10-90% edge_length.
 
     padding : float, optional
         Zero-field padding [m] added on both sides of the magnet (default 0).
@@ -213,7 +213,7 @@ def bm_magnetic_field(
     def _sigmoid_factory_pair(mode: str, edge_length_val: float):
         """
         Return two vectorized callables mapping R -> [0,1]:
-          S_rise(x): increasing  0→1 with the given 10–90 width when centered at x=0
+          S_rise(x): increasing  0→1 with the given 10-90 width when centered at x=0
           S_fall(x): decreasing 1→0 with mirrored asymmetry (important for Gompertz)
         """
         delta = float(edge_length_val)
@@ -286,10 +286,13 @@ def bm_magnetic_field(
     B_vec = np.column_stack([np.zeros_like(s), By, np.zeros_like(s)])
 
     if verbose:
-        print(f"s-center: {center:.6f} m | span: [{s[0]:.6f}, {s[-1]:.6f}] m | N={s.size}")
-        print(f"Nominal BM length: [{L_edge:.6f}, {R_edge:.6f}] m | length={length:.6f} m")
-        print(f"padding={padding:.6f} m | step_size={step_size:.6g} m")
+        ds = np.median(np.diff(s))
+        print(f"s-axis center: {center:.6f} m | span: [{s[0]:.6f}, {s[-1]:.6f}] m")
+        print(f"sampling: N = {s.size} | step: {ds:.3e} m")
+        print(f"nominal BM length: length = {length:.6f} m | span: [{L_edge:.6f}, {R_edge:.6f}] m")
+        print(f"mag. field range: [{By.min():+.3e}, {By.max():+.3e}] T")
         print(f"soft_edge: {se}")
+        print(f"padding = {padding:.6f} m")
 
     return {"s": s, "B": B_vec}
 
@@ -315,9 +318,9 @@ def multi_bm_magnetic_field(
             "s0": float,           # center position [m]
             # optional:
             "padding": float,       # per-magnet padding [m] (defaults to global `padding`)
-            "soft_edge": {         # OPTIONAL, same structure as in bm_magnetic_field
+            "soft_edge": {          # OPTIONAL, same structure as in bm_magnetic_field
                "mode": "none" | "tanh" | "erf" | "arctan" | "gompertz" | "srw",
-               "edge_length": float,             # 10–90 width [m] (required if mode != "none")
+               "edge_length": float,  # 10-90 width [m] (required if mode != "none")
                "center_on": "midpoint" | "left" | "right"
             }
           }
@@ -371,7 +374,9 @@ def multi_bm_magnetic_field(
 
     By_total = np.zeros_like(s, dtype=float)
 
-    for m in magnets:
+    for i, m in enumerate(magnets):
+        if verbose:
+            print(f"\n[Magnet {i+1}]")
         f_loc = float(m.get("padding", padding))
         bm = bm_magnetic_field(
             magnet=m,
@@ -460,11 +465,11 @@ def multi_arb_magnetic_field(
 
         if verbose:
             ds = np.median(np.diff(s_local))
-            print(f"[Magnet {i}]")
-            print(f"  Center: s0 = {s0:+.6f} m")
-            print(f"  Points: N = {s_local.size}, Δs ≈ {ds:.3e} m")
-            print(f"  s-range (shifted): [{s_shift.min():+.3f}, {s_shift.max():+.3f}] m")
-            print(f"  B-range: [{B_local.min():+.3e}, {B_local.max():+.3e}] T\n")
+            print(f"[Magnet {i+1}]")
+            print(f"  s-axis center: {s0:+.6f} m | span: [{s_shift.min():+.3f}, {s_shift.max():+.3f}] m")
+            print(f"  sampling: N = {s_local.size} | step: {ds:.3e} m")
+            print(f"  mag. field range: length = [{B_local.min():+.3e}, {B_local.max():+.3e}] T")
+            print(f"  padding = {padding:.6f} m")
 
     B_vec = np.column_stack([np.zeros_like(By_total), By_total, np.zeros_like(By_total)])
 

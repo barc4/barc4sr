@@ -287,12 +287,14 @@ def power_density(observation_point: float,
     ver_slit_cen = kwargs.get('ver_slit_cen', 0)
 
     if json_file is not None:
-        bl = syned_dictionary(json_file, None, observation_point, 
+        bl = syned_dictionary(json_file, observation_point, 
                               hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
     if light_source is not None:
-        bl = barc4sr_dictionary(light_source, None, observation_point, 
+        bl = barc4sr_dictionary(light_source, observation_point, 
                                 hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
-        
+
+    calc_etraj = False
+
     if bl['Class'] == 'bm':
         source_type = 'bending magnet'
     elif bl['Class'] == 'u':
@@ -302,18 +304,17 @@ def power_density(observation_point: float,
     elif bl['Class'] == 'arb':
         source_type = 'arbitrary magnetic field'
         
-    function_txt = f"{source_type} power density using SRW:"
+    function_txt = f"{source_type} wavefront for a fixed energy using SRW:"
 
     if verbose: print(f"{function_txt} please wait...")
 
     radiation_polarisation = kwargs.get('radiation_polarisation', 'T')
 
-    magfield_central_position = kwargs.get('magfield_central_position', 0)
-    ebeam_initial_position = kwargs.get('ebeam_initial_position', 0)
+    ebeam_initial_condition = kwargs.get('ebeam_initial_condition', 6*[0])
 
-    eBeam, magFldCnt, eTraj = set_light_source(bl, False, bl['Class'],
-                                               ebeam_initial_position=ebeam_initial_position,
-                                               magfield_central_position=magfield_central_position,
+    eBeam, magFldCnt, eTraj = set_light_source(bl,
+                                               calc_etraj, 
+                                               ebeam_initial_condition,
                                                verbose=verbose)
     
     pwr = srwlibCalcPowDenSR(bl, eBeam, magFldCnt, hor_slit_n, ver_slit_n)
