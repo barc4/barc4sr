@@ -465,7 +465,7 @@ def multi_arb_magnetic_field(
 
         if verbose:
             ds = np.median(np.diff(s_local))
-            print(f"[Magnet {i+1}]")
+            print(f"[Magnet {i}]")
             print(f"  s-axis center: {s0:+.6f} m | span: [{s_shift.min():+.3f}, {s_shift.max():+.3f}] m")
             print(f"  sampling: N = {s_local.size} | step: {ds:.3e} m")
             print(f"  mag. field range: length = [{B_local.min():+.3e}, {B_local.max():+.3e}] T")
