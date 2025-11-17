@@ -725,10 +725,10 @@ def srwlibCalcPowDenSR(bl: dict,
     stk = srwlib.SRWLStokes() 
     stk.allocate(1, h_slit_points, v_slit_points)     
     stk.mesh.zStart = bl['distance']
-    stk.mesh.xStart = bl['slitHcenter'] - bl['slitH']/2
-    stk.mesh.xFin =   bl['slitHcenter'] + bl['slitH']/2
-    stk.mesh.yStart = bl['slitVcenter'] - bl['slitV']/2
-    stk.mesh.yFin =   bl['slitVcenter'] + bl['slitV']/2
+    stk.mesh.xStart =  -bl['slitH']/2-bl['slitHcenter']
+    stk.mesh.xFin =     bl['slitH']/2-bl['slitHcenter']
+    stk.mesh.yStart = -bl['slitV']/2-bl['slitVcenter']
+    stk.mesh.yFin =    bl['slitV']/2-bl['slitVcenter']
 
     return srwlib.srwl.CalcPowDenSR(stk, eBeam, 0, magFldCnt, arPrecPar)
 

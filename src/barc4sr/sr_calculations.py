@@ -713,7 +713,7 @@ def emitted_radiation(energy_min: float,
 #***********************************************************************************
 
 def tuning_curves():
-    raise NotImplementedError('Ohhh ohhh we are half way there! Ohhh ohhh living on a prayer! - this function is not implemented yet!')
+    raise NotImplementedError('Ohhh ohhh we are half way there! Ohhh ohhh this function is not implemented yet!')
 
 
 if __name__ == '__main__':
