@@ -106,6 +106,367 @@ def plot_electron_trajectory(eBeamTraj: dict, direction: str, **kwargs) -> None:
     plt.tight_layout()
     plt.show()
             
+# def plot_electron_trajectory_with_rays(
+#     eBeamTraj: dict,
+#     direction: str,
+#     *,
+#     ray_length: float = 1.0,
+#     n_rays: int = 25,
+#     undersample: int | None = None,
+#     k: float = 1.0,
+# ) -> None:
+#     """
+#     Plot electron trajectory together with rays emitted tangentially to it.
+
+#     The electron trajectory is drawn in the (Z, X) or (Z, Y) plane, and a set of
+#     straight rays is overlaid, each starting at a trajectory point and following
+#     the local tangent angle (Xp or Yp).
+
+#     Parameters
+#     ----------
+#     eBeamTraj : dict
+#         Dictionary containing electron trajectory data, as returned by
+#         ``write_electron_trajectory``. Expected keys:
+#         ``eBeamTraj['eTraj']['Z']``, ``['X']``, ``['Xp']``, ``['Y']``, ``['Yp']``.
+#     direction : {'horizontal', 'vertical', 'both', 'x', 'y', 'h', 'v', 'hor', 'ver', 'b'}
+#         Direction to plot:
+#         - 'horizontal' (or 'x', 'h', 'hor'): use X / Xp vs Z.
+#         - 'vertical'   (or 'y', 'v', 'ver'): use Y / Yp vs Z.
+#         - 'both' (or 'b'): make two separate figures, one for each plane.
+#     ray_length : float, optional
+#         Ray propagation length along +Z, in meters. Default is 1.0 m.
+#     n_rays : int, optional
+#         Target number of rays to draw (used if `undersample` is not provided).
+#         Default is 25.
+#     undersample : int or None, optional
+#         Undersampling factor along the trajectory. If given, rays are drawn at
+#         indices ``0, undersample, 2*undersample, ...``. If None, an internal
+#         undersampling is chosen such that at most `n_rays` rays are drawn.
+#     k : float, optional
+#         Global scaling factor passed to ``start_plotting(k)`` for consistency
+#         with other plotting functions.
+
+#     Notes
+#     -----
+#     - Internally, positions are plotted in millimetres (mm) and Z in mm.
+#     - Xp / Yp are assumed to be small angles such that they can be treated as
+#       slopes: dX/dZ ≈ Xp, dY/dZ ≈ Yp.
+#     """
+#     # Handle 'both' first
+#     if direction.lower() in ['b', 'both']:
+#         plot_electron_trajectory_with_rays(
+#             eBeamTraj,
+#             'horizontal',
+#             ray_length=ray_length,
+#             n_rays=n_rays,
+#             undersample=undersample,
+#             k=k,
+#         )
+#         plot_electron_trajectory_with_rays(
+#             eBeamTraj,
+#             'vertical',
+#             ray_length=ray_length,
+#             n_rays=n_rays,
+#             undersample=undersample,
+#             k=k,
+#         )
+#         return
+
+#     # Map direction to axis and labels
+#     if direction.lower() in ['x', 'h', 'hor', 'horizontal']:
+#         axis = 'X'
+#         axis_label = 'x'
+#         title_suffix = 'Horizontal'
+#     elif direction.lower() in ['y', 'v', 'ver', 'vertical']:
+#         axis = 'Y'
+#         axis_label = 'y'
+#         title_suffix = 'Vertical'
+#     else:
+#         raise ValueError("Direction must be 'horizontal', 'vertical', or 'both'.")
+
+#     start_plotting(k)
+
+#     Z = np.asarray(eBeamTraj['eTraj']['Z'])          # [m]
+#     R = np.asarray(eBeamTraj['eTraj'][axis])         # [m] (X or Y)
+#     Rp = np.asarray(eBeamTraj['eTraj'][f'{axis}p'])  # [rad], treated as slope dR/dZ
+
+#     # Axes in mm for plotting
+#     Z_mm = Z * 1e3
+#     R_mm = R * 1e3
+
+#     fig, ax = plt.subplots(figsize=(8, 6))
+#     fig.suptitle(f'{title_suffix} electron trajectory with tangential rays', fontsize=14)
+
+#     # Plot electron trajectory
+#     ax.plot(Z_mm, R_mm, color='darkred', linewidth=1.5, label='Electron trajectory')
+
+#     # Determine where to draw rays
+#     n_points = Z.size
+#     if n_points < 2:
+#         raise ValueError("Trajectory must contain at least 2 points.")
+
+#     if undersample is None:
+#         # Choose undersampling so that we get at most n_rays rays
+#         undersample = max(1, n_points // max(1, n_rays))
+
+#     indices = np.arange(0, n_points, undersample)
+#     # Clip to at most n_rays rays
+#     if indices.size > n_rays:
+#         indices = np.linspace(0, indices.size - 1, n_rays, dtype=int)
+#         indices = indices.astype(int)
+
+#     # Ray construction: R_ray(Z) = R0 + Rp0 * (Z - Z0)
+#     # We'll draw each ray from Z0 to Z0 + ray_length
+#     for idx in indices:
+#         Z0 = Z[idx]
+#         R0 = R[idx]
+#         slope = Rp[idx]  # ≈ dR/dZ
+
+#         Z_ray = np.array([Z0, Z0 + ray_length])       # [m]
+#         R_ray = R0 + slope * (Z_ray - Z0)             # [m]
+
+#         ax.plot(
+#             Z_ray * 1e3,
+#             R_ray * 1e3,
+#             color='steelblue',
+#             linewidth=0.8,
+#             alpha=0.7,
+#         )
+
+#     # Cosmetics
+#     ax.set_xlabel('Z [mm]')
+#     ax.set_ylabel(f'{axis_label} [mm]')
+#     ax.grid(True, which='both', linestyle=':', linewidth=0.5)
+#     ax.tick_params(direction='in', top=True, right=True)
+#     for spine in ['top', 'right', 'bottom', 'left']:
+#         ax.spines[spine].set_visible(True)
+#         ax.spines[spine].set_color('black')
+
+#     ax.legend(loc='upper right', frameon=True)
+#     plt.tight_layout()
+#     plt.show()
+
+def plot_electron_trajectory_with_rays(
+    eBeamTraj,
+    direction,
+    *,
+    ray_length=1.0,
+    n_rays=25,
+    grad_rel_threshold=1e-3,
+    use_B_mask=True,
+    B_rel_threshold=0.01,
+    k=1.0,
+):
+    """
+    Plot electron trajectory with tangential rays, plus emission zones.
+
+    Panel 1: electron trajectory (R vs Z) with rays drawn only from emission
+             regions where |d(angle)/dZ| is non-zero (above threshold), colored
+             by contiguous emission segment.
+
+    Panel 2: d(angle)/dZ vs Z with the same emission segments highlighted using
+             the same colors as in Panel 1.
+
+    Parameters
+    ----------
+    eBeamTraj : dict
+        Dictionary containing electron trajectory data, as returned by
+        write_electron_trajectory.
+    direction : {'horizontal', 'vertical', 'both', 'x', 'y', 'h', 'v', 'hor', 'ver', 'b'}
+        Direction to plot.
+    ray_length : float, optional
+        Ray propagation length along +Z, in meters. Default is 1.0 m.
+    n_rays : int, optional
+        Maximum number of rays to draw. Default is 25.
+    grad_rel_threshold : float, optional
+        Relative threshold on |d(angle)/dZ| (fraction of max) to define
+        emission regions. Default is 1e-3.
+    use_B_mask : bool, optional
+        If True, emission regions must also satisfy |B| > B_rel_threshold * max(|B|).
+    B_rel_threshold : float, optional
+        Relative B-field threshold if use_B_mask is True. Default is 0.01.
+    k : float, optional
+        Global scaling factor passed to start_plotting(k).
+    """
+    # Handle 'both' first
+    if direction.lower() in ['b', 'both']:
+        plot_electron_trajectory_with_rays(
+            eBeamTraj,
+            'horizontal',
+            ray_length=ray_length,
+            n_rays=n_rays,
+            grad_rel_threshold=grad_rel_threshold,
+            use_B_mask=use_B_mask,
+            B_rel_threshold=B_rel_threshold,
+            k=k,
+        )
+        plot_electron_trajectory_with_rays(
+            eBeamTraj,
+            'vertical',
+            ray_length=ray_length,
+            n_rays=n_rays,
+            grad_rel_threshold=grad_rel_threshold,
+            use_B_mask=use_B_mask,
+            B_rel_threshold=B_rel_threshold,
+            k=k,
+        )
+        return
+
+    # Map direction to axis and labels
+    if direction.lower() in ['x', 'h', 'hor', 'horizontal']:
+        axis = 'X'
+        axis_label = 'x'
+        title_suffix = 'Horizontal'
+    elif direction.lower() in ['y', 'v', 'ver', 'vertical']:
+        axis = 'Y'
+        axis_label = 'y'
+        title_suffix = 'Vertical'
+    else:
+        raise ValueError("Direction must be 'horizontal', 'vertical', or 'both'.")
+
+    start_plotting(k)
+
+    Z  = np.asarray(eBeamTraj['eTraj']['Z'])            # [m]
+    R  = np.asarray(eBeamTraj['eTraj'][axis])           # [m] (X or Y)
+    Rp = np.asarray(eBeamTraj['eTraj'][f'{axis}p'])     # [rad], angle
+
+    # Optional B-field info
+    Bx = np.asarray(eBeamTraj['eTraj'].get('Bx', np.zeros_like(Z)))
+    By = np.asarray(eBeamTraj['eTraj'].get('By', np.zeros_like(Z)))
+    Bz = np.asarray(eBeamTraj['eTraj'].get('Bz', np.zeros_like(Z)))
+    Bmag = np.sqrt(Bx**2 + By**2 + Bz**2)
+
+    # Axes in mm for plotting
+    Z_mm = Z * 1e3
+    R_mm = R * 1e3
+
+    # Two panels: trajectory+rats, and d(angle)/dZ with emission zones
+    fig, (ax_traj, ax_grad) = plt.subplots(
+        2, 1,
+        sharex=True,
+        figsize=(8, 8),
+        height_ratios=[2, 1],
+    )
+    fig.suptitle(f'{title_suffix} electron trajectory with tangential rays', fontsize=14)
+
+    # --- Emission mask based on d(angle)/dZ ---
+    dRp_dZ = np.gradient(Rp, Z)  # [1/m]
+
+    max_grad = np.max(np.abs(dRp_dZ))
+    if max_grad > 0:
+        grad_eps = grad_rel_threshold * max_grad
+        mask_grad = np.abs(dRp_dZ) > grad_eps
+    else:
+        mask_grad = np.zeros_like(dRp_dZ, dtype=bool)
+
+    # Optional |B| mask
+    if use_B_mask and np.max(Bmag) > 0:
+        B_eps = B_rel_threshold * np.max(Bmag)
+        mask_B = Bmag > B_eps
+    else:
+        mask_B = np.ones_like(Bmag, dtype=bool)
+
+    mask_emit = mask_grad & mask_B
+    emit_indices = np.where(mask_emit)[0]
+
+    # If nothing passes the mask, fall back to uniform sampling
+    if emit_indices.size == 0:
+        emit_indices = np.linspace(0, len(Z) - 1, min(n_rays, len(Z)), dtype=int)
+
+    # --- Segment emission regions (contiguous groups) for coloring ---
+    segments = []
+    if emit_indices.size > 0:
+        start = emit_indices[0]
+        prev = emit_indices[0]
+        for idx in emit_indices[1:]:
+            if idx == prev + 1:
+                prev = idx
+            else:
+                segments.append(np.arange(start, prev + 1))
+                start = idx
+                prev = idx
+        segments.append(np.arange(start, prev + 1))
+
+    # Map index -> segment id
+    index_to_seg = {}
+    for seg_id, seg_inds in enumerate(segments):
+        for idx in seg_inds:
+            index_to_seg[int(idx)] = seg_id
+
+    # Downsample emission indices to at most n_rays
+    if emit_indices.size > n_rays:
+        step = max(1, emit_indices.size // n_rays)
+        sampled_indices = emit_indices[::step]
+    else:
+        sampled_indices = emit_indices
+
+    # Color cycle per segment
+    colors = ['steelblue', 'olive', 'darkorange', 'purple', 'teal', 'magenta']
+
+    # --- Panel 1: trajectory + rays ---
+    ax_traj.plot(Z_mm, R_mm, color='darkred', linewidth=1.5, label='Electron trajectory')
+
+    for idx in sampled_indices:
+        idx = int(idx)
+        Z0 = Z[idx]
+        R0 = R[idx]
+        slope = Rp[idx]  # ≈ dR/dZ
+
+        Z_ray = np.array([Z0, Z0 + ray_length])       # [m]
+        R_ray = R0 + slope * (Z_ray - Z0)             # [m]
+
+        seg_id = index_to_seg.get(idx, 0)
+        color = colors[seg_id % len(colors)]
+
+        ax_traj.plot(
+            Z_ray * 1e3,
+            R_ray * 1e3,
+            color=color,
+            linewidth=0.9,
+            alpha=0.8,
+        )
+
+    ax_traj.set_ylabel(f'{axis_label} [mm]')
+    ax_traj.grid(True, which='both', linestyle=':', linewidth=0.5)
+    ax_traj.tick_params(direction='in', top=True, right=True)
+    for spine in ['top', 'right', 'bottom', 'left']:
+        ax_traj.spines[spine].set_visible(True)
+        ax_traj.spines[spine].set_color('black')
+    ax_traj.legend(loc='upper right', frameon=True)
+
+    # --- Panel 2: d(angle)/dZ with emission zones ---
+    ax_grad.plot(Z_mm, dRp_dZ, color='black', linewidth=1.0, label='d(angle)/dZ')
+
+    # Plot each emission segment with same colors as rays
+    first_seg_label = True
+    for seg_id, seg_inds in enumerate(segments):
+        color = colors[seg_id % len(colors)]
+        label = 'Emission segments' if first_seg_label else None
+        first_seg_label = False
+
+        ax_grad.plot(
+            Z_mm[seg_inds],
+            dRp_dZ[seg_inds],
+            linestyle='-',
+            marker='o',
+            markersize=3,
+            color=color,
+            alpha=0.9,
+            label=label,
+        )
+
+    ax_grad.set_xlabel('Z [mm]')
+    ax_grad.set_ylabel('d(angle)/dZ [1/m]')
+    ax_grad.grid(True, which='both', linestyle=':', linewidth=0.5)
+    ax_grad.tick_params(direction='in', top=True, right=True)
+    for spine in ['top', 'right', 'bottom', 'left']:
+        ax_grad.spines[spine].set_visible(True)
+        ax_grad.spines[spine].set_color('black')
+    ax_grad.legend(loc='upper right', frameon=True)
+
+    plt.tight_layout()
+    plt.show()
+
 #***********************************************************************************
 # Magnetic field
 #***********************************************************************************
@@ -311,7 +672,7 @@ srw_cmap = LinearSegmentedColormap.from_list(
 )
 
 igor_colors = [
-    (0.0, (000/255, 000/255, 000/255, 1)),   # igor cold warm (brighter)
+    (0.0, (000/255,  22/255,  65/255, 1)),   # igor cold warm (brighter)
     (0.2, (000/255, 145/255, 232/255, 1)),
     (0.4, (128/255,  73/255, 116/255, 1)),
     (0.6, (255/255, 000/255, 000/255, 1)),
@@ -407,7 +768,7 @@ def plot_wavefront(
             vmax_eff = vmax if (vmax is not None and vmax > vmin_eff) else data.max()
             norm = LogNorm(vmin=vmin_eff, vmax=vmax_eff)
 
-            intensity_label = r"ph/s/mm$^2$/0.1%bw (log scale)"
+            intensity_label = r"ph/s/mm$^2$/0.1%bw"
             vmin_lin = None
             vmax_lin = None
         else:
