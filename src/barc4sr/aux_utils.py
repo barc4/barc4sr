@@ -58,45 +58,36 @@ PI = np.pi
 
 def set_light_source(bl: dict,
                      electron_trajectory: bool,
-                     id_type: str,
-                     **kwargs) -> Tuple[srwlib.SRWLPartBeam, srwlib.SRWLMagFldC, srwlib.SRWLPrtTrj]:
+                     ebeam_initial_condition: list = 6*[0],
+                     verbose: bool = True,
+                     ) -> Tuple[srwlib.SRWLPartBeam, srwlib.SRWLMagFldC, srwlib.SRWLPrtTrj]:
     """
     Set up the light source parameters including electron beam, magnetic structure, and electron trajectory.
 
     Args:
         bl (dict): Beamline parameters dictionary containing essential information for setup.
         electron_trajectory (bool): Whether to calculate electron trajectory.
-        id_type (str): Type of magnetic structure, can be undulator (u), wiggler (w), or bending magnet (bm).
 
     Optional Args (kwargs):
         verbose (bool): Whether to print dialogue.
-        ebeam_initial_position (float): Electron beam initial average longitudinal position [m]
-        magfield_initial_position (float): Longitudinal position of the magnet center [m]
+        ebeam_initial_condition (float): Electron beam initial condition from the 6D phase space (posX, posY, posZ, angX, angY, Energy)
 
     Returns:
         Tuple[srwlib.SRWLPartBeam, srwlib.SRWLMagFldC, srwlib.SRWLPrtTrj]: A tuple containing the electron beam,
         magnetic structure, and electron trajectory.
     """    
-
-    verbose = kwargs.get('verbose', True)
-    ebeam_initial_position = kwargs.get('ebeam_initial_position', 0)
-    magfield_central_position = kwargs.get('magfield_central_position', 0)
-
     # ----------------------------------------------------------------------------------
     # definition of the electron beam
     # ----------------------------------------------------------------------------------
     if verbose: print('> Generating the electron beam ... ', end='')
     eBeam = set_electron_beam(bl,
-                              id_type,
-                              ebeam_initial_position=ebeam_initial_position)
+                              ebeam_initial_condition=ebeam_initial_condition)
     if verbose: print('completed')
     # ----------------------------------------------------------------------------------
     # definition of magnetic structure
     # ----------------------------------------------------------------------------------
     if verbose: print('> Generating the magnetic structure ... ', end='')
-    magFldCnt = set_magnetic_structure(bl, 
-                                       id_type,
-                                       magfield_central_position = magfield_central_position)
+    magFldCnt = set_magnetic_structure(bl)
     if verbose: print('completed')
     # ----------------------------------------------------------------------------------
     # calculate electron trajectory
@@ -111,56 +102,54 @@ def set_light_source(bl: dict,
     return eBeam, magFldCnt, eTraj
 
 def set_electron_beam(bl: dict, 
-                      id_type: str, 
-                      **kwargs) -> srwlib.SRWLPartBeam:
+                      ebeam_initial_condition: list = 6*[0]) -> srwlib.SRWLPartBeam:
     """
     Set up the electron beam parameters.
 
     Parameters:
         bl (dict): Dictionary containing beamline parameters.
-        id_type (str): Type of magnetic structure, can be undulator (u), wiggler (w), or bending magnet (bm).
 
     Optional Args (kwargs):
-        ebeam_initial_position (float): Electron beam initial average longitudinal position [m]
+        ebeam_initial_condition (float): Electron beam initial condition from the 6D phase space (posX, posY, posZ, angX, angY, Energy)
 
     Returns:
         srwlib.SRWLPartBeam: Electron beam object initialized with specified parameters.
 
     """
-    ebeam_initial_position = kwargs.get('ebeam_initial_position', 0)
 
     eBeam = srwlib.SRWLPartBeam()
-    eBeam.Iavg = bl['ElectronCurrent']  # average current [A]
-    eBeam.partStatMom1.x = 0.  # initial transverse positions [m]
-    eBeam.partStatMom1.y = 0.
-    if id_type.startswith('u'):
-        eBeam.partStatMom1.z = - bl['PeriodID'] * (bl['NPeriods'] + 4) / 2  # initial longitudinal positions
+    eBeam.Iavg = bl['ElectronCurrent']                 # average current [A]
+    eBeam.partStatMom1.x = ebeam_initial_condition[0]  # initial transverse positions [m]
+    eBeam.partStatMom1.y = ebeam_initial_condition[1]
+    if bl['Class'].startswith('u'):
+        eBeam.partStatMom1.z = - bl['PeriodID'] * (bl['NPeriods'] + 4) / 2
     else:
-        eBeam.partStatMom1.z = ebeam_initial_position
-    eBeam.partStatMom1.xp = 0  # initial relative transverse divergence [rad]
-    eBeam.partStatMom1.yp = 0
-    eBeam.partStatMom1.gamma = get_gamma(bl['ElectronEnergy'])
+        eBeam.partStatMom1.z = ebeam_initial_condition[2]
+    eBeam.partStatMom1.xp = ebeam_initial_condition[3]
+    eBeam.partStatMom1.yp = ebeam_initial_condition[4]
+    if ebeam_initial_condition[5] == 0:
+        eBeam.partStatMom1.gamma = get_gamma(bl['ElectronEnergy'])
+    else:
+        eBeam.partStatMom1.gamma = get_gamma(ebeam_initial_condition[5])
 
-    sigX = bl['ElectronBeamSizeH']  # horizontal RMS size of e-beam [m]
+    sigX = bl['ElectronBeamSizeH']         # horizontal RMS size of e-beam [m]
     sigXp = bl['ElectronBeamDivergenceH']  # horizontal RMS angular divergence [rad]
-    sigY = bl['ElectronBeamSizeV']  # vertical RMS size of e-beam [m]
+    sigY = bl['ElectronBeamSizeV']         # vertical RMS size of e-beam [m]
     sigYp = bl['ElectronBeamDivergenceV']  # vertical RMS angular divergence [rad]
     sigEperE = bl['ElectronEnergySpread']  
 
     # 2nd order stat. moments:
-    eBeam.arStatMom2[0] = sigX * sigX  # <(x-<x>)^2>
-    eBeam.arStatMom2[1] = 0  # <(x-<x>)(x'-<x'>)>
-    eBeam.arStatMom2[2] = sigXp * sigXp  # <(x'-<x'>)^2>
-    eBeam.arStatMom2[3] = sigY * sigY  # <(y-<y>)^2>
-    eBeam.arStatMom2[4] = 0  # <(y-<y>)(y'-<y'>)>
-    eBeam.arStatMom2[5] = sigYp * sigYp  # <(y'-<y'>)^2>
+    eBeam.arStatMom2[0] = sigX * sigX   # <(x-<x>)^2>
+    eBeam.arStatMom2[1] = 0             # <(x-<x>)(x'-<x'>)>
+    eBeam.arStatMom2[2] = sigXp * sigXp # <(x'-<x'>)^2>
+    eBeam.arStatMom2[3] = sigY * sigY   # <(y-<y>)^2>
+    eBeam.arStatMom2[4] = 0             # <(y-<y>)(y'-<y'>)>
+    eBeam.arStatMom2[5] = sigYp * sigYp # <(y'-<y'>)^2>
     eBeam.arStatMom2[10] = sigEperE * sigEperE  # <(E-<E>)^2>/<E>^2
 
     return eBeam
 
-def set_magnetic_structure(bl: dict, 
-                           id_type: str, 
-                           **kwargs) -> srwlib.SRWLMagFldC:
+def set_magnetic_structure(bl: dict) -> srwlib.SRWLMagFldC:
     """
     Sets up the magnetic field container.
 
@@ -170,15 +159,13 @@ def set_magnetic_structure(bl: dict,
 
     Optional Args (kwargs):
         magfield_central_position (float): Longitudinal position of the magnet center [m]
-        tabulated_undulator_mthd (int): Method to use for generating undulator field if magnetic_measurement is provided. Defaults to 0
 
     Returns:
         srwlib.SRWLMagFldC: Magnetic field container.
 
     """
-    magfield_central_position = kwargs.get('magfield_central_position', 0)
 
-    if id_type.startswith('u'):
+    if bl['Class'].startswith('u'):
         und = srwlib.SRWLMagFldU()
         und.set_sin(_per=bl["PeriodID"],
                     _len=bl['PeriodID']*bl['NPeriods'], 
@@ -192,9 +179,9 @@ def set_magnetic_structure(bl: dict,
         magFldCnt = srwlib.SRWLMagFldC(_arMagFld=[und],
                                         _arXc=srwlib.array('d', [0.0]),
                                         _arYc=srwlib.array('d', [0.0]),
-                                        _arZc=srwlib.array('d', [magfield_central_position]))
-    if id_type.startswith('bm'):
-        # RC:2025JAN08 TODO: recheck magfield central position/extraction angle for edge radiation
+                                        _arZc=srwlib.array('d', [bl['MagFieldCenter']]))
+    if bl['Class'].startswith('bm'):
+
         bm = srwlib.SRWLMagFldM()
         bm.G = bl["B"]
         bm.m = 1         # multipole order: 1 for dipole, 2 for quadrupole, 3 for sextupole, 4 for octupole
@@ -206,9 +193,9 @@ def set_magnetic_structure(bl: dict,
         magFldCnt = srwlib.SRWLMagFldC(_arMagFld=[bm],
                                        _arXc=srwlib.array('d', [0.0]),
                                        _arYc=srwlib.array('d', [0.0]),
-                                       _arZc=srwlib.array('d', [magfield_central_position]))
+                                       _arZc=srwlib.array('d', [bl['MagFieldCenter']]))
         
-    if id_type.startswith('arb'):
+    if bl['Class'].startswith('arb'):
 
         field_axis = bl["MagFieldDict"]['s']
 
@@ -231,7 +218,7 @@ def set_magnetic_structure(bl: dict,
                                         1, 1, len(field_axis), _rz=range_z)],
                                         _arXc=srwlib.array('d', [0.0]),
                                         _arYc=srwlib.array('d', [0.0]),
-                                        _arZc=srwlib.array('d', [magfield_central_position]))
+                                        _arZc=srwlib.array('d', [bl['MagFieldCenter']]))
 
     return magFldCnt
 
@@ -274,7 +261,7 @@ def srwlibCalcElecFieldSR(bl: dict,
                           energy: np.array,
                           h_slit_points: int, 
                           v_slit_points: int,
-                          id_type: str) -> srwlib.SRWLWfr:
+                          partTraj: srwlib.SRWLPrtTrj) -> srwlib.SRWLWfr:
     """
     Calculates the electric field for synchrotron radiation.
 
@@ -285,7 +272,6 @@ def srwlibCalcElecFieldSR(bl: dict,
         energy (np.array): Photon energy array (np.array) or enerfy point (float) [eV].
         h_slit_points (int): Number of horizontal slit points.
         v_slit_points (int): Number of vertical slit points.
-        id_type (str): Type of magnetic structure, can be undulator (u), wiggler (w), 
         bending magnet (bm) or arbitrary (arb).
 
     Returns:
@@ -293,7 +279,7 @@ def srwlibCalcElecFieldSR(bl: dict,
     """
     tzero = time()
     arPrecPar = [0]*7
-    if id_type in ['bm', 'w', 'arb']:
+    if bl['Class'] in ['bm', 'w', 'arb']:
         arPrecPar[0] = 2      # SR calculation method: 0- "manual", 1- "auto-undulator", 2- "auto-wiggler"
     else:
         arPrecPar[0] = 1
@@ -329,7 +315,7 @@ def srwlibCalcElecFieldSR(bl: dict,
     wfr.mesh = mesh
     wfr.partBeam = eBeam
 
-    return srwlib.srwl.CalcElecFieldSR(wfr, 0, magFldCnt, arPrecPar), time()-tzero
+    return srwlib.srwl.CalcElecFieldSR(wfr, partTraj, magFldCnt, arPrecPar), time()-tzero
 
 def spectral_srwlibCalcElecFieldSR(bl: dict, 
                                    eBeam: srwlib.SRWLPartBeam, 
@@ -739,10 +725,10 @@ def srwlibCalcPowDenSR(bl: dict,
     stk = srwlib.SRWLStokes() 
     stk.allocate(1, h_slit_points, v_slit_points)     
     stk.mesh.zStart = bl['distance']
-    stk.mesh.xStart = bl['slitHcenter'] - bl['slitH']/2
-    stk.mesh.xFin =   bl['slitHcenter'] + bl['slitH']/2
-    stk.mesh.yStart = bl['slitVcenter'] - bl['slitV']/2
-    stk.mesh.yFin =   bl['slitVcenter'] + bl['slitV']/2
+    stk.mesh.xStart =  -bl['slitH']/2-bl['slitHcenter']
+    stk.mesh.xFin =     bl['slitH']/2-bl['slitHcenter']
+    stk.mesh.yStart = -bl['slitV']/2-bl['slitVcenter']
+    stk.mesh.yFin =    bl['slitV']/2-bl['slitVcenter']
 
     return srwlib.srwl.CalcPowDenSR(stk, eBeam, 0, magFldCnt, arPrecPar)
 

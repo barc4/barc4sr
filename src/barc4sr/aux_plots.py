@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.integrate as integrate
 from matplotlib import cm, rcParamsDefault
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import LinearSegmentedColormap,LogNorm
 from skimage.restoration import unwrap_phase
 
 #***********************************************************************************
@@ -169,11 +169,166 @@ def plot_magnetic_field(eBeamTraj: dict, direction: str, **kwargs) -> None:
     plt.tight_layout()
     plt.show()
 
+def plot_field_and_twiss(data: dict, **kwargs) -> None:
+    """
+    Plot magnetic field components vs s, and (optionally) Twiss parameters.
+
+    Parameters
+    ----------
+    data : dict
+        Required:
+          - 's' : array, positions [m], shape (N,)
+          - 'B' : array, magnetic field vectors [T], shape (N, 3) for (Bx, By, Bz)
+        Optional:
+          - 'Twiss' : dict with:
+              * 'beta_x' : array, [m], shape (N,)
+              * 'beta_y' : array, [m], shape (N,)
+              * 'eta_x' or 'eta' : array, [m], shape (N,)
+    **kwargs
+        k : float, optional
+            Global scaling factor for fonts (default matches aux_plots).
+
+    Raises
+    ------
+    KeyError
+        If required keys are missing in `data`.
+    ValueError
+        If array shapes are inconsistent or values are non-finite.
+    """
+    k = kwargs.get('k', 1)
+    try:
+        start_plotting(k)
+    except NameError:
+        pass
+
+    if 's' not in data or 'B' not in data:
+        raise KeyError("Missing required keys: 's' and 'B' must be present.")
+
+    s = np.asarray(data['s'], dtype=float)
+    B = np.asarray(data['B'], dtype=float)
+
+    if s.ndim != 1:
+        raise ValueError("'s' must be 1D.")
+    if B.ndim != 2 or B.shape[1] != 3 or B.shape[0] != s.size:
+        raise ValueError("'B' must have shape (N, 3) with N == len(s).")
+    if not (np.isfinite(s).all() and np.isfinite(B).all()):
+        raise ValueError("'s' and 'B' must be finite.")
+
+    color_Bx = 'darkred'
+    color_By = 'olive'
+    color_Bz = 'steelblue'
+    color_beta_x = 'teal'
+    color_beta_y = 'peru'
+    color_eta    = 'slategray'
+
+    def style_axis(ax):
+        ax.set_facecolor('white')
+        ax.grid(True, which='both', color='gray', linestyle=':', linewidth=0.5)
+        ax.tick_params(direction='in', top=True, right=True)
+        for spine in ('top', 'right', 'bottom', 'left'):
+            ax.spines[spine].set_visible(True)
+            ax.spines[spine].set_color('black')
+
+    tw = data.get('Twiss', None)
+    has_twiss = tw is not None
+
+    if has_twiss:
+        for key in ('beta_x', 'beta_y'):
+            if key not in tw:
+                raise KeyError(f"Missing Twiss key: '{key}'.")
+        eta_key = 'eta_x' if 'eta_x' in tw else ('eta' if 'eta' in tw else None)
+        if eta_key is None:
+            raise KeyError("Missing Twiss key: 'eta_x' (or 'eta').")
+
+        beta_x = np.asarray(tw['beta_x'], dtype=float)
+        beta_y = np.asarray(tw['beta_y'], dtype=float)
+        eta    = np.asarray(tw[eta_key], dtype=float)
+        for arr, name in ((beta_x, 'beta_x'), (beta_y, 'beta_y'), (eta, eta_key)):
+            if arr.ndim != 1 or arr.size != s.size:
+                raise ValueError(f"'{name}' must be 1D with len == len(s).")
+            if not np.isfinite(arr).all():
+                raise ValueError(f"'{name}' must be finite.")
+
+        fig, (axB, axTw) = plt.subplots(
+            nrows=2, ncols=1, sharex=True, figsize=(9, 7),
+            gridspec_kw={'height_ratios': [1, 1]}
+        )
+        fig.subplots_adjust(hspace=0.25)
+        fig.suptitle("Magnetic field and Twiss parameters vs s",
+                     fontsize=16 * k, x=0.5)
+
+        style_axis(axB)
+        labels = []
+        for y, lbl, col in ((B[:, 0], 'Bx', color_Bx),
+                            (B[:, 1], 'By', color_By),
+                            (B[:, 2], 'Bz', color_Bz)):
+            if np.any(y != 0):
+                axB.plot(s, y, color=col, lw=1.5, label=lbl)
+                axB.fill_between(s, y, 0.0, facecolor=col, alpha=0.5)
+                labels.append(lbl)
+        if labels:
+            axB.legend(loc='upper right', frameon=True)
+        axB.set_ylabel('B [T]')
+
+        style_axis(axTw)
+        axTw.plot(s, beta_x, color=color_beta_x, lw=1.5, label=r'$\beta_x$')
+        axTw.plot(s, beta_y, color=color_beta_y, lw=1.5, label=r'$\beta_y$')
+        axTw.set_ylabel(r'$\beta$ [m]', color='black')
+        axTw.legend(loc='upper left', frameon=True)
+
+        axTw2 = axTw.twinx()
+        axTw2.tick_params(direction='in', top=True, right=True)
+        axTw2.plot(s, eta, color=color_eta, lw=1.5, label=r'$\eta_x$')
+        axTw2.set_ylabel(r'$\eta_x$ [m]', color=color_eta)
+
+        axTw.set_xlabel('s [m]')
+        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        plt.show()
+
+    else:
+        fig, axB = plt.subplots(figsize=(9, 4.5))
+        fig.suptitle("Magnetic field vs s", fontsize=16 * k, x=0.5)
+        style_axis(axB)
+
+        axB.plot(s, B[:, 0], color=color_Bx, lw=1.5, label='Bx')
+        axB.fill_between(s, B[:, 0], 0.0, facecolor=color_Bx, alpha=0.5)
+        axB.plot(s, B[:, 1], color=color_By, lw=1.5, label='By')
+        axB.fill_between(s, B[:, 1], 0.0, facecolor=color_By, alpha=0.5)
+
+        axB.set_ylabel('B [T]')
+        axB.set_xlabel('s [m]')
+        axB.legend(loc='upper right', frameon=True)
+
+        plt.tight_layout()
+        plt.show()
+        
 #***********************************************************************************
 # Wavefront
 #***********************************************************************************
+srw_cmap = LinearSegmentedColormap.from_list(
+    "srw_bw",
+    [(0.0, "black"), (1.0, "white")],
+)
 
-def plot_wavefront(wfr: dict, cuts: bool = True, show_phase: bool = True, **kwargs) -> None:
+igor_colors = [
+    (0.0, (000/255, 000/255, 000/255, 1)),   # igor cold warm (brighter)
+    (0.2, (000/255, 145/255, 232/255, 1)),
+    (0.4, (128/255,  73/255, 116/255, 1)),
+    (0.6, (255/255, 000/255, 000/255, 1)),
+    (0.8, (255/255, 124/255,   2/255, 1)),
+    (1.0, (255/255, 240/255,  48/255, 1)),
+]
+
+igor_cmap = LinearSegmentedColormap.from_list("igor", igor_colors)
+
+
+def plot_wavefront(
+    wfr: dict,
+    cuts: bool = True,
+    show_phase: bool = True,
+    log_intensity: bool = False,
+    **kwargs,
+) -> None:
     """
     Plot wavefront intensity and optionally the phase from a wavefront dictionary.
 
@@ -182,45 +337,113 @@ def plot_wavefront(wfr: dict, cuts: bool = True, show_phase: bool = True, **kwar
         - If cuts=False: Only the 2D intensity map.
     Phase map is shown at the end if requested, with optional unwrapping.
 
-    Args:
-        wfr (dict): Dictionary returned by `write_wavefront` or `read_wavefront`.
-        cuts (bool, optional): Whether to include 1D cuts in the plot (default: True).
-        show_phase (bool, optional): Whether to plot the phase maps (default: True).
-        **kwargs:
-            k (float, optional): Scaling factor for fonts and titles (default: 1).
-            vmin (float, optional): Minimum value for intensity color scale.
-            vmax (float, optional): Maximum value for intensity color scale.
-            unwrap (bool, optional): Whether to unwrap the phase before plotting (default: True).
+    Intensity can be shown either in linear scale (default) or logarithmic scale
+    using Matplotlib's log normalization for the 2D map and semilogy for the cuts.
+
+    Parameters
+    ----------
+    wfr : dict
+        Dictionary returned by `write_wavefront` or `read_wavefront`.
+    cuts : bool, optional
+        Whether to include 1D cuts in the plot (default: True).
+    show_phase : bool, optional
+        Whether to plot the phase maps (default: True).
+    log_intensity : bool, optional
+        If True, use log scale for intensity (2D via LogNorm, cuts via semilogy).
+        Phase is always plotted in linear scale (default: False).
+    **kwargs :
+        k : float, optional
+            Scaling factor for fonts and titles (default: 1).
+        vmin : float, optional
+            Minimum value for intensity color scale (linear units).
+        vmax : float, optional
+            Maximum value for intensity color scale (linear units).
+        unwrap : bool, optional
+            Whether to unwrap the phase before plotting (default: True).
+        cmap : str, optional
+            Colormap for intensity. Can be any Matplotlib cmap name (e.g. 'viridis'),
+            or the special keywords:
+                - 'srw'  : black → white
+                - 'igor' : black → navy → darkred → red → orange → yellow
+            Default is 'jet'.
     """
-    k = kwargs.get('k', 1)
-    vmin = kwargs.get('vmin', None)
-    vmax = kwargs.get('vmax', None)
-    unwrap= kwargs.get('unwrap', True)
-    # mask_phase = kwargs.get('mask_phase', True)
+    k = kwargs.get("k", 1)
+    vmin = kwargs.get("vmin", None)
+    vmax = kwargs.get("vmax", None)
+    unwrap = kwargs.get("unwrap", True)
+    cmap_name = kwargs.get("cmap", "jet")
+
+    if cmap_name == "srw":
+        cmap_intensity = srw_cmap
+    elif cmap_name == "igor":
+        cmap_intensity = igor_cmap
+    else:
+        cmap_intensity = cmap_name 
 
     start_plotting(k)
 
-    x = wfr['axis']['x'] * 1e3  # mm
-    y = wfr['axis']['y'] * 1e3  # mm
+    x = wfr["axis"]["x"] * 1e3  # mm
+    y = wfr["axis"]["y"] * 1e3  # mm
     X, Y = np.meshgrid(x, y)
 
-    dx = wfr['axis']['x'][1]-wfr['axis']['x'][0]
-    dy = wfr['axis']['y'][1]-wfr['axis']['y'][0]
+    dx = wfr["axis"]["x"][1] - wfr["axis"]["x"][0]
+    dy = wfr["axis"]["y"][1] - wfr["axis"]["y"][0]
 
-    fctr =(wfr['axis']['x'][-1]-wfr['axis']['x'][0])/(wfr['axis']['y'][-1]-wfr['axis']['y'][0])
-   
-    for pol, data in wfr['intensity'].items():
+    fctr = (wfr["axis"]["x"][-1] - wfr["axis"]["x"][0]) / (
+        wfr["axis"]["y"][-1] - wfr["axis"]["y"][0]
+    )
 
-        flux = np.sum(data*dx*1E3*dy*1E3)
-        fig = plt.figure(figsize=(4.2*fctr, 4))
-        fig.suptitle(f"({pol}) | flux: {flux:.2e} ph/s/0.1%bw", fontsize=16 * k, x=0.5)
+    for pol, data in wfr["intensity"].items():
+        flux = np.sum(data * dx * 1e3 * dy * 1e3)
+
+        if log_intensity:
+            data_masked = np.ma.masked_less_equal(data, 0.0)
+            positive = data[data > 0]
+
+            if positive.size == 0:
+                continue
+
+            vmin_eff = vmin if (vmin is not None and vmin > 0) else positive.min()
+            vmax_eff = vmax if (vmax is not None and vmax > vmin_eff) else data.max()
+            norm = LogNorm(vmin=vmin_eff, vmax=vmax_eff)
+
+            intensity_label = r"ph/s/mm$^2$/0.1%bw (log scale)"
+            vmin_lin = None
+            vmax_lin = None
+        else:
+            data_masked = data
+            norm = None
+            intensity_label = r"ph/s/mm$^2$/0.1%bw"
+            vmin_lin = vmin
+            vmax_lin = vmax
+
+        fig = plt.figure(figsize=(4.2 * fctr, 4))
+        fig.suptitle(
+            f"({pol}) | flux: {flux:.2e} ph/s/0.1%bw",
+            fontsize=16 * k,
+            x=0.5,
+        )
         ax = fig.add_subplot(111)
-        im = ax.pcolormesh(X, Y, data, shading='auto', cmap='terrain', vmin=vmin, vmax=vmax)
-        ax.set_aspect('equal')
-        ax.set_xlabel('x [mm]')
-        ax.set_ylabel('y [mm]')
-        ax.grid(True, linestyle=':', linewidth=0.5)
-        cb = plt.colorbar(im, ax=ax, fraction=0.046 * 1, pad=0.04, format='%.0e')
+
+        im = ax.pcolormesh(
+            X,
+            Y,
+            data_masked,
+            shading="auto",
+            cmap=cmap_intensity,
+            vmin=vmin_lin,
+            vmax=vmax_lin,
+            norm=norm,
+        )
+
+        ax.set_aspect("equal")
+        ax.set_xlabel("x [mm]")
+        ax.set_ylabel("y [mm]")
+        ax.grid(True, linestyle=":", linewidth=0.5)
+
+        cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cb.set_label(intensity_label)
+
         plt.show()
 
         if cuts:
@@ -228,42 +451,59 @@ def plot_wavefront(wfr: dict, cuts: bool = True, show_phase: bool = True, **kwar
             ix0 = np.argmin(np.abs(x))
             iy0 = np.argmin(np.abs(y))
 
-            ax1.plot(x, data[iy0, :], color='darkred', lw=1.5)
-            ax1.set_title('Hor. cut (y=0)')
-            ax1.set_xlabel('x [mm]')
-            ax1.set_ylabel('ph/s/mm²/0.1%bw')
-            ax1.grid(True, linestyle=':', linewidth=0.5)
-            ax1.tick_params(direction='in', top=True, right=True)
-            ax2.plot(y, data[:, ix0], color='darkred', lw=1.5)
-            ax2.set_title('Ver. cut (x=0)')
-            ax2.set_xlabel('y [mm]')
-            ax2.grid(True, linestyle=':', linewidth=0.5)
-            ax2.tick_params(direction='in', top=True, right=True)
+            hor = data[iy0, :]
+            ver = data[:, ix0]
+
+            if log_intensity:
+                hor_plot = np.where(hor > 0, hor, np.nan)
+                ver_plot = np.where(ver > 0, ver, np.nan)
+
+                ax1.semilogy(x, hor_plot, color="darkred", lw=1.5)
+                ax2.semilogy(y, ver_plot, color="darkred", lw=1.5)
+            else:
+                ax1.plot(x, hor, color="darkred", lw=1.5)
+                ax2.plot(y, ver, color="darkred", lw=1.5)
+
+            ax1.set_title("Hor. cut (y=0)")
+            ax1.set_xlabel("x [mm]")
+            ax1.set_ylabel(intensity_label)
+            ax1.grid(True, linestyle=":", linewidth=0.5)
+            ax1.tick_params(direction="in", top=True, right=True)
+
+            ax2.set_title("Ver. cut (x=0)")
+            ax2.set_xlabel("y [mm]")
+            ax2.grid(True, linestyle=":", linewidth=0.5)
+            ax2.tick_params(direction="in", top=True, right=True)
+
             plt.tight_layout(rect=[0, 0, 1, 0.95])
-            plt.show()      
+            plt.show()
 
         if show_phase:
-            phase = wfr['phase'][pol]
+            phase = wfr["phase"][pol]
             if unwrap:
                 phase = unwrap_phase(phase)
-                phase -=phase[phase.shape[0]//2, phase.shape[1]//2]
-                cmapref = 'terrain'
+                phase -= phase[phase.shape[0] // 2, phase.shape[1] // 2]
+                cmapref = "terrain"
             else:
-                cmapref = 'coolwarm'                
-            # if mask_phase:
-            #     data /= np.max(data)
-            #     phase = np.ma.masked_where(data < 1E-4, phase)
-            Rx = wfr['wfr'].Rx
-            Ry = wfr['wfr'].Ry
-            fig = plt.figure(figsize=(4.2*fctr, 4))
-            fig.suptitle(f"({pol}) | residual phase - Rx = {Rx:.2f}m, Ry = {Ry:.2f}m", fontsize=16 * k, x=0.5)
+                cmapref = "coolwarm"
+
+            Rx = wfr["wfr"].Rx
+            Ry = wfr["wfr"].Ry
+
+            fig = plt.figure(figsize=(4.2 * fctr, 4))
+            fig.suptitle(
+                f"({pol}) | residual phase - Rx = {Rx:.2f} m, Ry = {Ry:.2f} m",
+                fontsize=16 * k,
+                x=0.5,
+            )
             ax = fig.add_subplot(111)
-            im = ax.pcolormesh(X, Y, phase, shading='auto', cmap=cmapref)#, vmin=-np.pi, vmax=np.pi)
-            ax.set_aspect('equal')
-            ax.set_xlabel('x [mm]')
-            ax.set_ylabel('y [mm]')
-            ax.grid(True, linestyle=':', linewidth=0.5)
-            cb = plt.colorbar(im, ax=ax, fraction=0.046 * 1, pad=0.04)
+            im = ax.pcolormesh(X, Y, phase, shading="auto", cmap=cmapref)
+            ax.set_aspect("equal")
+            ax.set_xlabel("x [mm]")
+            ax.set_ylabel("y [mm]")
+            ax.grid(True, linestyle=":", linewidth=0.5)
+            cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            cb.set_label("phase [rad]")
             plt.show()
 
             if cuts:
@@ -271,19 +511,21 @@ def plot_wavefront(wfr: dict, cuts: bool = True, show_phase: bool = True, **kwar
                 ix0 = np.argmin(np.abs(x))
                 iy0 = np.argmin(np.abs(y))
 
-                ax1.plot(x, phase[iy0, :], color='darkred', lw=1.5)
-                ax1.set_title('Hor. cut (y=0)')
-                ax1.set_xlabel('x [mm]')
-                ax1.set_ylabel('rad')
-                ax1.grid(True, linestyle=':', linewidth=0.5)
-                ax1.tick_params(direction='in', top=True, right=True)
-                ax2.plot(y, phase[:, ix0], color='darkred', lw=1.5)
-                ax2.set_title('Ver. cut (x=0)')
-                ax2.set_xlabel('y [mm]')
-                ax2.grid(True, linestyle=':', linewidth=0.5)
-                ax2.tick_params(direction='in', top=True, right=True)
+                ax1.plot(x, phase[iy0, :], color="darkred", lw=1.5)
+                ax1.set_title("Hor. cut (y=0)")
+                ax1.set_xlabel("x [mm]")
+                ax1.set_ylabel("rad")
+                ax1.grid(True, linestyle=":", linewidth=0.5)
+                ax1.tick_params(direction="in", top=True, right=True)
+
+                ax2.plot(y, phase[:, ix0], color="darkred", lw=1.5)
+                ax2.set_title("Ver. cut (x=0)")
+                ax2.set_xlabel("y [mm]")
+                ax2.grid(True, linestyle=":", linewidth=0.5)
+                ax2.tick_params(direction="in", top=True, right=True)
+
                 plt.tight_layout(rect=[0, 0, 1, 0.95])
-                plt.show() 
+                plt.show()
 
 #***********************************************************************************
 # Power Density

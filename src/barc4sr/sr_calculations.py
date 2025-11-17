@@ -70,9 +70,11 @@ def electron_trajectory(**kwargs) -> dict:
         raise ValueError("Please, provide either json_file or light_source - not both (see function docstring)")
 
     if json_file is not None:
-        bl = syned_dictionary(json_file, None, 10, 1e-3, 1e-3, 0, 0)
+        bl = syned_dictionary(json_file, 100, 1e-3, 1e-3, 0, 0)
     if light_source is not None:
-        bl = barc4sr_dictionary(light_source, None, 10, 1e-3, 1e-3, 0, 0)
+        bl = barc4sr_dictionary(light_source, 100, 1e-3, 1e-3, 0, 0)
+
+    calc_etraj = True
 
     if bl['Class'] == 'bm':
         source_type = 'bending magnet'
@@ -87,13 +89,12 @@ def electron_trajectory(**kwargs) -> dict:
 
     if verbose: print(f"{function_txt} please wait...")
 
-    magfield_central_position = kwargs.get('magfield_central_position', 0)
-    ebeam_initial_position = kwargs.get('ebeam_initial_position', 0)
+    ebeam_initial_condition = kwargs.get('ebeam_initial_condition', 6*[0])
 
-    eBeam, magFldCnt, eTraj = set_light_source(bl, True, bl['Class'],
-                                               ebeam_initial_position=ebeam_initial_position,
-                                               magfield_central_position=magfield_central_position,
-                                               verbose=verbose)
+    eBeam, magFldCnt, eTraj = set_light_source(bl,
+                                               calc_etraj,
+                                               ebeam_initial_condition,
+                                               verbose)
 
     if verbose: print('completed')
     if verbose: print_elapsed_time(t0)
@@ -161,11 +162,13 @@ def wavefront(photon_energy: float,
     ver_slit_cen = kwargs.get('ver_slit_cen', 0)
 
     if json_file is not None:
-        bl = syned_dictionary(json_file, None, observation_point, 
+        bl = syned_dictionary(json_file, observation_point, 
                               hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
     if light_source is not None:
-        bl = barc4sr_dictionary(light_source, None, observation_point, 
+        bl = barc4sr_dictionary(light_source, observation_point, 
                                 hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
+
+    calc_etraj = False
 
     if bl['Class'] == 'bm':
         source_type = 'bending magnet'
@@ -185,12 +188,11 @@ def wavefront(photon_energy: float,
 
     parallel = kwargs.get('parallel', False)
 
-    magfield_central_position = kwargs.get('magfield_central_position', 0)
-    ebeam_initial_position = kwargs.get('ebeam_initial_position', 0)
+    ebeam_initial_condition = kwargs.get('ebeam_initial_condition', 6*[0])
 
-    eBeam, magFldCnt, eTraj = set_light_source(bl, False, bl['Class'],
-                                               ebeam_initial_position=ebeam_initial_position,
-                                               magfield_central_position=magfield_central_position,
+    eBeam, magFldCnt, eTraj = set_light_source(bl,
+                                               calc_etraj, 
+                                               ebeam_initial_condition,
                                                verbose=verbose)
     
     calc_txt = "> Performing monochromatic wavefront calculation (___CALC___ simulation)"
@@ -214,19 +216,21 @@ def wavefront(photon_energy: float,
                                 photon_energy,
                                 hor_slit_n,
                                 ver_slit_n,
-                                bl['Class']) 
+                                0) 
     else:
         # TODO reimplement ME calculation
         pass
 
     if verbose: print('completed')
 
-    wfrDict = write_wavefront(file_name, wfr, radiation_polarisation, number_macro_electrons)
+    wfrDict = write_wavefront(file_name, wfr, radiation_polarisation,
+                              number_macro_electrons, observation_point)
     
     if verbose: print(f"{function_txt} finished.")
     if verbose: print_elapsed_time(t0)
 
     return wfrDict
+
 
 #***********************************************************************************
 # power distribution
@@ -283,12 +287,14 @@ def power_density(observation_point: float,
     ver_slit_cen = kwargs.get('ver_slit_cen', 0)
 
     if json_file is not None:
-        bl = syned_dictionary(json_file, None, observation_point, 
+        bl = syned_dictionary(json_file, observation_point, 
                               hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
     if light_source is not None:
-        bl = barc4sr_dictionary(light_source, None, observation_point, 
+        bl = barc4sr_dictionary(light_source, observation_point, 
                                 hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
-        
+
+    calc_etraj = False
+
     if bl['Class'] == 'bm':
         source_type = 'bending magnet'
     elif bl['Class'] == 'u':
@@ -298,18 +304,17 @@ def power_density(observation_point: float,
     elif bl['Class'] == 'arb':
         source_type = 'arbitrary magnetic field'
         
-    function_txt = f"{source_type} power density using SRW:"
+    function_txt = f"{source_type} wavefront for a fixed energy using SRW:"
 
     if verbose: print(f"{function_txt} please wait...")
 
     radiation_polarisation = kwargs.get('radiation_polarisation', 'T')
 
-    magfield_central_position = kwargs.get('magfield_central_position', 0)
-    ebeam_initial_position = kwargs.get('ebeam_initial_position', 0)
+    ebeam_initial_condition = kwargs.get('ebeam_initial_condition', 6*[0])
 
-    eBeam, magFldCnt, eTraj = set_light_source(bl, False, bl['Class'],
-                                               ebeam_initial_position=ebeam_initial_position,
-                                               magfield_central_position=magfield_central_position,
+    eBeam, magFldCnt, eTraj = set_light_source(bl,
+                                               calc_etraj, 
+                                               ebeam_initial_condition,
                                                verbose=verbose)
     
     pwr = srwlibCalcPowDenSR(bl, eBeam, magFldCnt, hor_slit_n, ver_slit_n)
@@ -613,17 +618,102 @@ def coherent_modes(photon_energy: float,
 # spectral wavefront calculation - 3D datasets
 #***********************************************************************************
 
-def emitted_radiation():
-    raise NotImplementedError('Ohhh ohhh we are half way there! Ohhh ohhh living on a prayer! - this function is not implemented yet!')
+def emitted_radiation(energy_min: float,
+                      energy_max: float,
+                      num_points: int,
+                      observation_point: float,
+                      hor_slit: float, 
+                      hor_slit_n: int,
+                      ver_slit: float,
+                      ver_slit_n: int,
+                      **kwargs) -> dict:
+    
+    """
+    Calculates the spatial and spectral SR distribution using SRW
+        Args:
+        energy_min (float): Minimum photon energy [eV].
+        energy_max (float): Maximum photon energy [eV].
+        num_points (int): Number of photon energy points.
+        observation_point (float): Distance to the observation point
+        hor_slit (float): Horizontal slit size [m].
+        ver_slit (float): Vertical slit size [m].
 
+    Optional Args (kwargs):
+        file_name (str): The name of the output file.
+        json_file (optional): The path to the SYNED JSON configuration file.
+        light_source (optional): barc4sr.aux_utils.SynchrotronSource or inheriting class
+        hor_slit_cen (float): Horizontal slit center position [m]. Default is 0.
+        ver_slit_cen (float): Vertical slit center position [m]. Default is 0.
+        radiation_polarisation (str): Polarisation component to be extracted. Default is 'T'.
+            = LH   - Linear Horizontal (0); 
+            = LV   - Linear Vertical   (1); 
+            = L45  - Linear 45°        (2); 
+            = L135 - Linear 135°       (3); 
+            = CR   - Circular Right    (4); 
+            = CL   - Circular Left     (5); 
+            = T    - Total             (6);
+        energy_sampling (int): Energy sampling method (0: linear, 1: logarithmic). Default is 0.
+        number_macro_electrons (int): Number of macro electrons. Default is 1.
+        parallel (bool): Whether to use parallel computation. Default is False.
+        verbose (bool): If True, print log information
+    """
+    
+    t0 = time.time()
 
+    verbose = kwargs.get('verbose', True)
+    json_file = kwargs.get('json_file', None)
+    light_source = kwargs.get('light_source', None)
+    file_name = kwargs.get('file_name', None)
+    energy_sampling = kwargs.get('energy_sampling', 0)
+    parallel = kwargs.get('parallel', False)
+
+    if json_file is None and light_source is None:
+        raise ValueError("Please, provide either json_file or light_source (see function docstring)")
+    if json_file is not None and light_source is not None:
+        raise ValueError("Please, provide either json_file or light_source - not both (see function docstring)")
+
+    hor_slit_cen = kwargs.get('hor_slit_cen', 0)
+    ver_slit_cen = kwargs.get('ver_slit_cen', 0)
+
+    if json_file is not None:
+        bl = syned_dictionary(json_file, None, observation_point, 
+                              hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
+    if light_source is not None:
+        bl = barc4sr_dictionary(light_source, None, observation_point, 
+                                hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
+        
+    if bl['Class'] == 'bm':
+        source_type = 'bending magnet'
+    elif bl['Class'] == 'u':
+        source_type = 'undulator'
+    elif bl['Class'] == 'w':
+        source_type = 'wiggler'
+    elif bl['Class'] == 'arb':
+        source_type = 'arbitrary magnetic field'
+        
+    function_txt = f"{source_type} spectrum using SRW:"
+
+    if verbose: print(f"{function_txt} please wait...")
+
+    radiation_polarisation = kwargs.get('radiation_polarisation', 'T')
+    number_macro_electrons = kwargs.get('number_macro_electrons', 0)
+
+    parallel = kwargs.get('parallel', False)
+
+    magfield_central_position = kwargs.get('magfield_central_position', 0)
+    ebeam_initial_position = kwargs.get('ebeam_initial_position', 0)
+
+    eBeam, magFldCnt, eTraj = set_light_source(bl, False, bl['Class'],
+                                               ebeam_initial_position=ebeam_initial_position,
+                                               magfield_central_position=magfield_central_position,
+                                               verbose=verbose)
 
 #***********************************************************************************
 # tuning curves
 #***********************************************************************************
 
 def tuning_curves():
-    raise NotImplementedError('Ohhh ohhh we are half way there! Ohhh ohhh living on a prayer! - this function is not implemented yet!')
+    raise NotImplementedError('Ohhh ohhh we are half way there! Ohhh ohhh this function is not implemented yet!')
 
 
 if __name__ == '__main__':

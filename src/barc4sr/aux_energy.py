@@ -37,7 +37,6 @@ def get_gamma(E: float) -> float:
     """
     return E * 1e9 / (MASS * LIGHT ** 2) * CHARGE
 
-
 def energy_wavelength(value: float, unity: str) -> float:
     """
     Converts energy to wavelength and vice versa.
@@ -72,7 +71,6 @@ def energy_wavelength(value: float, unity: str) -> float:
 
     return PLANCK * LIGHT / CHARGE / (value * factor)
 
-
 def generate_logarithmic_energy_array(emin: float, emax: float, resonant_energy: float, 
                                       stepsize: float, verbose: bool=True) -> np.ndarray:
     """
@@ -95,7 +93,6 @@ def generate_logarithmic_energy_array(emin: float, emax: float, resonant_energy:
     steps = np.linspace(n_steps_neg, n_steps_pos, n_steps + 1)
     return resonant_energy * np.exp(steps * stepsize)
 
-
 def smart_split_energy(energy_array, num_cores):
         """
         Splits an array of energy values into chunks based on a weighted distribution.
@@ -117,7 +114,6 @@ def smart_split_energy(energy_array, num_cores):
 
         energy_chunks = [energy_array[split_indices[i]:split_indices[i+1]] for i in range(num_cores)]
         return energy_chunks
-    
     
 def get_undulator_emission_energy(und_per: float, K: float, ring_e: float, n: int = 1, theta: float = 0) -> float:
     """

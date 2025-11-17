@@ -14,7 +14,7 @@ __changed__ = '16/JUL/2025'
 import os
 import pickle
 from array import array
-from copy import copy
+from copy import copy, deepcopy
 
 import h5py as h5
 import numpy as np
@@ -177,7 +177,8 @@ def read_electron_trajectory_dat(file_path: str) -> dict:
 # Wavevfront
 #***********************************************************************************
    
-def write_wavefront(file_name: str, wfr: srwlib.SRWLWfr, selected_polarisations: list, number_macro_electrons: int) -> dict:
+def write_wavefront(file_name: str, wfr: srwlib.SRWLWfr, selected_polarisations: list, 
+                    number_macro_electrons: int, propagation_distance: float=None) -> dict:
     """
     Writes wavefront data (intensity, phase, and wavefront object) to an HDF5 file.
 
@@ -204,6 +205,7 @@ def write_wavefront(file_name: str, wfr: srwlib.SRWLWfr, selected_polarisations:
         if not s.isupper():
             selected_polarisations[i] = s.upper()
 
+    wfr_qpt = deepcopy(wfr)
     wfrDict = {'wfr': wfr}
 
     wfrDict.update({'axis':{'x': np.linspace(wfr.mesh.xStart, wfr.mesh.xFin, wfr.mesh.nx),
@@ -218,49 +220,49 @@ def write_wavefront(file_name: str, wfr: srwlib.SRWLWfr, selected_polarisations:
         print(">>>>> No valid polarisation found - defaulting to 'T'")
         return write_wavefront(file_name, wfr, ['T'], number_macro_electrons)
     
+    if propagation_distance is None:
+        Rx, Ry = wfr.Rx, wfr.Ry
+    else:
+        Rx, Ry = propagation_distance, propagation_distance
+
     wfrDict.update({'energy':wfr.mesh.eStart})
     wfrDict.update({'intensity':{}})
     wfrDict.update({'phase':{}})
-    wfrDict.update({'Rx':wfr.Rx, 'Ry':wfr.Ry})
+    wfrDict.update({'Rx':Rx, 'Ry':Ry})
 
     _inIntType = int(number_macro_electrons)
     _inDepType = 3
 
-    Rx, Ry = copy(wfr.Rx), copy(wfr.Ry)
+    # X, Y = np.meshgrid(wfrDict['axis']['x'], wfrDict['axis']['y'])
+    # spherical_phase = Rx - np.sqrt(Rx**2 - X**2 - (Rx/Ry)**2 * Y**2)
+    # amplitude_transmission = np.ones((wfr.mesh.ny, wfr.mesh.nx), dtype='float64')
+    # arTr = np.empty((2 * wfr.mesh.nx * wfr.mesh.ny), dtype=spherical_phase.dtype)
+    # arTr[0::2] = np.reshape(amplitude_transmission,(wfr.mesh.nx*wfr.mesh.ny))
+    # arTr[1::2] = np.reshape(-spherical_phase,(wfr.mesh.nx*wfr.mesh.ny))
+    # spherical_wave = srwlib.SRWLOptT(wfr.mesh.nx, wfr.mesh.ny, 
+    #                                  wfrDict['axis']['x'][-1]-wfrDict['axis']['x'][0],
+    #                                  wfrDict['axis']['y'][-1]-wfrDict['axis']['y'][0],
+    #                                  _arTr=arTr, _extTr=1, _Fx=Rx, _Fy=Ry, _x=0, _y=0)
 
-    X, Y = np.meshgrid(wfrDict['axis']['x'], wfrDict['axis']['y'])
-    spherical_phase = Rx - np.sqrt(Rx**2 - X**2 - (Rx/Ry)**2 * Y**2)
-    amplitude_transmission = np.ones((wfr.mesh.ny, wfr.mesh.nx), dtype='float64')
-    arTr = np.empty((2 * wfr.mesh.nx * wfr.mesh.ny), dtype=spherical_phase.dtype)
-    arTr[0::2] = np.reshape(amplitude_transmission,(wfr.mesh.nx*wfr.mesh.ny))
-    arTr[1::2] = np.reshape(-spherical_phase,(wfr.mesh.nx*wfr.mesh.ny))
-    spherical_wave = srwlib.SRWLOptT(wfr.mesh.nx, wfr.mesh.ny, 
-                                     wfrDict['axis']['x'][-1]-wfrDict['axis']['x'][0],
-                                     wfrDict['axis']['y'][-1]-wfrDict['axis']['y'][0],
-                                     _arTr=arTr, _extTr=1, _Fx=Rx, _Fy=Ry, _x=0, _y=0)
-
-    # spherical_wave = srwlib.SRWLOptL(_Fx=Rx, _Fy=Ry)
+    quadratic_phase_term = srwlib.SRWLOptL(_Fx=Rx, _Fy=Ry)
     pp_spherical_wave =  [0, 0, 1.0, 1, 0, 1., 1., 1., 1., 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    OE = [spherical_wave]
+    OE = [quadratic_phase_term]
     PP = [pp_spherical_wave]
     
     optBL = srwlib.SRWLOptC(OE, PP)
-    srwlib.srwl.PropagElecField(wfr, optBL)
+    srwlib.srwl.PropagElecField(wfr_qpt, optBL)
 
     for polarisation, index in zip(selected_polarisations, selected_indices):
         _inPol = index
 
-        arInt = array('f', [0]*wfr.mesh.nx*wfr.mesh.ny)
-        srwlib.srwl.CalcIntFromElecField(arInt, wfr, _inPol, _inIntType, _inDepType, wfr.mesh.eStart, 0, 0)
-        wfrDict['intensity'].update({polarisation:np.asarray(arInt, dtype="float64").reshape((wfr.mesh.ny, wfr.mesh.nx))})
+        arInt = array('f', [0]*wfr_qpt.mesh.nx*wfr_qpt.mesh.ny)
+        srwlib.srwl.CalcIntFromElecField(arInt, wfr_qpt, _inPol, _inIntType, _inDepType, wfr_qpt.mesh.eStart, 0, 0)
+        wfrDict['intensity'].update({polarisation:np.asarray(arInt, dtype="float64").reshape((wfr_qpt.mesh.ny, wfr_qpt.mesh.nx))})
 
-        arPh = array('d', [0]*wfr.mesh.nx*wfr.mesh.ny)
-        srwlib.srwl.CalcIntFromElecField(arPh, wfr, _inPol, 4, _inDepType, wfr.mesh.eStart, 0, 0)
-        # pahse = unwrap_phase(np.asarray(arPh, dtype="float64").reshape((wfr.mesh.ny, wfr.mesh.nx)))
-        phase = np.asarray(arPh, dtype="float64").reshape((wfr.mesh.ny, wfr.mesh.nx))
+        arPh = array('d', [0]*wfr_qpt.mesh.nx*wfr_qpt.mesh.ny)
+        srwlib.srwl.CalcIntFromElecField(arPh, wfr_qpt, _inPol, 4, _inDepType, wfr_qpt.mesh.eStart, 0, 0)
+        phase = np.asarray(arPh, dtype="float64").reshape((wfr_qpt.mesh.ny, wfr_qpt.mesh.nx))
         wfrDict['phase'].update({polarisation:phase})
-
-    wfr.Rx, wfr.Ry = Rx, Ry
 
     if file_name is not None:
         with h5.File(f'{file_name}_undulator_wfr.h5', 'w') as f:
@@ -318,7 +320,6 @@ def read_wavefront(file_name: str) -> dict:
 
         wfr = pickle.loads(group["wfr"][()])
 
-    # Extract Rx, Ry, energy from wavefront object
     Rx = getattr(wfr, "Rx", None)
     Ry = getattr(wfr, "Ry", None)
     energy = getattr(wfr.mesh, "eStart", None)
