@@ -41,202 +41,341 @@ PI = np.pi
 PLANCK = physical_constants["Planck constant"][0]
 Z0 = physical_constants["characteristic impedance of vacuum"][0]
 
+from typing import Optional, Tuple
+
+
 class ElectronBeam(object):
     """
-    Class for entering the electron beam parameters - this is based on the SRWLPartBeam class.
+    Container for electron beam second moments.
+
+    The canonical state is given by the six transverse second-order
+    moments: <x^2>, <x*xp>, <xp^2>, <y^2>, <y*yp>, <yp^2>.
+    RMS beam sizes and divergences are always derived on the fly
+    from these moments.
     """
-    def __init__(self, **kwargs) -> None:
+
+    CLASS_NAME = "ElectronBeam"
+
+    def __init__(
+        self,
+        *,
+        energy: Optional[float] = None,
+        energy_spread: Optional[float] = None,
+        current: Optional[float] = None,
+        number_of_bunches: int = 1,
+        moment_xx: Optional[float] = None,
+        moment_xxp: Optional[float] = None,
+        moment_xpxp: Optional[float] = None,
+        moment_yy: Optional[float] = None,
+        moment_yyp: Optional[float] = None,
+        moment_ypyp: Optional[float] = None,
+        verbose: bool = False
+    ) -> None:
         """
-        Initializes an instance of the ElectronBeam class.
+        Initialize an electron beam container.
 
-        Args:
-            **kwargs: Parameters for the electron beam:
-                - energy (float): Energy of the electron beam in GeV.
-                - energy_spread (float): RMS energy spread of the electron beam.
-                - current (float): Average current of the electron beam in Amperes.
-                - number_of_bunches (int): Number of bunches in the electron beam (default: 1).
-                - moment_xx (float): Second order moment: <(x-<x>)^2>.
-                - moment_xxp (float): Second order moment: <(x-<x>)(x'-<x'>)>.
-                - moment_xpxp (float): Second order moment: <(x'-<x'>)^2>.
-                - moment_yy (float): Second order moment: <(y-<y>)^2>.
-                - moment_yyp (float): Second order moment: <(y-<y>)(y'-<y'>)>.
-                - moment_ypyp (float): Second order moment: <(y'-<y'>)^2>.
+        Parameters
+        ----------
+        energy : float, optional
+            Beam energy in GeV.
+        energy_spread : float, optional
+            RMS relative energy spread (dE/E).
+        current : float, optional
+            Average beam current in A.
+        number_of_bunches : int, optional
+            Number of bunches in the ring.
+        moment_xx, moment_xxp, moment_xpxp : float, optional
+            Horizontal second-order moments <x^2>, <x*xp>, <xp^2>
+            in units of m^2, m*rad, rad^2.
+        moment_yy, moment_yyp, moment_ypyp : float, optional
+            Vertical second-order moments <y^2>, <y*yp>, <yp^2>
+            in units of m^2, m*rad, rad^2.
+        verbose : bool, optional
+            If True, print RMS beam sizes and divergences after initialization.
         """
-        self.CLASS_NAME = "ElectronBeam"
-        self.energy_in_GeV = kwargs.get("energy", None)
-        self.energy_spread = kwargs.get("energy_spread", None)
-        self.current = kwargs.get("current", None)
-        self.number_of_bunches = kwargs.get("number_of_bunches", 1)
+        self.energy_in_GeV = energy
+        self.energy_spread = energy_spread
+        self.current = current
+        self.number_of_bunches = number_of_bunches
 
-        self.moment_xx = kwargs.get("moment_xx", None)
-        self.moment_xxp = kwargs.get("moment_xxp", None)
-        self.moment_xpxp = kwargs.get("moment_xpxp", None)
-        self.moment_yy = kwargs.get("moment_yy", None)
-        self.moment_yyp = kwargs.get("moment_yyp", None)
-        self.moment_ypyp = kwargs.get("moment_ypyp", None)
+        self.moment_xx = moment_xx
+        self.moment_xxp = moment_xxp
+        self.moment_xpxp = moment_xpxp
+        self.moment_yy = moment_yy
+        self.moment_yyp = moment_yyp
+        self.moment_ypyp = moment_ypyp
 
-        moments_list = [
-            self.moment_xx, self.moment_xxp, self.moment_xpxp,
-            self.moment_yy, self.moment_yyp, self.moment_ypyp,
-        ]
-        if all(moment is not None for moment in moments_list):
-            self.to_rms()
+        moments = (
+            self.moment_xx,
+            self.moment_xxp,
+            self.moment_xpxp,
+            self.moment_yy,
+            self.moment_yyp,
+            self.moment_ypyp,
+        )
 
-    def from_twiss(self, energy: float, energy_spread: float, current: float, 
-                   beta_x: float, alpha_x: float, eta_x: float, etap_x: float, 
-                   beta_y: float, alpha_y: float, eta_y: float, etap_y: float,
-                   **kwargs) -> None:
+        self._initialised = all(m is not None for m in moments)
+
+        if verbose and self._initialised:
+            self.print_rms()
+
+    def _ensure_not_initialised(self) -> None:
+        if self._initialised:
+            raise RuntimeError(
+                "ElectronBeam is already initialised and cannot be reconfigured."
+            )
+
+    def from_twiss(
+        self,
+        energy: float,
+        energy_spread: float,
+        current: float,
+        beta_x: float,
+        alpha_x: float,
+        eta_x: float,
+        etap_x: float,
+        beta_y: float,
+        alpha_y: float,
+        eta_y: float,
+        etap_y: float,
+        *,
+        emittance: Optional[float] = None,
+        coupling: Optional[float] = None,
+        emittance_x: Optional[float] = None,
+        emittance_y: Optional[float] = None,
+        verbose: bool = False
+    ) -> None:
         """
-        Sets up electron beam internal data from Twiss parameters.
+        Initialize from Twiss parameters and emittances.
 
-        Args:
-            energy (float): Energy of the electron beam in GeV.
-            energy_spread (float): RMS energy spread of the electron beam.
-            current (float): Average current of the electron beam in Amperes.
-            beta_x (float): Horizontal beta-function in meters.
-            alpha_x (float): Horizontal alpha-function in radians.
-            eta_x (float): Horizontal dispersion function in meters.
-            etap_x (float): Horizontal dispersion function derivative in radians.
-            beta_y (float): Vertical beta-function in meters.
-            alpha_y (float): Vertical alpha-function in radians.
-            eta_y (float): Vertical dispersion function in meters.
-            etap_y (float): Vertical dispersion function derivative in radians.
+        Parameters
+        ----------
+        energy : float
+            Beam energy in GeV.
+        energy_spread : float
+            RMS relative energy spread (dE/E).
+        current : float
+            Average beam current in A.
+        beta_x, beta_y : float
+            Horizontal and vertical beta functions in m.
+        alpha_x, alpha_y : float
+            Horizontal and vertical alpha functions (dimensionless).
+        eta_x, eta_y : float
+            Horizontal and vertical dispersion functions in m.
+        etap_x, etap_y : float
+            Derivatives of dispersion in rad.
+        emittance : float, optional
+            Total emittance epsilon (used with coupling if
+            emittance_x and emittance_y are not given).
+        coupling : float, optional
+            Coupling ratio epsilon_y / epsilon_x when emittance is given.
+        emittance_x, emittance_y : float, optional
+            Horizontal and vertical emittances in m*rad.
+        verbose : bool, optional
+            If True, print RMS beam sizes and divergences after initialization.
 
-        Keyword Args for emittance and coupling or emittance_x and emittance_y:
-            emittance (float): Emittance of the electron beam.
-            coupling (float): Coupling coefficient between horizontal and vertical emittances.
-            emittance_x (float): Horizontal emittance in meters.
-            emittance_y (float): Vertical emittance in meters.
+        Raises
+        ------
+        RuntimeError
+            If the beam is already initialized.
+        ValueError
+            If emittance information is incomplete.
         """
-
-        emittance = kwargs.get('emittance')
-        coupling = kwargs.get('coupling')
-        emittance_x = kwargs.get('emittance_x')
-        emittance_y = kwargs.get('emittance_y')
+        self._ensure_not_initialised()
 
         if emittance_x is None or emittance_y is None:
             if emittance is None or coupling is None:
-                raise ValueError("Either emittance and coupling, or both emittance_x and emittance_y must be provided.")
-            emittance_x = emittance * (1 / (coupling + 1)) if emittance_x is None else emittance_x
-            emittance_y = emittance * (coupling / (coupling + 1)) if emittance_y is None else emittance_y
-
-        self.energy_in_GeV = energy
-        self.energy_spread = energy_spread
-        self.current = current
-        sigE2 = energy_spread**2
-        # <(x-<x>)^2>
-        self.moment_xx = emittance_x*beta_x + sigE2*eta_x*eta_x 
-        # <(x-<x>)(x'-<x'>)>          
-        self.moment_xxp = -emittance_x*alpha_x + sigE2*eta_x*etap_x  
-        # <(x'-<x'>)^2>      
-        self.moment_xpxp = emittance_x*(1 + alpha_x*alpha_x)/beta_x + sigE2*etap_x*etap_x 
-        #<(y-<y>)^2>    
-        self.moment_yy = emittance_y*beta_y + sigE2*eta_y*eta_y 
-        #<(y-<y>)(y'-<y'>)>          
-        self.moment_yyp = -emittance_y*alpha_y + sigE2*eta_y*etap_y
-        #<(y'-<y'>)^2>        
-        self.moment_ypyp = emittance_y*(1 + alpha_y*alpha_y)/beta_y + sigE2*etap_y*etap_y     
-
-        self.to_rms()
-
-    def from_rms(self, energy: float, energy_spread: float, current: float, x: float, xp: float,
-                 y: float, yp: float, xxp: float = 0, yyp: float = 0) -> None:
-        """
-        Sets up electron beam internal data from RMS values.
-
-        Args:
-            energy (float): Energy of the electron beam in GeV.
-            energy_spread (float): RMS energy spread of the electron beam.
-            current (float): Average current of the electron beam in Amperes.
-            x (float): Horizontal RMS size in meters.
-            xp (float): Horizontal RMS divergence in radians.
-            y (float): Vertical RMS size in meters.
-            yp (float): Vertical RMS divergence in radians.
-            xxp (float): Cross-correlation term between x and xp in meters. Defaults to 0.
-            yyp (float): Cross-correlation term between y and yp in meters. Defaults to 0.
-        """
+                raise ValueError(
+                    "Either (emittance and coupling) or (emittance_x and emittance_y) "
+                    "must be provided."
+                )
+            if emittance_x is None:
+                emittance_x = emittance / (1.0 + coupling)
+            if emittance_y is None:
+                emittance_y = emittance * coupling / (1.0 + coupling)
 
         self.energy_in_GeV = energy
         self.energy_spread = energy_spread
         self.current = current
 
-        self.moment_xx = x*x        # <(x-<x>)^2>
-        self.moment_xxp = xxp       # <(x-<x>)(x'-<x'>)>          
-        self.moment_xpxp = xp*xp    # <(x'-<x'>)^2>      
-        self.moment_yy = y*y        # <(y-<y>)^2>    
-        self.moment_yyp = yyp       # <(y-<y>)(y'-<y'>)>          
-        self.moment_ypyp = yp*yp    # <(y'-<y'>)^2>        
+        sigE2 = energy_spread ** 2
 
-        self.to_rms()
+        self.moment_xx = emittance_x * beta_x + sigE2 * eta_x * eta_x
+        self.moment_xxp = -emittance_x * alpha_x + sigE2 * eta_x * etap_x
+        self.moment_xpxp = (
+            emittance_x * (1.0 + alpha_x * alpha_x) / beta_x
+            + sigE2 * etap_x * etap_x
+        )
 
-    def from_syned(self, json_file: str) -> None:
+        self.moment_yy = emittance_y * beta_y + sigE2 * eta_y * eta_y
+        self.moment_yyp = -emittance_y * alpha_y + sigE2 * eta_y * etap_y
+        self.moment_ypyp = (
+            emittance_y * (1.0 + alpha_y * alpha_y) / beta_y
+            + sigE2 * etap_y * etap_y
+        )
+
+        self._initialised = True
+
+        if verbose:
+            self.print_rms()
+
+    def from_rms(
+        self,
+        energy: float,
+        energy_spread: float,
+        current: float,
+        x: float,
+        xp: float,
+        y: float,
+        yp: float,
+        xxp: float = 0.0,
+        yyp: float = 0.0,
+        verbose: bool = False
+    ) -> None:
         """
-        Reads and sets up electron beam internal data from a SYNED JSON configuration file.
+        Initialize from RMS beam sizes and divergences.
 
-        Parameters:
-            json_file (str): The path to the JSON file where the dictionary is written.
+        Parameters
+        ----------
+        energy : float
+            Beam energy in GeV.
+        energy_spread : float
+            RMS relative energy spread (dE/E).
+        current : float
+            Average beam current in A.
+        x, y : float
+            Horizontal and vertical RMS sizes in m.
+        xp, yp : float
+            Horizontal and vertical RMS divergences in rad.
+        xxp, yyp : float, optional
+            Cross-correlation terms <x*xp> and <y*yp> in m*rad.
+        verbose : bool, optional
+            If True, print RMS beam sizes and divergences after initialization.
         """
-        syned  = read_syned_file(json_file)
-        self.energy_in_GeV = syned["electron_beam"]["energy_in_GeV"]
-        self.energy_spread = syned["electron_beam"]["energy_spread"]
-        self.current = syned["electron_beam"]["current"]
-        self.number_of_bunches = syned["electron_beam"]["number_of_bunches"]
-        self.moment_xx = syned["electron_beam"]["moment_xx"]
-        self.moment_xxp = syned["electron_beam"]["moment_xxp"]
-        self.moment_xpxp = syned["electron_beam"]["moment_xpxp"]
-        self.moment_yy = syned["electron_beam"]["moment_yy"]
-        self.moment_yyp = syned["electron_beam"]["moment_yyp"]
-        self.moment_ypyp = syned["electron_beam"]["moment_ypyp"]
+        self._ensure_not_initialised()
 
-        self.to_rms()
+        self.energy_in_GeV = energy
+        self.energy_spread = energy_spread
+        self.current = current
 
-    # def from_spectra(self):
-    #     pass
+        self.moment_xx = x * x
+        self.moment_xxp = xxp
+        self.moment_xpxp = xp * xp
+        self.moment_yy = y * y
+        self.moment_yyp = yyp
+        self.moment_ypyp = yp * yp
 
-    def propagate(self, dist: float) -> None:
+        self._initialised = True
+
+        if verbose:
+            self.print_rms()
+
+    def from_moments(
+        self,
+        energy: float,
+        energy_spread: float,
+        current: float,
+        moment_xx: float,
+        moment_xxp: float,
+        moment_xpxp: float,
+        moment_yy: float,
+        moment_yyp: float,
+        moment_ypyp: float,
+        verbose: bool = False
+    ) -> None:
         """
-        Propagates electron beam statistical moments over a distance in free space.
+        Initialize directly from the six transverse second moments.
 
-        Args:
-            dist (float): Distance the beam has to be propagated over in meters.
+        Parameters
+        ----------
+        energy : float
+            Beam energy in GeV.
+        energy_spread : float
+            RMS relative energy spread (dE/E).
+        current : float
+            Average beam current in A.
+        moment_xx, moment_xxp, moment_xpxp : float
+            Horizontal second moments <x^2>, <x*xp>, <xp^2>.
+        moment_yy, moment_yyp, moment_ypyp : float
+            Vertical second moments <y^2>, <y*yp>, <yp^2>.
+        verbose : bool, optional
+            If True, print RMS beam sizes and divergences after initialization.
         """
-        self.moment_xx  += (self.moment_xxp + self.moment_xpxp)*dist**2
-        self.moment_xxp += (self.moment_xpxp)*dist
-        self.moment_yy  += (self.moment_yyp + self.moment_ypyp)*dist**2
-        self.moment_yyp += (self.moment_ypyp)*dist
+        self._ensure_not_initialised()
 
-        self.to_rms()
+        self.energy_in_GeV = energy
+        self.energy_spread = energy_spread
+        self.current = current
 
-    def to_rms(self) -> None:
-        """
-        Computes the RMS sizes and divergences of the electron beam based on its 
-        second-order statistical moments. The calculated values are stored back in the 
-        object attributes (e_x, e_y, e_xp, e_yp).
-        """
-        self.e_x = np.sqrt(self.moment_xx)
-        self.e_y = np.sqrt(self.moment_yy)
-        self.e_xp = np.sqrt(self.moment_xpxp)
-        self.e_yp = np.sqrt(self.moment_ypyp)
+        self.moment_xx = moment_xx
+        self.moment_xxp = moment_xxp
+        self.moment_xpxp = moment_xpxp
+        self.moment_yy = moment_yy
+        self.moment_yyp = moment_yyp
+        self.moment_ypyp = moment_ypyp
+
+        self._initialised = True
+        if verbose:
+            self.print_rms()
+
+    # ------------------------------------------------------------------
+    # Derived RMS properties
+    # ------------------------------------------------------------------
+    @property
+    def e_x(self) -> float:
+        """ Horizontal RMS size sigma_x in m."""
+        return float(np.sqrt(self.moment_xx)) if self.moment_xx is not None else np.nan
+
+    @property
+    def e_y(self) -> float:
+        """Vertical RMS size sigma_y in m."""
+        return float(np.sqrt(self.moment_yy)) if self.moment_yy is not None else np.nan
+
+    @property
+    def e_xp(self) -> float:
+        """Horizontal RMS divergence sigma_xp in rad."""
+        return (
+            float(np.sqrt(self.moment_xpxp))
+            if self.moment_xpxp is not None
+            else np.nan
+        )
+
+    @property
+    def e_yp(self) -> float:
+        """Vertical RMS divergence sigma_yp in rad."""
+        return (
+            float(np.sqrt(self.moment_ypyp))
+            if self.moment_ypyp is not None
+            else np.nan
+        )
 
     def gamma(self) -> float:
-        """Calculate the Lorentz factor (γ) based on the energy of electrons in GeV."""
+        """
+        Return the Lorentz factor gamma for the current beam energy.
+
+        Returns
+        -------
+        float
+            Lorentz factor gamma.
+        """
         return get_gamma(self.energy_in_GeV)
 
     def print_rms(self) -> None:
         """
-        Prints electron beam rms sizes and divergences 
+        Print RMS sizes and divergences in both planes.
         """
         print("electron beam:")
-        print(f"\t>> x/xp = {self.e_x*1e6:0.2f} µm vs. {self.e_xp*1e6:0.2f} µrad")
-        print(f"\t>> y/yp = {self.e_y*1e6:0.2f} µm vs. {self.e_yp*1e6:0.2f} µrad")
-            
+        print(f"\t>> x/xp = {self.e_x * 1e6:0.2f} um vs. {self.e_xp * 1e6:0.2f} urad")
+        print(f"\t>> y/yp = {self.e_y * 1e6:0.2f} um vs. {self.e_yp * 1e6:0.2f} urad")
+
     def print_attributes(self) -> None:
         """
-        Prints all attribute of object
+        Print all attributes of the electron beam instance.
         """
-        print('\nElectronBeam():')
-        for i in (vars(self)):
-            print("> {0:2}: {1}".format(i, vars(self)[i]))
+        print("\nElectronBeam():")
+        for name, value in vars(self).items():
+            print(f"> {name:16}: {value}")
+
 
 class MagneticStructure(object):
     """
@@ -520,6 +659,7 @@ class UndulatorSource(SynchrotronSource):
             raise ValueError("Please, provide either the wavelength [m], the magnetic fields [T] or the deflection parameters Kx and/or Ky.")
 
         if wavelength is not None:
+            print('aiaiai')
             self.MagneticStructure.harmonic = kwargs.get('harmonic', None)
             self.set_resonant_energy(energy=energy_wavelength(wavelength, unity='m'), 
                                      harmonic=self.harmonic, direction=direction, 
@@ -542,7 +682,7 @@ class UndulatorSource(SynchrotronSource):
         cund = kwargs.get('center_undulator', 0)
         css = kwargs.get('center_straight_section', 0)
 
-        self.MagneticStructure.harmonic = 0
+        self.MagneticStructure.center = 0
 
         if verbose:
             print('\n>>>>>>>>>>> beam phase-space characteristics <<<<<<<<<<<')
