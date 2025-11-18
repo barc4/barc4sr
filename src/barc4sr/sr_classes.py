@@ -542,6 +542,8 @@ class UndulatorSource(SynchrotronSource):
         cund = kwargs.get('center_undulator', 0)
         css = kwargs.get('center_straight_section', 0)
 
+        self.MagneticStructure.harmonic = 0
+
         if verbose:
             print('\n>>>>>>>>>>> beam phase-space characteristics <<<<<<<<<<<')
             self.print_rms()
