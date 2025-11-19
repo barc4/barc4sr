@@ -20,6 +20,7 @@ __created__ = '2024.11.25'
 __changed__ = '2025.10.23'
 
 import os
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import scipy.optimize as opt
@@ -31,7 +32,7 @@ from scipy.special import erf, jv
 
 from barc4sr.aux_energy import energy_wavelength, get_gamma
 from barc4sr.aux_magnetic_fields import check_magnetic_field_dictionary
-from barc4sr.aux_syned import read_syned_file, write_syned_file
+from barc4sr.aux_syned import write_syned_file
 
 ALPHA =  physical_constants["fine-structure constant"][0]
 CHARGE = physical_constants["atomic unit of charge"][0]
@@ -40,8 +41,6 @@ MASS = physical_constants["electron mass"][0]
 PI = np.pi
 PLANCK = physical_constants["Planck constant"][0]
 Z0 = physical_constants["characteristic impedance of vacuum"][0]
-
-from typing import Optional, Tuple
 
 
 class ElectronBeam(object):
@@ -318,9 +317,6 @@ class ElectronBeam(object):
         if verbose:
             self.print_rms()
 
-    # ------------------------------------------------------------------
-    # Derived RMS properties
-    # ------------------------------------------------------------------
     @property
     def e_x(self) -> float:
         """ Horizontal RMS size sigma_x in m."""
@@ -376,156 +372,336 @@ class ElectronBeam(object):
         for name, value in vars(self).items():
             print(f"> {name:16}: {value}")
 
-
 class MagneticStructure(object):
     """
-    Class for defining magnetic structure parameters, including undulators, wigglers, and bending magnets.
+    Container for magnetic structure parameters.
+
+    One instance represents a single magnetic structure of type:
+    undulator, wiggler, bending magnet, or arbitrary field.
     """
-    def __init__(self, mag_structure: str = None, **kwargs) -> None:
+
+    CLASS_NAME = "MagneticStructure"
+
+    def __init__(
+        self,
+        magnet_type: str,
+        *,
+        # generic placement
+        center: Optional[float] = None,
+        # arbitrary field only
+        magnetic_field: Optional[Dict[str, Any]] = None,
+        # undulator / wiggler
+        period_length: Optional[float] = None,
+        number_of_periods: Optional[int] = None,
+        K_vertical: Optional[float] = None,
+        K_horizontal: Optional[float] = None,
+        B_vertical: Optional[float] = None,
+        B_horizontal: Optional[float] = None,
+        B_vertical_phase: float = 0.0,
+        B_horizontal_phase: float = 0.0,
+        B_vertical_symmetry: int = 1,
+        B_horizontal_symmetry: int = 1,
+        harmonic: int = 1,
+        # bending magnet
+        B: Optional[float] = None,
+        field_length: Optional[float] = None,
+        edge_length: float = 0.0,
+        extraction_angle: Optional[float] = None,
+    ) -> None:
         """
-        Initializes the MagneticStructure class with parameters representing the magnetic field and geometry.
-
-        Args:
-            mag_structure (str): One of:
-                - Undulator: 'u', 'und', 'undulator'
-                - Wiggler: 'w', 'wig', 'wiggler'
-                - Bending magnet: 'bm', 'bending magnet', 'bending_magnet'
-                - Arbitrary field: 'a', 'arb', 'arbitrary', 'measured'
-
-            **kwargs: Additional optional parameters based on the magnetic structure type:
-                - center (float): center of the mag. structure (in meters) in relation to where the electron beam moments are calculated. Defaults to 0.
-
-                For undulators and wigglers:
-                    - B_vertical (float): Vertical magnetic field (T).
-                    - B_horizontal (float): Horizontal magnetic field (T).
-                    - K_vertical (float): Vertical deflection parameter (K-value).
-                    - B_vertical_phase (float): Phase offset for the vertical magnetic field in radians. Defaults to 0.
-                    - B_horizontal_symmetry (int): Symmetry type for the vertical deflection parameter. Defaults to 1.
-                            1 for symmetric      (B ~ cos(2*Pi*n*z/per + ph)),
-                           -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)).
-                    - K_horizontal (float): Horizontal deflection parameter (K-value).
-                    - B_horizontal_phase (float): Phase offset for the horizontal magnetic field in radians. Defaults to 0.
-                    - B_vertical_symmetry (int): Symmetry type for the horizontal deflection parameter. Defaults to 1.
-                            1 for symmetric      (B ~ cos(2*Pi*n*z/per + ph)),
-                           -1 for anti-symmetric (B ~ sin(2*Pi*n*z/per + ph)).
-                    - harmonic (int): Harmonic number. Defaults to 1.
-                    - period_length (float): Length of one period (in meters).
-                    - number_of_periods (int): Number of periods.
-
-                For bending magnets:
-                    - radius (float): Radius of curvature (in meters). Effective if > 0.
-                    - length (float): Effective length of the magnet (in meters). Effective if > 0.
-                    - length_edge (float): Soft edge length for field variation (10% to 90%) in meters. 
-                                           Defaults to 0. Assumes a fringe field dependence of 
-                                           G / (1 + ((z - zc) / d)^2)^2.
-                    - extraction_angle (float):
-                    - magnetic_field_center (float):
-                    - critical_energy (float):
-
-                For arbitrary magnet fields:
-                    - 
-
-        Raises:
-            ValueError: If an invalid magnetic structure type is provided.
-        """
-
-        und = ['u', 'und', 'undulator']
-        wig = ['w', 'wig', 'wiggler']
-        bm = ['bm', 'bending magnet', 'bending_magnet']
-        arb = ['a', 'arb', 'arbitrary', 'measured']
-
-        allowed_mag_structure = [ms for group in [und, wig, bm, arb] for ms in group]
-
-        if mag_structure not in allowed_mag_structure:
-            raise ValueError(f"Invalid magnetic structure: {mag_structure}. "
-                             f"Must be one of {allowed_mag_structure}")
-
-        if mag_structure in und + wig:
-            self.CLASS_NAME = "Undulator" if mag_structure in und else "Wiggler"
-        if mag_structure in bm:
-            self.CLASS_NAME = "BendingMagnet"
-        if mag_structure in arb:
-            self.CLASS_NAME = "Arbitrary"
-
-        self.magnetic_field = kwargs.get("magnetic_field", None)
-        self.center = kwargs.get("center", None)
-
-        if mag_structure in und + wig:
-            self.B_vertical = kwargs.get("B_vertical", None) 
-            self.B_horizontal = kwargs.get("B_horizontal", None)   
-    
-            self.K_vertical = kwargs.get("K_vertical", None)
-            self.K_horizontal = kwargs.get("K_horizontal", None)
-
-            self.B_vertical_phase = kwargs.get("B_vertical_phase", 0)
-            self.B_horizontal_phase = kwargs.get("B_horizontal_phase", 0)
-
-            self.B_vertical_symmetry = kwargs.get("B_vertical_symmetry", 1)
-            self.B_horizontal_symmetry = kwargs.get("B_horizontal_symmetry", 1)
-
-            self.harmonic = kwargs.get("harmonic", 1)
-            self.period_length = kwargs.get("period_length", None)
-            self.number_of_periods = kwargs.get("number_of_periods", None)
-
-            if self.B_vertical is not None and self.K_vertical is None:
-                raise ValueError("Redundancy: please, provide either B_vertical or K_vertical - not both.")
-            if self.B_horizontal is not None and self.K_horizontal is None:
-                raise ValueError("Redundancy: please, provide either B_horizontal or K_horizontal - not both.")
-
-        if mag_structure in bm:
-            self.radius = kwargs.get("radius", None)
-            self.field_length = kwargs.get("field_length", None)
-            self.edge_length = kwargs.get("edge_length", 0)
-            self.extraction_angle = kwargs.get("extraction_angle", None)
-            self.critical_energy = kwargs.get("critical_energy", None)
-            if self.extraction_angle is not None and self.center is not None:
-                raise ValueError("Redundancy: please, provide either the extraction angle or the center position, not both.")
-            
-        else:
-            if self.magnetic_field is not None:
-                if self.check_magnetic_field_dictionary() is False:
-                    raise ValueError(
-                        "Expected magnetic_field dict like: "
-                        "{'s': np.asarray(N,), 'B': np.asarray(N,3), ...}"
-                    )
-
-    def check_magnetic_field_dictionary(self) -> bool:
-        """
-        Validate a magnetic field dictionary.
+        Initialize a magnetic structure.
 
         Parameters
         ----------
-        magnetic_field_dictionary : dict
-            Magnetic field definition with at least the following keys:
-            - 's' : 1D array-like, positions [m], shape (N,)
-            - 'B' : 2D array-like, magnetic field vectors [T], shape (N, 3)
-            Extra keys are allowed.
+        magnet_type : str
+            Magnet type (case insensitive). Accepted values:
+            undulator: 'u', 'und', 'undulator'
+            wiggler: 'w', 'wig', 'wiggler'
+            bending magnet: 'bm', 'bending magnet', 'bending_magnet'
+            arbitrary field: 'a', 'arb', 'arbitrary', 'measured'
 
-        Returns
-        -------
-        bool
-            True if the dictionary is valid, False otherwise.
+        center : float, optional
+            Center position of the magnet on the global axis [m]. Used for
+            placement but does not change the field definition.
+
+        Arbitrary magnetic field (magnet_type 'arbitrary' or 'measured')
+        ----------------------------------------------------------            
+        magnetic_field : dict, optional
+            Magnetic field dictionary for arbitrary magnets only
+            (magnet_type 'arbitrary'). The structure must be compatible with
+            check_magnetic_field_dictionary. Ignored for other magnet types.
+
+        Undulator / wiggler (magnet_type 'undulator' or 'wiggler')
+        ----------------------------------------------------------
+        period_length : float, optional
+            Magnetic period length [m]. Required for undulators and wigglers.
+        number_of_periods : int, optional
+            Number of periods. Required for undulators and wigglers.
+        K_vertical, K_horizontal : float, optional
+            Vertical and horizontal deflection parameters K (canonical).
+            For each plane, provide either K_* or B_* or neither, but not both.
+        B_vertical, B_horizontal : float, optional
+            Vertical and horizontal peak fields [T]. 
+        B_vertical_phase, B_horizontal_phase : float, optional
+            Phase offsets for the vertical and horizontal fields [rad].
+        B_vertical_symmetry, B_horizontal_symmetry : int, optional
+            Symmetry flags describing the field parity:
+                1  -> symmetric     (B ~ cos(2*pi*n*z/period + phase))
+               -1  -> antisymmetric (B ~ sin(2*pi*n*z/period + phase))
+        harmonic : int, optional
+            Harmonic index used in source calculations. Stored as metadata.
+
+        Bending magnet (magnet_type 'bending_magnet')
+        ---------------------------------------------
+        B : float, optional
+            Vertical magnetic field amplitude [T]. Required for bending
+            magnets and used as the canonical field parameter.
+        field_length : float, optional
+            Length of the region with full field [m]. Required for bending
+            magnets.
+        edge_length : float, optional
+            Soft-edge length on each side [m]. Default is 0. Assumes a
+            fringe field dependence of the form:
+                G / (1 + ((z - zc) / d)^2)^2
+            where d is related to edge_length (10 percent to 90 percent
+            field transition).
+        extraction_angle : float, optional
+            Observation angle with respect to the orbit tangent [rad].
+            Stored here but no geometry conversion is performed; this is
+            handled by the source class.
 
         Raises
         ------
-        TypeError
-            If `magnetic_field_dictionary` is not a dict.
-        KeyError
-            If `magnetic_field_dictionary` does not contain keys 's' and 'B'.
         ValueError
-            If 's' is not 1D, if 'B' is not 2D with shape (N, 3),
-            or if any values in 's' or 'B' are non-finite.
+            If magnet_type is invalid, or if required parameters for the
+            selected type are missing, or if inconsistent or redundant
+            inputs are provided (for example both K and B in one plane).
         """
 
-        return check_magnetic_field_dictionary(self.magnetic_field)
+        mt = magnet_type.lower().strip().replace(" ", "_")
+        if mt in ("u", "und", "undulator"):
+            self.magnet_type = "undulator"
+            self.CLASS_NAME = "Undulator"
+        elif mt in ("w", "wig", "wiggler"):
+            self.magnet_type = "wiggler"
+            self.CLASS_NAME = "Wiggler"
+        elif mt in ("bm", "bending_magnet", "bending_magnet"):
+            self.magnet_type = "bending_magnet"
+            self.CLASS_NAME = "BendingMagnet"
+        elif mt in ("a", "arb", "arbitrary", "measured"):
+            self.magnet_type = "arbitrary"
+            self.CLASS_NAME = "ArbitraryMagnet"
+        else:
+            raise ValueError(
+                f"Invalid magnet_type '{magnet_type}'. "
+                "Use undulator, wiggler, bending_magnet, or arbitrary."
+            )
+
+        self.center = center
+
+        if self.magnet_type in ("undulator", "wiggler"):
+            self._init_undulator(
+                period_length=period_length,
+                number_of_periods=number_of_periods,
+                K_vertical=K_vertical,
+                K_horizontal=K_horizontal,
+                B_vertical=B_vertical,
+                B_horizontal=B_horizontal,
+                B_vertical_phase=B_vertical_phase,
+                B_horizontal_phase=B_horizontal_phase,
+                B_vertical_symmetry=B_vertical_symmetry,
+                B_horizontal_symmetry=B_horizontal_symmetry,
+                harmonic=harmonic,
+            )
+        elif self.magnet_type == "bending_magnet":
+            self._init_bending_magnet(
+                B=B,
+                field_length=field_length,
+                edge_length=edge_length,
+                extraction_angle=extraction_angle,
+            )
+        else:
+            self._init_arbitrary(magnetic_field=magnetic_field)
+
+    def _init_undulator(
+        self,
+        *,
+        period_length: Optional[float],
+        number_of_periods: Optional[int],
+        K_vertical: Optional[float],
+        K_horizontal: Optional[float],
+        B_vertical: Optional[float],
+        B_horizontal: Optional[float],
+        B_vertical_phase: float,
+        B_horizontal_phase: float,
+        B_vertical_symmetry: int,
+        B_horizontal_symmetry: int,
+        harmonic: int,
+    ) -> None:
+        """
+        Internal initialisation for undulators and wigglers.
+        """
+        if period_length is None or number_of_periods is None:
+            raise ValueError(
+                "period_length and number_of_periods are required for "
+                "undulators and wigglers."
+            )
+
+        self.period_length = period_length
+        self.number_of_periods = number_of_periods
+
+        self.B_vertical_symmetry = B_vertical_symmetry
+        self.B_horizontal_symmetry = B_horizontal_symmetry
+
+        self.B_vertical_phase = B_vertical_phase
+        self.B_horizontal_phase = B_horizontal_phase
+        self.harmonic = harmonic
+
+        self.K_vertical = self._resolve_K_plane(
+            K=K_vertical,
+            B=B_vertical,
+            period_length=period_length,
+            label="vertical",
+        )
+        self.K_horizontal = self._resolve_K_plane(
+            K=K_horizontal,
+            B=B_horizontal,
+            period_length=period_length,
+            label="horizontal",
+        )
+
+    def _init_bending_magnet(
+        self,
+        *,
+        B: Optional[float],
+        field_length: Optional[float],
+        edge_length: float,
+        extraction_angle: Optional[float],
+    ) -> None:
+        """
+        Internal initialisation for bending magnets.
+        """
+        if B is None or field_length is None:
+            raise ValueError(
+                "B and field_length are required for a bending magnet."
+            )
+
+        self.B = B
+        self.field_length = field_length
+        self.edge_length = edge_length
+        self.extraction_angle = extraction_angle
+
+    def _init_arbitrary(
+        self,
+        *,
+        magnetic_field: Optional[Dict[str, Any]],
+    ) -> None:
+        """
+        Internal initialisation for arbitrary field magnets.
+        """
+        if magnetic_field is None:
+            raise ValueError(
+                "magnetic_field dictionary is required for an arbitrary magnet."
+            )
+
+        check_magnetic_field_dictionary(magnetic_field)
+        self.magnetic_field = magnetic_field
+
+    @staticmethod
+    def _resolve_K_plane(
+        *,
+        K: Optional[float],
+        B: Optional[float],
+        period_length: float,
+        label: str,
+    ) -> float:
+        """
+        Resolve canonical K for a single plane.
+
+        Parameters
+        ----------
+        K : float or None
+            Deflection parameter K provided by the user.
+        B : float or None
+            Peak magnetic field provided by the user [T].
+        period_length : float
+            Undulator period length [m].
+        label : str
+            Text label for error messages ('vertical' or 'horizontal').
+
+        Returns
+        -------
+        float
+            Canonical K value for the plane. Returns 0.0 if both K and B
+            are None (no field in this plane).
+
+        Raises
+        ------
+        ValueError
+            If both K and B are provided for the same plane.
+        """
+        if K is not None and B is not None:
+            raise ValueError(
+                f"Both K and B were provided for the {label} plane. "
+                "Provide either K or B, but not both."
+            )
+
+        if K is None and B is None:
+            return 0.0
+
+        if K is not None:
+            return K
+
+        return CHARGE * B * period_length / (2.0 * PI * MASS * LIGHT)
+
+    @property
+    def B_vertical(self) -> Optional[float]:
+        """
+        Vertical peak field [T] derived from K_vertical and period_length.
+
+        Returns
+        -------
+        float or None
+            Vertical peak field in Tesla, or None if this is not an
+            undulator/wiggler or if K_vertical is not defined.
+        """
+        if self.magnet_type not in ("undulator", "wiggler"):
+            return None
+        if not hasattr(self, "K_vertical") or self.K_vertical is None:
+            return None
+        return (
+            self.K_vertical * (2.0 * PI * MASS * LIGHT)
+            / (self.period_length * CHARGE)
+        )
+
+    @property
+    def B_horizontal(self) -> Optional[float]:
+        """
+        Horizontal peak field [T] derived from K_horizontal and period_length.
+
+        Returns
+        -------
+        float or None
+            Horizontal peak field in Tesla, or None if this is not an
+            undulator/wiggler or if K_horizontal is not defined.
+        """
+        if self.magnet_type not in ("undulator", "wiggler"):
+            return None
+        if not hasattr(self, "K_horizontal") or self.K_horizontal is None:
+            return None
+        return (
+            self.K_horizontal * (2.0 * PI * MASS * LIGHT)
+            / (self.period_length * CHARGE)
+        )
 
     def print_attributes(self) -> None:
         """
-        Prints all attribute of object
+        Print all attributes of the magnetic structure instance.
         """
-        print('\nMagneticStructure():')
-        for i in (vars(self)):
-            print("> {0:2}: {1}".format(i, vars(self)[i]))
+        print(f"\n{self.CLASS_NAME} (magnet_type='{self.magnet_type}'):")
+        for name, value in vars(self).items():
+            print(f"> {name:20}: {value}")
+            
 class SynchrotronSource(object):
     """
     Class representing a synchrotron radiation source, which combines an electron beam and a magnetic structure.
