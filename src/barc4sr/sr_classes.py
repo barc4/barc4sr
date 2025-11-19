@@ -704,55 +704,82 @@ class MagneticStructure(object):
             
 class SynchrotronSource(object):
     """
-    Class representing a synchrotron radiation source, which combines an electron beam and a magnetic structure.
+    Base container for a synchrotron radiation source.
+
+    A SynchrotronSource combines an ElectronBeam instance and a
+    MagneticStructure instance. Concrete source classes such as
+    UndulatorSource, BendingMagnetSource and ArbitraryMagnetSource
+    build on this base.
     """
+
     def __init__(self, electron_beam: ElectronBeam, magnetic_structure: MagneticStructure) -> None:
         """
-        Initializes an instance of the SynchrotronSource class.
+        Initialize a synchrotron source.
 
-        Args:
-            electron_beam (ElectronBeam): An instance of the ElectronBeam class representing the electron beam parameters.
-            magnetic_structure (MagneticStructure): An instance of the MagneticStructure class representing the magnetic structure parameters.
+        Parameters
+        ----------
+        electron_beam : ElectronBeam
+            ElectronBeam instance describing the electron beam parameters.
+        magnetic_structure : MagneticStructure
+            MagneticStructure instance describing the magnetic structure
+            (undulator, bending magnet, arbitrary field, etc.).
         """
         self.ElectronBeam = electron_beam
         self.MagneticStructure = magnetic_structure
-    
-    def __getattr__(self, name):
+
+    def __getattr__(self, name: str):
         """
-        Retrieves an attribute from either the ElectronBeam or MagneticStructure instances if it exists.
+        Delegate attribute access to ElectronBeam or MagneticStructure.
 
-        Args:
-            name (str): The name of the attribute to retrieve.
+        If an attribute is not found on the SynchrotronSource instance
+        itself, this method looks for it first on the ElectronBeam
+        instance and then on the MagneticStructure instance.
 
-        Returns:
-            The value of the attribute from either the ElectronBeam or MagneticStructure instance.
+        Parameters
+        ----------
+        name : str
+            Name of the requested attribute.
 
+        Returns
+        -------
+        Any
+            Value of the attribute if it exists on ElectronBeam or
+            MagneticStructure.
+
+        Raises
+        ------
+        AttributeError
+            If the attribute is not found on the source, the electron
+            beam, or the magnetic structure.
         """
         if name in self.__dict__:
             return self.__dict__[name]
-        elif hasattr(self.ElectronBeam, name):
+        if hasattr(self.ElectronBeam, name):
             return getattr(self.ElectronBeam, name)
-        elif hasattr(self.MagneticStructure, name):
+        if hasattr(self.MagneticStructure, name):
             return getattr(self.MagneticStructure, name)
-        else:
-            raise AttributeError(f"'SynchrotronSource' object has no attribute '{name}'")
-        
-    def write_syned_config(self, json_file: str, light_source_name: str=None):
-        """
-        Writes a SYNED JSON configuration file.
+        raise AttributeError(f"'SynchrotronSource' object has no attribute '{name}'")
 
-        Parameters:
-            json_file (str): The path to the JSON file where the dictionary will be written.
-            light_source_name (str): The name of the light source.
+    def write_syned_config(self, json_file: str, light_source_name: Optional[str] = None) -> None:
+        """
+        Write a SYNED JSON configuration file.
+
+        Parameters
+        ----------
+        json_file : str
+            Path to the JSON file to be written.
+        light_source_name : str, optional
+            Name of the light source. If None, the file name (without
+            extension) is used.
         """
         if light_source_name is None:
-            light_source_name = json_file.split('/')[-1].replace('.json','')
+            light_source_name = json_file.split("/")[-1].replace(".json", "")
 
         write_syned_file(json_file, light_source_name, self.ElectronBeam, self.MagneticStructure)
 
     def print_attributes(self) -> None:
         """
-        Prints all attribute of object
+        Print attributes of the electron beam and magnetic structure.
         """
         self.ElectronBeam.print_attributes()
         self.MagneticStructure.print_attributes()
