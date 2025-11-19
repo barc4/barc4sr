@@ -6,9 +6,10 @@ This module provides the barc4sr classes:
 - ElectronBeam
 - MagneticStructure
 - SynchrotronSource
-- UndulatorSource(SynchrotronSource)
-- BendingMagnetSource(SynchrotronSource)
 - ArbitraryMagnetSource(SynchrotronSource)
+- BendingMagnetSource(SynchrotronSource)
+- UndulatorSource(SynchrotronSource)
+- Wiggler(SynchrotronSource) -> not implemented
 
 """
 
@@ -17,10 +18,9 @@ __contact__ = 'rafael.celestre@synchrotron-soleil.fr'
 __license__ = 'CC BY-NC-SA 4.0'
 __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '2024.11.25'
-__changed__ = '2025.10.23'
+__changed__ = '2025.11.19'
 
 import os
-from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import scipy.optimize as opt
@@ -45,29 +45,19 @@ Z0 = physical_constants["characteristic impedance of vacuum"][0]
 
 class ElectronBeam(object):
     """
-    Container for electron beam second moments.
+    Container for electron beam parameters.
 
-    The canonical state is given by the six transverse second-order
-    moments: <x^2>, <x*xp>, <xp^2>, <y^2>, <y*yp>, <yp^2>.
-    RMS beam sizes and divergences are always derived on the fly
-    from these moments.
+    The canonical state is given by the six transverse second-order moments: 
+        <x^2>, <x*xp>, <xp^2>, <y^2>, <y*yp>, <yp^2>.
     """
 
     CLASS_NAME = "ElectronBeam"
 
-    def __init__(
-        self,
+    def __init__(self,
         *,
-        energy: Optional[float] = None,
-        energy_spread: Optional[float] = None,
-        current: Optional[float] = None,
-        number_of_bunches: int = 1,
-        moment_xx: Optional[float] = None,
-        moment_xxp: Optional[float] = None,
-        moment_xpxp: Optional[float] = None,
-        moment_yy: Optional[float] = None,
-        moment_yyp: Optional[float] = None,
-        moment_ypyp: Optional[float] = None,
+        energy: float = None, energy_spread: float = None, current: float = None,
+        moment_xx: float = None, moment_xxp: float = None, moment_xpxp: float = None,
+        moment_yy: float = None, moment_yyp: float = None, moment_ypyp: float = None,
         verbose: bool = False
     ) -> None:
         """
@@ -75,27 +65,19 @@ class ElectronBeam(object):
 
         Parameters
         ----------
-        energy : float, optional
-            Beam energy in GeV.
-        energy_spread : float, optional
-            RMS relative energy spread (dE/E).
-        current : float, optional
-            Average beam current in A.
-        number_of_bunches : int, optional
-            Number of bunches in the ring.
-        moment_xx, moment_xxp, moment_xpxp : float, optional
-            Horizontal second-order moments <x^2>, <x*xp>, <xp^2>
-            in units of m^2, m*rad, rad^2.
-        moment_yy, moment_yyp, moment_ypyp : float, optional
-            Vertical second-order moments <y^2>, <y*yp>, <yp^2>
-            in units of m^2, m*rad, rad^2.
-        verbose : bool, optional
-            If True, print RMS beam sizes and divergences after initialization.
+        - energy (float): beam energy in GeV.
+        - energy_spread (float): RMS relative energy spread (dE/E).
+        - current (float): average beam current in A.
+        - moment_xx, moment_xxp, moment_xpxp (float):
+            horizontal second-order moments <x^2>, <x*xp>, <xp^2> in units of m^2, m*rad, rad^2.
+        - moment_yy, moment_yyp, moment_ypyp (float) 
+            vertical second-order moments <y^2>, <y*yp>, <yp^2> in units of m^2, m*rad, rad^2.
+        - verbose (bool): if True, prints to the prompt
         """
         self.energy_in_GeV = energy
         self.energy_spread = energy_spread
         self.current = current
-        self.number_of_bunches = number_of_bunches
+        self.number_of_bunches = 1
 
         self.moment_xx = moment_xx
         self.moment_xxp = moment_xxp
@@ -124,54 +106,30 @@ class ElectronBeam(object):
                 "ElectronBeam is already initialised and cannot be reconfigured."
             )
 
-    def from_twiss(
-        self,
-        energy: float,
-        energy_spread: float,
-        current: float,
-        beta_x: float,
-        alpha_x: float,
-        eta_x: float,
-        etap_x: float,
-        beta_y: float,
-        alpha_y: float,
-        eta_y: float,
-        etap_y: float,
+    def from_twiss(self, energy: float, energy_spread: float, current: float,
+        beta_x: float, alpha_x: float, eta_x: float, etap_x: float,
+        beta_y: float, alpha_y: float, eta_y: float, etap_y: float,
         *,
-        emittance: Optional[float] = None,
-        coupling: Optional[float] = None,
-        emittance_x: Optional[float] = None,
-        emittance_y: Optional[float] = None,
+        emittance: float = None, coupling: float = None,
+        emittance_x: float = None, emittance_y: float = None,
         verbose: bool = False
     ) -> None:
         """
-        Initialize from Twiss parameters and emittances.
+        Initialize ElectronBeam from Twiss parameters and emittances.
 
         Parameters
         ----------
-        energy : float
-            Beam energy in GeV.
-        energy_spread : float
-            RMS relative energy spread (dE/E).
-        current : float
-            Average beam current in A.
-        beta_x, beta_y : float
-            Horizontal and vertical beta functions in m.
-        alpha_x, alpha_y : float
-            Horizontal and vertical alpha functions (dimensionless).
-        eta_x, eta_y : float
-            Horizontal and vertical dispersion functions in m.
-        etap_x, etap_y : float
-            Derivatives of dispersion in rad.
-        emittance : float, optional
-            Total emittance epsilon (used with coupling if
-            emittance_x and emittance_y are not given).
-        coupling : float, optional
-            Coupling ratio epsilon_y / epsilon_x when emittance is given.
-        emittance_x, emittance_y : float, optional
-            Horizontal and vertical emittances in m*rad.
-        verbose : bool, optional
-            If True, print RMS beam sizes and divergences after initialization.
+        - energy (float): beam energy in GeV.
+        - energy_spread (float): RMS relative energy spread (dE/E).
+        - current (float): average beam current in A.
+        - beta_x, beta_y (float): horizontal and vertical beta functions in m.
+        - alpha_x, alpha_y (float): horizontal and vertical alpha functions.
+        - eta_x, eta_y (float):) horizontal and vertical dispersion functions in m.
+        - etap_x, etap_y (float): derivatives of dispersion in rad.
+        - emittance (float): total emittance (used with coupling if emittance_x and emittance_y are not given).
+        - coupling (float): coupling ratio horizontal and vertical when emittance is given.
+        - emittance_x, emittance_y (float): horizontal and vertical emittances in m*rad.
+        - verbose (bool): if True, prints to the prompt
 
         Raises
         ------
@@ -218,38 +176,23 @@ class ElectronBeam(object):
         if verbose:
             self.print_rms()
 
-    def from_rms(
-        self,
-        energy: float,
-        energy_spread: float,
-        current: float,
-        x: float,
-        xp: float,
-        y: float,
-        yp: float,
-        xxp: float = 0.0,
-        yyp: float = 0.0,
+    def from_rms(self, energy: float, energy_spread: float, current: float,
+        x: float, xp: float, y: float, yp: float, xxp: float = 0.0,  yyp: float = 0.0,
         verbose: bool = False
     ) -> None:
         """
-        Initialize from RMS beam sizes and divergences.
+        Initialize ElectronBeam from RMS beam sizes and divergences.
 
         Parameters
         ----------
-        energy : float
-            Beam energy in GeV.
-        energy_spread : float
-            RMS relative energy spread (dE/E).
-        current : float
-            Average beam current in A.
-        x, y : float
-            Horizontal and vertical RMS sizes in m.
-        xp, yp : float
-            Horizontal and vertical RMS divergences in rad.
-        xxp, yyp : float, optional
-            Cross-correlation terms <x*xp> and <y*yp> in m*rad.
-        verbose : bool, optional
-            If True, print RMS beam sizes and divergences after initialization.
+        - energy (float): beam energy in GeV.
+        - energy_spread (float): RMS relative energy spread (dE/E).
+        - current (float): average beam current in A.
+        - x, y (float): horizontal and vertical RMS sizes in m.
+        - xp, yp (float): horizontal and vertical RMS divergences in rad.
+        - xxp, yyp (float): cross-correlation terms <x*xp> and <y*yp> in m*rad.
+        - verbose (bool): if True, prints to the prompt
+
         """
         self._ensure_not_initialised()
 
@@ -270,35 +213,24 @@ class ElectronBeam(object):
             self.print_rms()
 
     def from_moments(
-        self,
-        energy: float,
-        energy_spread: float,
-        current: float,
-        moment_xx: float,
-        moment_xxp: float,
-        moment_xpxp: float,
-        moment_yy: float,
-        moment_yyp: float,
-        moment_ypyp: float,
+        self, energy: float, energy_spread: float, current: float,
+        moment_xx: float, moment_xxp: float, moment_xpxp: float,
+        moment_yy: float, moment_yyp: float, moment_ypyp: float,
         verbose: bool = False
     ) -> None:
         """
-        Initialize directly from the six transverse second moments.
+        Initialize ElectronBeam directly from the six transverse second moments.
 
         Parameters
         ----------
-        energy : float
-            Beam energy in GeV.
-        energy_spread : float
-            RMS relative energy spread (dE/E).
-        current : float
-            Average beam current in A.
-        moment_xx, moment_xxp, moment_xpxp : float
-            Horizontal second moments <x^2>, <x*xp>, <xp^2>.
-        moment_yy, moment_yyp, moment_ypyp : float
-            Vertical second moments <y^2>, <y*yp>, <yp^2>.
-        verbose : bool, optional
-            If True, print RMS beam sizes and divergences after initialization.
+        - energy (float): beam energy in GeV.
+        - energy_spread (float): RMS relative energy spread (dE/E).
+        - current (float): average beam current in A.
+        - moment_xx, moment_xxp, moment_xpxp (float):
+            horizontal second-order moments <x^2>, <x*xp>, <xp^2> in units of m^2, m*rad, rad^2.
+        - moment_yy, moment_yyp, moment_ypyp (float): 
+            vertical second-order moments <y^2>, <y*yp>, <yp^2> in units of m^2, m*rad, rad^2.
+        - verbose (bool): if True, prints to the prompt
         """
         self._ensure_not_initialised()
 
@@ -374,101 +306,74 @@ class ElectronBeam(object):
 
 class MagneticStructure(object):
     """
-    Container for magnetic structure parameters.
-
-    One instance represents a single magnetic structure of type:
-    undulator, wiggler, bending magnet, or arbitrary field.
+    Container for magnetic structure parameters for undulator, wiggler, bending magnet, 
+    or arbitrary magnetic field.
     """
 
     CLASS_NAME = "MagneticStructure"
 
     def __init__(
-        self,
-        magnet_type: str,
+        self, magnet_type: str,
         *,
         # generic placement
-        center: Optional[float] = None,
+        center: float = None,
         # arbitrary field only
-        magnetic_field: Optional[Dict[str, Any]] = None,
+        magnetic_field: dict = None,
         # undulator / wiggler
-        period_length: Optional[float] = None,
-        number_of_periods: Optional[int] = None,
-        K_vertical: Optional[float] = None,
-        K_horizontal: Optional[float] = None,
-        B_vertical: Optional[float] = None,
-        B_horizontal: Optional[float] = None,
-        B_vertical_phase: float = 0.0,
-        B_horizontal_phase: float = 0.0,
-        B_vertical_symmetry: int = 1,
-        B_horizontal_symmetry: int = 1,
+        period_length: float = None,
+        number_of_periods: float = None,
+        K_vertical: float = None, K_horizontal: float = None,
+        B_vertical: float = None, B_horizontal: float = None,
+        B_vertical_phase: float = 0.0, B_horizontal_phase: float = 0.0,
+        B_vertical_symmetry: int = 1, B_horizontal_symmetry: int = 1,
         harmonic: int = 1,
         # bending magnet
-        B: Optional[float] = None,
-        field_length: Optional[float] = None,
-        edge_length: float = 0.0,
-        extraction_angle: Optional[float] = None,
+        B: float = None, field_length: float = None, 
+        edge_length: float = 0.0, extraction_angle: float = None,
     ) -> None:
         """
         Initialize a magnetic structure.
 
         Parameters
         ----------
-        magnet_type : str
-            Magnet type (case insensitive). Accepted values:
-            undulator: 'u', 'und', 'undulator'
-            wiggler: 'w', 'wig', 'wiggler'
-            bending magnet: 'bm', 'bending magnet', 'bending_magnet'
-            arbitrary field: 'a', 'arb', 'arbitrary', 'measured'
+        - magnet_type (str):
+            - undulator: 'u', 'und', 'undulator'
+            - wiggler: 'w', 'wig', 'wiggler'
+            - bending magnet: 'bm', 'bending magnet', 'bending_magnet'
+            - arbitrary field: 'a', 'arb', 'arbitrary', 'measured'
 
-        center : float, optional
-            Center position of the magnet on the global axis [m]. Used for
-            placement but does not change the field definition.
+        - center (float): center position of the magnetin relation to where the electron 
+        beam moments are calculated [m].
 
+        ----------------------------------------------------------------            
         Arbitrary magnetic field (magnet_type 'arbitrary' or 'measured')
-        ----------------------------------------------------------            
-        magnetic_field : dict, optional
-            Magnetic field dictionary for arbitrary magnets only
-            (magnet_type 'arbitrary'). The structure must be compatible with
-            check_magnetic_field_dictionary. Ignored for other magnet types.
+        ----------------------------------------------------------------            
+        - magnetic_field (dict): magnetic field dictionary for arbitrary magnets.
 
+        ----------------------------------------------------------           
         Undulator / wiggler (magnet_type 'undulator' or 'wiggler')
-        ----------------------------------------------------------
-        period_length : float, optional
-            Magnetic period length [m]. Required for undulators and wigglers.
-        number_of_periods : int, optional
-            Number of periods. Required for undulators and wigglers.
-        K_vertical, K_horizontal : float, optional
-            Vertical and horizontal deflection parameters K (canonical).
-            For each plane, provide either K_* or B_* or neither, but not both.
-        B_vertical, B_horizontal : float, optional
-            Vertical and horizontal peak fields [T]. 
-        B_vertical_phase, B_horizontal_phase : float, optional
-            Phase offsets for the vertical and horizontal fields [rad].
-        B_vertical_symmetry, B_horizontal_symmetry : int, optional
+        ----------------------------------------------------------        
+        - period_length (float): magnetic period length [m].
+        - number_of_periods (int): Number of periods.
+        - K_vertical, K_horizontal (float): vertical and horizontal deflection parameters K.
+        - B_vertical, B_horizontal (float): vertical and horizontal peak fields [T]. 
+        - B_vertical_phase, B_horizontal_phase (float): phase offsets for the vertical
+            and horizontal fields [rad].
+        - B_vertical_symmetry, B_horizontal_symmetry (int):
             Symmetry flags describing the field parity:
                 1  -> symmetric     (B ~ cos(2*pi*n*z/period + phase))
                -1  -> antisymmetric (B ~ sin(2*pi*n*z/period + phase))
-        harmonic : int, optional
-            Harmonic index used in source calculations. Stored as metadata.
+        - harmonic (int): harmonic index used in source calculations.
 
+        ---------------------------------------------
         Bending magnet (magnet_type 'bending_magnet')
         ---------------------------------------------
-        B : float, optional
-            Vertical magnetic field amplitude [T]. Required for bending
-            magnets and used as the canonical field parameter.
-        field_length : float, optional
-            Length of the region with full field [m]. Required for bending
-            magnets.
-        edge_length : float, optional
-            Soft-edge length on each side [m]. Default is 0. Assumes a
-            fringe field dependence of the form:
-                G / (1 + ((z - zc) / d)^2)^2
-            where d is related to edge_length (10 percent to 90 percent
-            field transition).
-        extraction_angle : float, optional
-            Observation angle with respect to the orbit tangent [rad].
-            Stored here but no geometry conversion is performed; this is
-            handled by the source class.
+        - B (float): magnetic field amplitude [T].
+        - field_length (float): length of the region with full field [m].
+        - edge_length (float): Soft edge length for field variation (10% to 90%) in meters.
+             Assumes a fringe field dependence of B / (1 + ((z - zc) / d)^2)^2.
+        - extraction_angle (float): observation angle with respect to the preceeding 
+             straight section [rad].
 
         Raises
         ------
@@ -526,16 +431,11 @@ class MagneticStructure(object):
     def _init_undulator(
         self,
         *,
-        period_length: Optional[float],
-        number_of_periods: Optional[int],
-        K_vertical: Optional[float],
-        K_horizontal: Optional[float],
-        B_vertical: Optional[float],
-        B_horizontal: Optional[float],
-        B_vertical_phase: float,
-        B_horizontal_phase: float,
-        B_vertical_symmetry: int,
-        B_horizontal_symmetry: int,
+        period_length: float, number_of_periods: int,
+        K_vertical: float, K_horizontal: float,
+        B_vertical: float, B_horizontal: float,
+        B_vertical_phase: float, B_horizontal_phase: float,
+        B_vertical_symmetry: int, B_horizontal_symmetry: int,
         harmonic: int,
     ) -> None:
         """
@@ -573,10 +473,7 @@ class MagneticStructure(object):
     def _init_bending_magnet(
         self,
         *,
-        B: Optional[float],
-        field_length: Optional[float],
-        edge_length: float,
-        extraction_angle: Optional[float],
+        B: float, field_length: float, edge_length: float, extraction_angle: float,
     ) -> None:
         """
         Internal initialisation for bending magnets.
@@ -594,7 +491,7 @@ class MagneticStructure(object):
     def _init_arbitrary(
         self,
         *,
-        magnetic_field: Optional[Dict[str, Any]],
+        magnetic_field: dict,
     ) -> None:
         """
         Internal initialisation for arbitrary field magnets.
@@ -610,30 +507,21 @@ class MagneticStructure(object):
     @staticmethod
     def _resolve_K_plane(
         *,
-        K: Optional[float],
-        B: Optional[float],
-        period_length: float,
-        label: str,
+        K: float, B: float, period_length: float, label: str,
     ) -> float:
         """
-        Resolve canonical K for a single plane.
+        Internal resolve canonical K.
 
         Parameters
         ----------
-        K : float or None
-            Deflection parameter K provided by the user.
-        B : float or None
-            Peak magnetic field provided by the user [T].
-        period_length : float
-            Undulator period length [m].
-        label : str
-            Text label for error messages ('vertical' or 'horizontal').
+        - K (float): deflection parameter K provided by the user.
+        - B (float): peak magnetic field provided by the user [T].
+        - period_length (float): undulator period length [m].
+        - label (str): text label for error messages ('vertical' or 'horizontal').
 
         Returns
         -------
-        float
-            Canonical K value for the plane. Returns 0.0 if both K and B
-            are None (no field in this plane).
+        (float): canonical K value for the plane. Returns 0.0 if both K and B are None.
 
         Raises
         ------
@@ -655,15 +543,14 @@ class MagneticStructure(object):
         return CHARGE * B * period_length / (2.0 * PI * MASS * LIGHT)
 
     @property
-    def B_vertical(self) -> Optional[float]:
+    def B_vertical(self) -> float:
         """
         Vertical peak field [T] derived from K_vertical and period_length.
 
         Returns
         -------
-        float or None
-            Vertical peak field in Tesla, or None if this is not an
-            undulator/wiggler or if K_vertical is not defined.
+        (float): vertical peak field in Tesla, or None if this is not an undulator/wiggler
+             or if K_vertical is not defined.
         """
         if self.magnet_type not in ("undulator", "wiggler"):
             return None
@@ -675,15 +562,14 @@ class MagneticStructure(object):
         )
 
     @property
-    def B_horizontal(self) -> Optional[float]:
+    def B_horizontal(self) -> float:
         """
         Horizontal peak field [T] derived from K_horizontal and period_length.
 
         Returns
         -------
-        float or None
-            Horizontal peak field in Tesla, or None if this is not an
-            undulator/wiggler or if K_horizontal is not defined.
+        (float): horizontal peak field in Tesla, or None if this is not an undulator/wiggler
+             or if K_horizontal is not defined.
         """
         if self.magnet_type not in ("undulator", "wiggler"):
             return None
@@ -704,47 +590,34 @@ class MagneticStructure(object):
             
 class SynchrotronSource(object):
     """
-    Base container for a synchrotron radiation source.
+    Base container for a synchrotron radiation sources.
 
-    A SynchrotronSource combines an ElectronBeam instance and a
-    MagneticStructure instance. Concrete source classes such as
-    UndulatorSource, BendingMagnetSource and ArbitraryMagnetSource
-    build on this base.
+    A SynchrotronSource combines an ElectronBeam and a MagneticStructure. 
     """
 
     def __init__(self, electron_beam: ElectronBeam, magnetic_structure: MagneticStructure) -> None:
         """
-        Initialize a synchrotron source.
+        Initialize a synchrotron source container
 
         Parameters
         ----------
-        electron_beam : ElectronBeam
-            ElectronBeam instance describing the electron beam parameters.
-        magnetic_structure : MagneticStructure
-            MagneticStructure instance describing the magnetic structure
-            (undulator, bending magnet, arbitrary field, etc.).
+        - electron_beam (ElectronBeam): an isntance of ElectronBeam
+        - magnetic_structure (MagneticStructure): an isntance of MagneticStructure
         """
         self.ElectronBeam = electron_beam
         self.MagneticStructure = magnetic_structure
 
     def __getattr__(self, name: str):
         """
-        Delegate attribute access to ElectronBeam or MagneticStructure.
-
-        If an attribute is not found on the SynchrotronSource instance
-        itself, this method looks for it first on the ElectronBeam
-        instance and then on the MagneticStructure instance.
+        Retrieves an attribute from either the ElectronBeam or MagneticStructure instances if it exists.
 
         Parameters
         ----------
-        name : str
-            Name of the requested attribute.
+        - name (str): Name of the requested attribute.
 
         Returns
         -------
-        Any
-            Value of the attribute if it exists on ElectronBeam or
-            MagneticStructure.
+        - Value of the attribute if it exists on ElectronBeam or MagneticStructure.
 
         Raises
         ------
@@ -760,17 +633,14 @@ class SynchrotronSource(object):
             return getattr(self.MagneticStructure, name)
         raise AttributeError(f"'SynchrotronSource' object has no attribute '{name}'")
 
-    def write_syned_config(self, json_file: str, light_source_name: Optional[str] = None) -> None:
+    def write_syned_config(self, json_file: str, light_source_name: str = None) -> None:
         """
         Write a SYNED JSON configuration file.
 
         Parameters
         ----------
-        json_file : str
-            Path to the JSON file to be written.
-        light_source_name : str, optional
-            Name of the light source. If None, the file name (without
-            extension) is used.
+        - json_file (str): The path to the JSON file where the dictionary will be written.
+        - light_source_name (str): The name of the light source.
         """
         if light_source_name is None:
             light_source_name = json_file.split("/")[-1].replace(".json", "")
@@ -783,6 +653,162 @@ class SynchrotronSource(object):
         """
         self.ElectronBeam.print_attributes()
         self.MagneticStructure.print_attributes()
+
+# ------------------------------------------------------------------
+# Arbitrary/measured magnetic field
+# ------------------------------------------------------------------
+
+class ArbitraryMagnetSource(SynchrotronSource):
+    """
+    SR source based on a user-defined arbitrary magnetic field.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        """
+        Initialize an arbitrary magnetic source.
+
+        Parameters
+        ----------
+        - electron_beam (ElectronBeam): an isntance of ElectronBeam
+        - magnetic_structure (MagneticStructure): an isntance of MagneticStructure with
+             magnet_type='arbitrary'
+        """
+        super().__init__(**kwargs)
+
+    def initialize(self, *, si=-1e23, sf=1e23, center=None, verbose=False) -> None:
+        """
+        Trim and optionally recenter the arbitrary magnetic field.
+        
+        The magnetic field is assumed to be stored in:
+            self.MagneticStructure.magnetic_field
+        and must contain at least:
+            - 's' : (N,) array, longitudinal coordinate [m]
+            - 'B' : (N, 3) array, magnetic field vectors [T]
+
+        Any other key with a first dimension matching N is trimmed consistently with 's'.
+        
+
+        Parameters
+        ----------
+        - si, sf (float): lower and upper trimming bounds [m]. 
+        - center (float): new center position [m].
+        - verbose (bool): if True, prints to the prompt
+
+        Raises
+        ------
+        ValueError
+            If trimming removes all samples, or if the magnetic field
+            dictionary is missing mandatory keys.
+        """
+
+
+        mf = self.MagneticStructure.magnetic_field
+        if mf is None:
+            raise ValueError(
+                "magnetic_field dictionary is not set in MagneticStructure "
+                "(magnet_type='arbitrary' expected)."
+            )
+
+        try:
+            s = np.asarray(mf["s"], dtype=float)
+            B = np.asarray(mf["B"], dtype=float)
+        except KeyError as exc:
+            raise ValueError(
+                "The magnetic_field dictionary must contain keys 's' and 'B'."
+            ) from exc
+
+        if s.ndim != 1:
+            raise ValueError("'s' must be a 1D array.")
+        if B.ndim != 2 or B.shape[1] != 3 or B.shape[0] != s.size:
+            raise ValueError(
+                "'B' must be a (N, 3) array and its first dimension must "
+                "match len(s)."
+            )
+
+        if si > sf:
+            si, sf = sf, si
+
+        mask = (s >= si) & (s <= sf)
+        if not np.any(mask):
+            raise ValueError(
+                f"Trimming interval [{si}, {sf}] produced an empty dataset."
+            )
+
+        s_trim = s[mask]
+
+        mf_trim = {}
+        for k, v in mf.items():
+            if k == "s":
+                mf_trim["s"] = s_trim
+                continue
+            arr = np.asarray(v)
+            if arr.shape[:1] == (s.size,):
+                mf_trim[k] = arr[mask, ...]
+            else:
+                mf_trim[k] = v
+
+        mid = 0.5 * (s_trim[0] + s_trim[-1])
+        center_val = mid if center is None else float(center)
+
+        delta = center_val - mid
+        if delta != 0.0:
+            mf_trim["s"] = mf_trim["s"] + delta
+
+        self.MagneticStructure.magnetic_field = mf_trim
+        self.MagneticStructure.center = center_val
+
+        if verbose:
+            s_out = mf_trim["s"]
+            print(f"Field recentered at s = {center_val:.6f} m")
+            print(f"Span: [{s_out[0]:.6f}, {s_out[-1]:.6f}] m")
+            if s_out.size > 1:
+                print(f"Step size: {s_out[1] - s_out[0]:.6g} m; N = {s_out.size}")
+            else:
+                print("Only one sample after trimming.")
+
+# ------------------------------------------------------------------
+# Bending magnet
+# ------------------------------------------------------------------
+
+
+
+# ------------------------------------------------------------------
+# Undulator
+# ------------------------------------------------------------------
+
+
+
+# ------------------------------------------------------------------
+# Wiggler
+# ------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 class UndulatorSource(SynchrotronSource):
     """
@@ -862,7 +888,6 @@ class UndulatorSource(SynchrotronSource):
             raise ValueError("Please, provide either the wavelength [m], the magnetic fields [T] or the deflection parameters Kx and/or Ky.")
 
         if wavelength is not None:
-            print('aiaiai')
             self.MagneticStructure.harmonic = kwargs.get('harmonic', None)
             self.set_resonant_energy(energy=energy_wavelength(wavelength, unity='m'), 
                                      harmonic=self.harmonic, direction=direction, 
@@ -1480,46 +1505,69 @@ class UndulatorSource(SynchrotronSource):
 
 class BendingMagnetSource(SynchrotronSource):
     """
-    Class representing an bending magnet source, which combines an electron beam and 
-    a magnetic structure.
+    Bending magnet source: electron beam + bending magnet magnetic structure.
     """
+
     def __init__(self, **kwargs) -> None:
         """
-        Initializes an instance of the BendingMagnet class.
+        Initialize a bending magnet source.
 
-        Args:
-            electron_beam (ElectronBeam): An instance of the ElectronBeam class 
-               representing the electron beam parameters.
-            magnetic_structure (MagneticStructure): An instance of the MagneticStructure 
-               class representing the magnetic structure parameters.
+        Parameters
+        ----------
+        electron_beam : ElectronBeam
+            ElectronBeam instance.
+        magnetic_structure : MagneticStructure
+            MagneticStructure instance (must be magnet_type='bending_magnet').
         """
-        super().__init__(**kwargs)  
+        super().__init__(**kwargs)
+
+
+        self.radius: float | None = None
+        self.critical_energy: float | None = None
+
 
     def initialize(self, **kwargs) -> None:
         """
-        Sets the parameters of the bending magnet.
+        Configure the bending magnet from one of several possible inputs.
 
-        Keyword Args:
-            verbose (bool): If True, prints additional information. Default is False.
-            critical_wavelength (float): The critical wavelength in meters. If provided,
-               the magnetic field and radius of curvature are recalculated.
-
+        Keyword Parameters
+        ------------------
+        verbose : bool, optional
+            If True, print diagnostic information.
+        critical_wavelength : float, optional
+            Critical wavelength in meters. If provided, the magnetic field
+            and radius are recalculated accordingly.
+        extraction_angle : float, optional
+            Extraction angle (rad).
+        center : float, optional
+            Central position of the extraction point (m).
         """
         verbose = kwargs.get('verbose', False)
         critical_wavelength = kwargs.get('critical_wavelength', None)
 
-        piloting = [critical_wavelength, self.critical_energy, self.magnetic_field, self.radius]
+        B = self.MagneticStructure.B
 
-        if all(param is None for param in piloting):
-            raise ValueError("Please, provide either the critical wavelength [m], the magnetic field [T] or bending radius [m]")
+        piloting_inputs = [
+            critical_wavelength,
+            self.critical_energy,
+            B,
+            self.radius,
+        ]
+
+        if all(param is None for param in piloting_inputs):
+            raise ValueError(
+                "Please provide either critical wavelength [m], "
+                "the magnetic field B [T], or the bending radius [m]."
+            )
 
         if critical_wavelength is not None:
-            self.set_B_from_critical_energy(energy=energy_wavelength(critical_wavelength, unity='m'), 
-                                            verbose=verbose)
-            self.MagneticStructure.critical_energy = energy_wavelength(critical_wavelength, unity='m')
+            energy_eV = energy_wavelength(critical_wavelength, unity='m')
+            self.set_B_from_critical_energy(energy=energy_eV, verbose=verbose)
+            self.critical_energy = energy_eV
+
         else:
-            if self.magnetic_field is not None:
-                self.set_radius_from_B(magnetic_field=self.magnetic_field,  verbose=verbose)
+            if B is not None:
+                self.set_radius_from_B(magnetic_field=B, verbose=verbose)
             else:
                 self.set_B_from_radius(radius=self.radius, verbose=verbose)
 
@@ -1529,10 +1577,12 @@ class BendingMagnetSource(SynchrotronSource):
         if (extraction_angle is not None) and (center is not None):
             raise ValueError("Provide only one of 'extraction_angle' or 'center', not both.")
 
-        piloting = [extraction_angle, center,
-                        self.MagneticStructure.extraction_angle, self.center]
-        
-        if all(param is None for param in piloting):
+        if (
+            extraction_angle is None
+            and center is None
+            and self.MagneticStructure.center is None
+            and self.MagneticStructure.extraction_angle is None
+        ):
             center = 0.0
 
         if center is not None:
@@ -1541,126 +1591,141 @@ class BendingMagnetSource(SynchrotronSource):
         if extraction_angle is not None:
             self.set_B_central_position(extraction_angle=extraction_angle, verbose=verbose)
 
-        if self.MagneticStructure.center is not None and (center is None and extraction_angle is None):
-            self.set_B_central_position(center=self.MagneticStructure.center, verbose=verbose)
-
-        if self.MagneticStructure.extraction_angle is not None and (center is None and extraction_angle is None):
-            self.set_B_central_position(extraction_angle=self.MagneticStructure.extraction_angle, verbose=verbose)
+        if center is None and extraction_angle is None:
+            if self.MagneticStructure.center is not None:
+                self.set_B_central_position(center=self.MagneticStructure.center, verbose=verbose)
+            elif self.MagneticStructure.extraction_angle is not None:
+                self.set_B_central_position(
+                    extraction_angle=self.MagneticStructure.extraction_angle,
+                    verbose=verbose
+                )
 
     def set_B_from_critical_energy(self, energy: float, verbose: bool=False) -> None:
         """
-        Sets the magnetic field for a bending magnet based on the critical energy and  
-        on the electron beam energy. Updates the bending radius.
+        Set B from the critical photon energy (in eV) and beam energy.
 
-        Args:
-            critical energy (float): critical energy for a bending magnet based (in eV).
-            verbose (bool): If True, prints additional information. Default is False.
+        Parameters
+        ----------
+        energy : float
+            Critical photon energy [eV].
+        verbose : bool, optional
+            Print diagnostics.
         """
-        self.MagneticStructure.critical_energy = energy
+        self.critical_energy = energy
         gamma = self.gamma()
-        self.MagneticStructure.magnetic_field = (energy*4*PI*MASS)/(3*PLANCK*gamma**2)
-        self.set_radius_from_B(self.magnetic_field, False)
+
+        B = (energy * 4 * PI * MASS) / (3 * PLANCK * gamma**2)
+        self.MagneticStructure.B = B
+
+        self.set_radius_from_B(B, False)
+
         if verbose:
-            print(f"Bending magnet critial energy energy set to {self.critical_energy:.3f} eV with:")
-            print(f">> B: {self.magnetic_field:.6f} T")
-            print(f">> R: {self.radius:.6f} m")
+            print(f"Bending magnet critical energy set to {energy:.3f} eV:")
+            print(f">> B = {B:.6f} T")
+            print(f">> R = {self.radius:.6f} m")
 
     def set_radius_from_B(self, magnetic_field: float, verbose: bool=False) -> None:
         """
-        Sets the radius of curvature from the magnetic field for a bending magnet based 
-        on the electron beam energy.
+        Set the radius of curvature from magnetic field B.
 
-        Args:
-            magnetic_field (float): Vertical magnetic field component (in Tesla).
-            eBeamEnergy (float): Energy of the electron beam in GeV.
-            verbose (bool): If True, prints additional information. Default is False.
+        Parameters
+        ----------
+        magnetic_field : float
+            Magnetic field B [T].
+        verbose : bool, optional
+            Print diagnostics.
         """
-
-        self.MagneticStructure.magnetic_field = magnetic_field
-        self.set_critical_energy(False)
+        self.MagneticStructure.B = magnetic_field
         gamma = self.gamma()
-        e_speed = LIGHT * np.sqrt(1-1/gamma)
-        self.MagneticStructure.radius = gamma * MASS * e_speed /(CHARGE * np.abs(magnetic_field))
-        if verbose:
-            print(f"Bending magnet critial energy energy set to {self.critical_energy:.3f} eV with:")
-            print(f"\t>> B: {self.magnetic_field:.6f} T")
-            print(f"\t>> R: {self.radius:.6f} m")
 
-    def set_B_from_radius(self, radius:float, verbose: bool=False) -> None:
-        """
-        Sets the magnetic field from the radius of curvature for a bending magnet based 
-        on the electron beam energy.
+        e_speed = LIGHT * (1 - 1/gamma**2)**0.5
+        R = gamma * MASS * e_speed / (CHARGE * abs(magnetic_field))
 
-        Args:
-            eBeamEnergy (float): Energy of the electron beam in GeV.
-            verbose (bool): If True, prints additional information. Default is False.
-
-        """
-        self.MagneticStructure.radius = radius
-        gamma = self.gamma()
-        e_speed = LIGHT * np.sqrt(1-1/gamma)
-        self.MagneticStructure.magnetic_field = gamma * MASS * e_speed /(CHARGE * radius)
+        self.radius = R
         self.set_critical_energy(False)
+
         if verbose:
-            print(f"Bending magnet critial energy energy set to {self.critical_energy:.3f} eV with:")
-            print(f"\t>> B: {self.magnetic_field:.6f} T")
-            print(f"\t>> R: {self.radius:.6f} m")
+            print(f"From B={magnetic_field:.6f} T:")
+            print(f">> R = {R:.6f} m")
+            print(f">> critical energy = {self.critical_energy:.3f} eV")
+
+    def set_B_from_radius(self, radius: float, verbose: bool=False) -> None:
+        """
+        Set magnetic field B from radius (m), using beam energy.
+        """
+        self.radius = radius
+        gamma = self.gamma()
+
+        e_speed = LIGHT * (1 - 1/gamma**2)**0.5
+        B = gamma * MASS * e_speed / (CHARGE * radius)
+
+        self.MagneticStructure.B = B
+        self.set_critical_energy(False)
+
+        if verbose:
+            print(f"From R={radius:.6f} m:")
+            print(f">> B = {B:.6f} T")
+            print(f">> critical energy = {self.critical_energy:.3f} eV")
 
     def set_critical_energy(self, verbose: bool=False) -> float:
         """
-        Set the critical energy for a bending magnet based on the electron beam energy
+        Compute critical energy [eV] for the current B and electron beam.
+
+        Returns
+        -------
+        float
         """
-        self.MagneticStructure.critical_energy = (3*PLANCK*self.magnetic_field*self.gamma()**2)/(4*PI*MASS)
+        B = self.MagneticStructure.B
+        if B is None:
+            raise ValueError("Cannot compute critical energy: B is not set.")
+
+        gamma = self.gamma()
+
+        self.critical_energy = (3 * PLANCK * B * gamma**2) / (4 * PI * MASS)
+
         if verbose:
-            print(f">> critical energy {self.MagneticStructure.critical_energy:.2f} eV")
+            print(f">> critical energy: {self.critical_energy:.3f} eV")
 
-    def set_B_central_position(self, **kwargs):
+        return self.critical_energy
+
+    def set_B_central_position(self, **kwargs) -> None:
         """
-        Set the magnetic-field central position used for x-ray extraction.
+        Set the central extraction geometry.
 
-        Geometry:
-            - Define half-arc = (L / (2R)).
-            - Relationship between center (m) and extraction angle (rad):
-                extraction_angle = half_arc - center/R
-            so that:
-                center = (half_arc - extraction_angle) * R
-            - By convention, extraction at 0 rad is the magnet entrance; the
-            largest allowed angle is full_arc = L/R.
-
-        Keyword Args:
-            verbose (bool): If True, prints diagnostics. Default False.
-            extraction_angle (float | None): rad. Exactly one of (extraction_angle, center) must be provided.
-            center (float | None): m. Exactly one of (extraction_angle, center) must be provided.
+        Exactly one of:
+            center (m)
+            extraction_angle (rad)
+        must be provided.
         """
         verbose = kwargs.get('verbose', False)
         extraction_angle = kwargs.get('extraction_angle', None)
         center = kwargs.get('center', None)
 
-        if (extraction_angle is None) and (center is None):
-            raise ValueError("Provide either 'extraction_angle' (rad) or 'center' (m).")
-        if (extraction_angle is not None) and (center is not None):
-            raise ValueError("Provide only one of 'extraction_angle' or 'center', not both.")
+        if (center is None) and (extraction_angle is None):
+            raise ValueError("Provide 'center' (m) or 'extraction_angle' (rad).")
+        if (center is not None) and (extraction_angle is not None):
+            raise ValueError("Provide only one, not both.")
 
-        L = self.field_length
+        L = self.MagneticStructure.field_length
         R = self.radius
+
         if L is None or R is None:
-            raise ValueError("field_length and radius must be set before computing extraction geometry.")
+            raise ValueError("field_length and radius must be defined before geometry.")
 
         half_arc = 0.5 * L / R
         full_arc = L / R
 
         if extraction_angle is None:
-            extraction_angle = (half_arc - center / R)
+            extraction_angle = half_arc - center / R
         else:
             center = (half_arc - extraction_angle) * R
 
         if not (0.0 <= extraction_angle <= full_arc):
             raise ValueError(
-                f"extraction_angle={extraction_angle:.6g} rad out of range [0, {full_arc:.6g}] "
-                f"(L={L:.6g} m, R={R:.6g} m)."
+                f"extraction_angle={extraction_angle:.6f} rad out of range [0, {full_arc:.6f}]"
             )
 
-        magnetic_field_center = (0.5 * L - center)
+        magnetic_field_center = 0.5 * L - center
 
         self.MagneticStructure.extraction_angle = extraction_angle
         self.MagneticStructure.center = center
@@ -1671,101 +1736,7 @@ class BendingMagnetSource(SynchrotronSource):
             print(f"Extraction axis {extraction_angle*1E3:.3f} mrad from the previous straight section")
             print(f">> arc segment of {2*half_arc*1E3:.3f} mrad (L={L:.3f} m/R={R:.3f} m).")
 
-class ArbitraryMagnetSource(SynchrotronSource):
-    """
-    Class representing an arbitrary magnetic source, which combines an electron beam and 
-    a magnetic structure.
-    """
-    def __init__(self, **kwargs) -> None:
-        """
-        Initializes an instance of the ArbitraryMagnetSource class.
 
-        Args:
-            electron_beam (ElectronBeam): An instance of the ElectronBeam class 
-               representing the electron beam parameters.
-            magnetic_structure (MagneticStructure): An instance of the MagneticStructure 
-               class representing the magnetic structure parameters.
-        """
-        super().__init__(**kwargs)  
-
-    def initialize(self, **kwargs) -> None:
-        """
-        Sets a user-defined arbitrary magnetic field and trims/recenters all s-aligned data.
-
-        Keyword Args
-        ------------
-        magnetic_field : dict
-            Dictionary with at least:
-            - 's' : (N,) float array, longitudinal coordinate [m]
-            - 'B' : (N, 3) float array, magnetic field vectors [T]
-            Extra keys are allowed. Any extra value that is array-like with a first
-            dimension N (same length as 's') will be trimmed consistently. This is
-            intended to catch Twiss arrays when present, e.g.:
-            beta_x, beta_y, eta_x, eta_y, alpha_x, alpha_y, etap_x, etap_y, ...
-        recenter : float | None
-            If provided, shift the final 's' so that its midpoint is at `-recenter`
-            (i.e., s := s - (mid + recenter)). If None, no recentering is done.
-        si : float
-            Start position for trimming. Default: -1e23 (no lower cut).
-        sf : float
-            End position for trimming. Default:  1e23 (no upper cut).
-
-        Raises
-        ------
-        ValueError
-            If the magnetic field dictionary is missing or invalid, or if trimming
-            results in an empty interval.
-        """
-
-        verbose = kwargs.get('verbose', False)
-        center = kwargs.get('center', None)
-        si      = kwargs.get('si', -1e23)
-        sf      = kwargs.get('sf',  1e23)
-
-        mf = self.MagneticStructure.magnetic_field
-        s  = np.asarray(mf['s'], dtype=float)
-        B  = np.asarray(mf['B'], dtype=float)
-
-        if s.ndim != 1:
-            raise ValueError("'s' must be 1D.")
-        if B.ndim != 2 or B.shape[1] != 3 or B.shape[0] != s.size:
-            raise ValueError("'B' must be (N,3) and match len(s).")
-
-        if si > sf:
-            si, sf = sf, si
-
-        mask = (s >= si) & (s <= sf)
-        if not np.any(mask):
-            raise ValueError(f"Trimming produced empty interval: [{si}, {sf}] yielded no samples.")
-
-        s_trim = s[mask]
-
-        mf_trim = {}
-        for k, v in mf.items():
-            if k == 's':
-                mf_trim['s'] = s_trim
-                continue
-            arr = np.asarray(v)
-            if arr.shape[:1] == (s.size,):
-                mf_trim[k] = arr[mask, ...]
-            else:
-                mf_trim[k] = v
-
-        mid = 0.5 * (s_trim[0] + s_trim[-1])
-        center_val = mid if center is None else float(center)
-
-        delta = center_val - mid
-        if delta != 0.0:
-            mf_trim['s'] = mf_trim['s'] + delta
-
-        self.MagneticStructure.magnetic_field = mf_trim
-        self.MagneticStructure.center = center_val
-
-        if verbose:
-            s_out = mf_trim['s']
-            print(f"Grid center (array midpoint): s = {center_val:.6f} m")
-            print(f"Grid span: [{s_out[0]:.6f}, {s_out[-1]:.6f}] m")
-            print(f"Step_size: {s[1]-s[0]:.6g} m; N = {s_out.size}")
 
     
 #***********************************************************************************
