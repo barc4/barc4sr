@@ -21,6 +21,7 @@ __created__ = '2024.11.25'
 __changed__ = '2025.11.19'
 
 import os
+from copy import deepcopy
 
 import numpy as np
 import scipy.optimize as opt
@@ -679,7 +680,8 @@ class ArbitraryMagnetSource(SynchrotronSource):
                 "ArbitraryMagnetSource requires MagneticStructure with "
                 "magnet_type='arbitrary'."
             )
-        
+        self._original_magnetic_field = None
+
     def configure(self, *, si=-1e23, sf=1e23, center=None, verbose=False) -> None:
         """
         Configure an arbitrary magnetic source.
@@ -700,12 +702,15 @@ class ArbitraryMagnetSource(SynchrotronSource):
         """
 
 
-        mf = self.MagneticStructure.magnetic_field
-        if mf is None:
-            raise ValueError(
-                "magnetic_field dictionary is not set in MagneticStructure "
-                "(magnet_type='arbitrary' expected)."
-            )
+        if self._original_magnetic_field is None:
+            if self.MagneticStructure.magnetic_field is None:
+                raise ValueError(
+                    "magnetic_field dictionary is not set in MagneticStructure "
+                    "(magnet_type='arbitrary' expected)."
+                )
+            self._original_magnetic_field = deepcopy(self.MagneticStructure.magnetic_field)
+
+        mf = self._original_magnetic_field
 
         try:
             s = np.asarray(mf["s"], dtype=float)
@@ -764,6 +769,19 @@ class ArbitraryMagnetSource(SynchrotronSource):
                 print(f"\t>> Step size: {s_out[1] - s_out[0]:.6g} m; N = {s_out.size}")
             else:
                 print("Only one sample after trimming.")
+
+    def reset_field(self) -> None:
+        """
+        Reset the magnetic field to its original untrimmed state.
+        """
+        if self._original_magnetic_field is None:
+            raise RuntimeError(
+                "reset_field() called before configure(). "
+                "There is no stored original magnetic field to restore."
+            )
+
+        self.MagneticStructure.magnetic_field = deepcopy(self._original_magnetic_field)
+        self.MagneticStructure.center = 0.0
 
 # ------------------------------------------------------------------
 # Bending magnet
@@ -911,6 +929,41 @@ class BendingMagnetSource(SynchrotronSource):
         if B is None:
             raise ValueError("Magnetic field B is not defined in MagneticStructure.")
         return B
+
+    @B.setter
+    def B(self, value: float) -> None:
+        """
+        Set magnetic field amplitude [T].
+        """
+        self.MagneticStructure.B = value
+
+    @property
+    def center(self) -> float:
+        """
+        Center of the magnetic field [m].
+        """
+        return self.MagneticStructure.center
+
+    @center.setter
+    def center(self, value: float) -> None:
+        """
+        Set center of the magnetic field [m].
+        """
+        self.MagneticStructure.center = value
+
+    @property
+    def extraction_angle(self) -> float:
+        """
+        Extraction angle [rad] taken from the previous straight section.
+        """
+        return self.MagneticStructure.extraction_angle
+
+    @extraction_angle.setter
+    def extraction_angle(self, value: float) -> None:
+        """
+        Set extraction angle [rad] taken from the previous straight section.
+        """
+        self.MagneticStructure.extraction_angle = value
 
     @property
     def radius(self) -> float:
