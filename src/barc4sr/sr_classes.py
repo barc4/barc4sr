@@ -362,7 +362,7 @@ class MagneticStructure(object):
         - B_vertical_symmetry, B_horizontal_symmetry (int):
             Symmetry flags describing the field parity:
                 1  -> symmetric     (B ~ cos(2*pi*n*z/period + phase))
-               -1  -> antisymmetric (B ~ sin(2*pi*n*z/period + phase))
+                Z-1  -> antisymmetric (B ~ sin(2*pi*n*z/period + phase))
         - harmonic (int): harmonic index used in source calculations.
 
         ---------------------------------------------
@@ -371,9 +371,9 @@ class MagneticStructure(object):
         - B (float): magnetic field amplitude [T].
         - field_length (float): length of the region with full field [m].
         - edge_length (float): Soft edge length for field variation (10% to 90%) in meters.
-             Assumes a fringe field dependence of B / (1 + ((z - zc) / d)^2)^2.
+            Assumes a fringe field dependence of B / (1 + ((z - zc) / d)^2)^2.
         - extraction_angle (float): observation angle with respect to the preceeding 
-             straight section [rad].
+            straight section [rad].
 
         Raises
         ------
@@ -550,7 +550,7 @@ class MagneticStructure(object):
         Returns
         -------
         (float): vertical peak field in Tesla, or None if this is not an undulator/wiggler
-             or if K_vertical is not defined.
+            or if K_vertical is not defined.
         """
         if self.magnet_type not in ("undulator", "wiggler"):
             return None
@@ -669,24 +669,22 @@ class ArbitraryMagnetSource(SynchrotronSource):
 
         Parameters
         ----------
-        - electron_beam (ElectronBeam): an isntance of ElectronBeam
-        - magnetic_structure (MagneticStructure): an isntance of MagneticStructure with
-             magnet_type='arbitrary'
+        - electron_beam (ElectronBeam)
+        - magnetic_structure (MagneticStructure)
         """
         super().__init__(**kwargs)
 
-    def initialize(self, *, si=-1e23, sf=1e23, center=None, verbose=False) -> None:
+        if getattr(self.MagneticStructure, "magnet_type", None) != "arbitrary":
+            raise ValueError(
+                "ArbitraryMagnetSource requires MagneticStructure with "
+                "magnet_type='arbitrary'."
+            )
+        
+    def configure(self, *, si=-1e23, sf=1e23, center=None, verbose=False) -> None:
         """
-        Trim and optionally recenter the arbitrary magnetic field.
-        
-        The magnetic field is assumed to be stored in:
-            self.MagneticStructure.magnetic_field
-        and must contain at least:
-            - 's' : (N,) array, longitudinal coordinate [m]
-            - 'B' : (N, 3) array, magnetic field vectors [T]
+        Configure an arbitrary magnetic source.
 
-        Any other key with a first dimension matching N is trimmed consistently with 's'.
-        
+        Trim and optionally recenter the arbitrary magnetic field.      
 
         Parameters
         ----------
@@ -759,10 +757,11 @@ class ArbitraryMagnetSource(SynchrotronSource):
 
         if verbose:
             s_out = mf_trim["s"]
-            print(f"Field recentered at s = {center_val:.6f} m")
-            print(f"Span: [{s_out[0]:.6f}, {s_out[-1]:.6f}] m")
+            print('\n>>>>>>>>>>> User-defined arbitrary magnetic field <<<<<<<<<<<\n')
+            print(f"\t>> Field recentered at s = {center_val:.6f} m")
+            print(f"\t>> Span: [{s_out[0]:.6f}, {s_out[-1]:.6f}] m")
             if s_out.size > 1:
-                print(f"Step size: {s_out[1] - s_out[0]:.6g} m; N = {s_out.size}")
+                print(f"\t>> Step size: {s_out[1] - s_out[0]:.6g} m; N = {s_out.size}")
             else:
                 print("Only one sample after trimming.")
 
@@ -770,45 +769,171 @@ class ArbitraryMagnetSource(SynchrotronSource):
 # Bending magnet
 # ------------------------------------------------------------------
 
+class BendingMagnetSource(SynchrotronSource):
+    """
+    SR bending magnet source
+    """
 
+    def __init__(self, **kwargs) -> None:
+        """
+        Initialize a bending magnet source.
 
+        Parameters
+        ----------
+        - electron_beam (ElectronBeam)
+        - magnetic_structure (MagneticStructure)
+        """
+        super().__init__(**kwargs)
+
+        if getattr(self.MagneticStructure, "magnet_type", None) != "bending_magnet":
+            raise ValueError(
+                "BendingMagnetSource requires MagneticStructure with "
+                "magnet_type='bending_magnet'."
+            )
+
+    def configure(self,
+        *,
+        center: float = None,
+        extraction_angle: float = None,
+        verbose: bool = False,
+    ) -> None:
+        """
+        Configure bending magnet source.
+
+        From B and the electron beam energy, the radius and critical energy can be computed
+        on the fly and optionally printed.
+
+        The extraction geometry is defined by either the center position [m] of the magnetic
+        field or the extraction angle [rad] taken from the preceeding straight section. 
+
+        Parameters
+        ----------
+        - center (float): center of the magnetic field [m]. The emission direction (optical
+            axis) is taken from the tangent to the trajectory at this position. 
+        - extraction_angle (float): extraction angle [rad] taken from the previous straight
+            section. 0 [rad] is the magnet entrance and L/R [rad] is the magnet exit. If 
+            provided, the center is derived from it and stored in MagneticStructure.center.
+        - verbose (bool): if True, prints to the prompt
+
+        Raises
+        ------
+        ValueError
+            If B is not set, or if both center and extraction_angle are
+            provided at the same time.
+        """
+        _ = self.B
+
+        if verbose:
+            print('\n>>>>>>>>>>> bending magnet <<<<<<<<<<<\n')
+            print("> Properties:")
+            print(f"\t>> B = {self.B:.6f} T")
+            print(f"\t>> R = {self.radius:.6f} m")
+            print(f"\t>> critical energy = {self.critical_energy:.3f} eV")
+
+        if center is not None and extraction_angle is not None:
+            raise ValueError("Provide only one of 'center' or 'extraction_angle', not both.")
+
+        if center is None and extraction_angle is None:
+            if self.MagneticStructure.center is not None:
+                center = self.MagneticStructure.center
+            elif self.MagneticStructure.extraction_angle is not None:
+                extraction_angle = self.MagneticStructure.extraction_angle
+            else:
+                center = 0.0
+
+        self._set_geometry(center=center, extraction_angle=extraction_angle, verbose=verbose)
+
+    def _set_geometry(self, *,
+        center: float, extraction_angle: float,
+        verbose: bool = False,
+    ) -> None:
+        """
+        Internal helper to set extraction geometry.
+
+        Parameters
+        ----------
+        - center (float): center of the magnetic field [m]. The emission direction (optical
+            axis) is taken from the tangent to the trajectory at this position. 
+        - extraction_angle (float): extraction angle [rad] taken from the previous straight
+            section. 0 [rad] is the magnet entrance and L/R [rad] is the magnet exit. If 
+            provided, the center is derived from it and stored in MagneticStructure.center.
+        - verbose (bool): if True, prints to the prompt
+
+        Raises
+        ------
+        ValueError
+            If both center and extraction_angle are None, or if the
+            resulting angle is out of range.
+        """
+        if center is None and extraction_angle is None:
+            raise ValueError("Provide 'center' (m) or 'extraction_angle' (rad).")
+
+        L = self.MagneticStructure.field_length
+        if L is None:
+            raise ValueError("MagneticStructure.field_length must be defined.")
+
+        R = self.radius
+
+        half_arc = 0.5 * L / R
+        full_arc = L / R
+
+        if extraction_angle is None:
+            center_val = float(center)
+            extraction_angle = half_arc - center_val / R
+        else:
+            extraction_angle = float(extraction_angle)
+            center_val = (half_arc - extraction_angle) * R
+
+        if not (0.0 <= extraction_angle <= full_arc):
+            raise ValueError(
+                f"extraction_angle={extraction_angle:.6g} rad out of range [0, {full_arc:.6g}]"
+            )
+
+        magnetic_field_center = 0.5 * L - center_val
+
+        self.MagneticStructure.center = center_val
+        self.MagneticStructure.extraction_angle = extraction_angle
+
+        if verbose:
+            print("> Extraction geometry:")
+            print(f"\t>> dist. from BM center    : {center_val:.6f} m")
+            print(f"\t>> dist. from BM entrance  : {magnetic_field_center:.6f} m")
+            print(f"\t>> extraction angle        : {extraction_angle*1e3:.3f} mrad")
+            print(f"\t>> BM arc                  : {2.0*half_arc*1e3:.3f} mrad "
+                  f"(L={L:.3f} m, R={R:.3f} m)")
+
+    @property
+    def B(self) -> float:
+        """
+        Magnetic field amplitude [T].
+        """
+        B = self.MagneticStructure.B
+        if B is None:
+            raise ValueError("Magnetic field B is not defined in MagneticStructure.")
+        return B
+
+    @property
+    def radius(self) -> float:
+        """
+        Bending radius [m], computed from B and electron beam energy.
+        """
+        B = self.B
+        gamma = self.gamma()
+        e_speed = LIGHT * np.sqrt(1.0 - 1.0 / gamma**2)
+        return gamma * MASS * e_speed / (CHARGE * abs(B))
+
+    @property
+    def critical_energy(self) -> float:
+        """
+        Critical photon energy [eV], computed from B and electron beam energy.
+        """
+        B = self.B
+        gamma = self.gamma()
+        return (3.0 * PLANCK * B * gamma**2) / (4.0 * PI * MASS)
+    
 # ------------------------------------------------------------------
 # Undulator
 # ------------------------------------------------------------------
-
-
-
-# ------------------------------------------------------------------
-# Wiggler
-# ------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 class UndulatorSource(SynchrotronSource):
     """
@@ -1503,241 +1628,6 @@ class UndulatorSource(SynchrotronSource):
 
         self.power_though_slit = {'power': CumPow, 'slit': {'dh':hor_slit, 'dv':ver_slit}}
 
-class BendingMagnetSource(SynchrotronSource):
-    """
-    Bending magnet source: electron beam + bending magnet magnetic structure.
-    """
-
-    def __init__(self, **kwargs) -> None:
-        """
-        Initialize a bending magnet source.
-
-        Parameters
-        ----------
-        electron_beam : ElectronBeam
-            ElectronBeam instance.
-        magnetic_structure : MagneticStructure
-            MagneticStructure instance (must be magnet_type='bending_magnet').
-        """
-        super().__init__(**kwargs)
-
-
-        self.radius: float | None = None
-        self.critical_energy: float | None = None
-
-
-    def initialize(self, **kwargs) -> None:
-        """
-        Configure the bending magnet from one of several possible inputs.
-
-        Keyword Parameters
-        ------------------
-        verbose : bool, optional
-            If True, print diagnostic information.
-        critical_wavelength : float, optional
-            Critical wavelength in meters. If provided, the magnetic field
-            and radius are recalculated accordingly.
-        extraction_angle : float, optional
-            Extraction angle (rad).
-        center : float, optional
-            Central position of the extraction point (m).
-        """
-        verbose = kwargs.get('verbose', False)
-        critical_wavelength = kwargs.get('critical_wavelength', None)
-
-        B = self.MagneticStructure.B
-
-        piloting_inputs = [
-            critical_wavelength,
-            self.critical_energy,
-            B,
-            self.radius,
-        ]
-
-        if all(param is None for param in piloting_inputs):
-            raise ValueError(
-                "Please provide either critical wavelength [m], "
-                "the magnetic field B [T], or the bending radius [m]."
-            )
-
-        if critical_wavelength is not None:
-            energy_eV = energy_wavelength(critical_wavelength, unity='m')
-            self.set_B_from_critical_energy(energy=energy_eV, verbose=verbose)
-            self.critical_energy = energy_eV
-
-        else:
-            if B is not None:
-                self.set_radius_from_B(magnetic_field=B, verbose=verbose)
-            else:
-                self.set_B_from_radius(radius=self.radius, verbose=verbose)
-
-        extraction_angle = kwargs.get('extraction_angle', None)
-        center = kwargs.get('center', None)
-
-        if (extraction_angle is not None) and (center is not None):
-            raise ValueError("Provide only one of 'extraction_angle' or 'center', not both.")
-
-        if (
-            extraction_angle is None
-            and center is None
-            and self.MagneticStructure.center is None
-            and self.MagneticStructure.extraction_angle is None
-        ):
-            center = 0.0
-
-        if center is not None:
-            self.set_B_central_position(center=center, verbose=verbose)
-
-        if extraction_angle is not None:
-            self.set_B_central_position(extraction_angle=extraction_angle, verbose=verbose)
-
-        if center is None and extraction_angle is None:
-            if self.MagneticStructure.center is not None:
-                self.set_B_central_position(center=self.MagneticStructure.center, verbose=verbose)
-            elif self.MagneticStructure.extraction_angle is not None:
-                self.set_B_central_position(
-                    extraction_angle=self.MagneticStructure.extraction_angle,
-                    verbose=verbose
-                )
-
-    def set_B_from_critical_energy(self, energy: float, verbose: bool=False) -> None:
-        """
-        Set B from the critical photon energy (in eV) and beam energy.
-
-        Parameters
-        ----------
-        energy : float
-            Critical photon energy [eV].
-        verbose : bool, optional
-            Print diagnostics.
-        """
-        self.critical_energy = energy
-        gamma = self.gamma()
-
-        B = (energy * 4 * PI * MASS) / (3 * PLANCK * gamma**2)
-        self.MagneticStructure.B = B
-
-        self.set_radius_from_B(B, False)
-
-        if verbose:
-            print(f"Bending magnet critical energy set to {energy:.3f} eV:")
-            print(f">> B = {B:.6f} T")
-            print(f">> R = {self.radius:.6f} m")
-
-    def set_radius_from_B(self, magnetic_field: float, verbose: bool=False) -> None:
-        """
-        Set the radius of curvature from magnetic field B.
-
-        Parameters
-        ----------
-        magnetic_field : float
-            Magnetic field B [T].
-        verbose : bool, optional
-            Print diagnostics.
-        """
-        self.MagneticStructure.B = magnetic_field
-        gamma = self.gamma()
-
-        e_speed = LIGHT * (1 - 1/gamma**2)**0.5
-        R = gamma * MASS * e_speed / (CHARGE * abs(magnetic_field))
-
-        self.radius = R
-        self.set_critical_energy(False)
-
-        if verbose:
-            print(f"From B={magnetic_field:.6f} T:")
-            print(f">> R = {R:.6f} m")
-            print(f">> critical energy = {self.critical_energy:.3f} eV")
-
-    def set_B_from_radius(self, radius: float, verbose: bool=False) -> None:
-        """
-        Set magnetic field B from radius (m), using beam energy.
-        """
-        self.radius = radius
-        gamma = self.gamma()
-
-        e_speed = LIGHT * (1 - 1/gamma**2)**0.5
-        B = gamma * MASS * e_speed / (CHARGE * radius)
-
-        self.MagneticStructure.B = B
-        self.set_critical_energy(False)
-
-        if verbose:
-            print(f"From R={radius:.6f} m:")
-            print(f">> B = {B:.6f} T")
-            print(f">> critical energy = {self.critical_energy:.3f} eV")
-
-    def set_critical_energy(self, verbose: bool=False) -> float:
-        """
-        Compute critical energy [eV] for the current B and electron beam.
-
-        Returns
-        -------
-        float
-        """
-        B = self.MagneticStructure.B
-        if B is None:
-            raise ValueError("Cannot compute critical energy: B is not set.")
-
-        gamma = self.gamma()
-
-        self.critical_energy = (3 * PLANCK * B * gamma**2) / (4 * PI * MASS)
-
-        if verbose:
-            print(f">> critical energy: {self.critical_energy:.3f} eV")
-
-        return self.critical_energy
-
-    def set_B_central_position(self, **kwargs) -> None:
-        """
-        Set the central extraction geometry.
-
-        Exactly one of:
-            center (m)
-            extraction_angle (rad)
-        must be provided.
-        """
-        verbose = kwargs.get('verbose', False)
-        extraction_angle = kwargs.get('extraction_angle', None)
-        center = kwargs.get('center', None)
-
-        if (center is None) and (extraction_angle is None):
-            raise ValueError("Provide 'center' (m) or 'extraction_angle' (rad).")
-        if (center is not None) and (extraction_angle is not None):
-            raise ValueError("Provide only one, not both.")
-
-        L = self.MagneticStructure.field_length
-        R = self.radius
-
-        if L is None or R is None:
-            raise ValueError("field_length and radius must be defined before geometry.")
-
-        half_arc = 0.5 * L / R
-        full_arc = L / R
-
-        if extraction_angle is None:
-            extraction_angle = half_arc - center / R
-        else:
-            center = (half_arc - extraction_angle) * R
-
-        if not (0.0 <= extraction_angle <= full_arc):
-            raise ValueError(
-                f"extraction_angle={extraction_angle:.6f} rad out of range [0, {full_arc:.6f}]"
-            )
-
-        magnetic_field_center = 0.5 * L - center
-
-        self.MagneticStructure.extraction_angle = extraction_angle
-        self.MagneticStructure.center = center
-
-        if verbose:
-            print(f"Extraction at {-1*center:.3f} m from the center of the bending magnet.")
-            print(f">> {magnetic_field_center:.3f} m from the BM entrance.")
-            print(f"Extraction axis {extraction_angle*1E3:.3f} mrad from the previous straight section")
-            print(f">> arc segment of {2*half_arc*1E3:.3f} mrad (L={L:.3f} m/R={R:.3f} m).")
-
-
-
     
 #***********************************************************************************
 # **planar undulator** auxiliary functions 
@@ -1809,6 +1699,52 @@ def Fn(K, n):
 # K. J. Kim, "Optical and power characteristics of synchrotron radiation sources" 
 # [also Erratum 34(4)1243(Apr1995)],  Opt. Eng 34(2), 342 (1995)
 #***********************************************************************************
+
+# ------------------------------------------------------------------
+# Wiggler
+# ------------------------------------------------------------------
+
+class WigglerSource(SynchrotronSource):
+    """
+    Placeholder: SR Wiggler source.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        """
+        Initialize a wiggler source.
+
+        Parameters
+        ----------
+        - electron_beam (ElectronBeam)
+        - magnetic_structure (MagneticStructure)
+        """
+        super().__init__(**kwargs)
+
+        if getattr(self.MagneticStructure, "magnet_type", None) != "wiggler":
+            raise ValueError(
+                "WigglerSource requires a MagneticStructure with "
+                "magnet_type='wiggler'."
+            )
+
+    def initialize(self, **kwargs) -> None:
+        """
+        Configure the wiggler source.
+
+        Parameters
+        ----------
+        **kwargs
+            Reserved for future configuration options.
+
+        Raises
+        ------
+        NotImplementedError
+            Always raised until the wiggler model is implemented.
+        """
+        raise NotImplementedError(
+            "WigglerSource.initialize() is not implemented yet. "
+            "Please implement the wiggler radiation model."
+        )
+    
 
 #***********************************************************************************
 # **other** auxiliary functions 
