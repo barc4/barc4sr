@@ -682,7 +682,7 @@ class ArbitraryMagnetSource(SynchrotronSource):
             )
         self._original_magnetic_field = None
 
-    def configure(self, *, si=-1e23, sf=1e23, center=None, verbose=False) -> None:
+    def configure(self, *, si=-1e23, sf=1e23, dS=None, verbose=False) -> None:
         """
         Configure an arbitrary magnetic source.
 
@@ -691,7 +691,7 @@ class ArbitraryMagnetSource(SynchrotronSource):
         Parameters
         ----------
         - si, sf (float): lower and upper trimming bounds [m]. 
-        - center (float): new center position [m].
+        - dS (float): shift applied to the magnetic-field grid [m].
         - verbose (bool): if True, prints to the prompt
 
         Raises
@@ -700,17 +700,91 @@ class ArbitraryMagnetSource(SynchrotronSource):
             If trimming removes all samples, or if the magnetic field
             dictionary is missing mandatory keys.
         """
+        if dS is not None:
+            self.recenter(dS=dS, verbose=False)
+        self.trim(si=si, sf=sf, verbose=False)
 
+        if verbose:
+            self._verbose()
 
-        if self._original_magnetic_field is None:
-            if self.MagneticStructure.magnetic_field is None:
-                raise ValueError(
-                    "magnetic_field dictionary is not set in MagneticStructure "
-                    "(magnet_type='arbitrary' expected)."
-                )
-            self._original_magnetic_field = deepcopy(self.MagneticStructure.magnetic_field)
+    def recenter(self, *, dS=None, verbose=False) -> None:
+        """
+        Recenter the arbitrary magnetic field.
 
-        mf = self._original_magnetic_field
+        The recentering is performed on the current magnetic field stored in
+        MagneticStructure.magnetic_field and does not crop any data.
+
+        Parameters
+        ----------
+        - dS (float): shift applied to the magnetic-field grid [m]. If None, the midpoint
+            of the current s-interval is used.
+        - verbose (bool): if True, prints to the prompt
+        """
+        self._ensure_original_field()
+
+        mf = self.MagneticStructure.magnetic_field
+        if mf is None:
+            raise ValueError(
+                "magnetic_field dictionary is not set in MagneticStructure "
+                "(magnet_type='arbitrary' expected)."
+            )
+
+        try:
+            s = np.asarray(mf["s"], dtype=float)
+        except KeyError as exc:
+            raise ValueError(
+                "The magnetic_field dictionary must contain key 's'."
+            ) from exc
+
+        if s.ndim != 1:
+            raise ValueError("'s' must be a 1D array.")
+
+        mid = 0.5 * (s[0] + s[-1])
+        center_val = mid if dS is None else float(dS)
+        delta = center_val - mid
+
+        mf_shift = {}
+        for k, v in mf.items():
+            if k == "s":
+                mf_shift["s"] = s + delta
+            else:
+                mf_shift[k] = v
+
+        self.MagneticStructure.magnetic_field = mf_shift
+        self.MagneticStructure.center = center_val
+
+        if verbose:
+            self._verbose()
+
+    def trim(self, *, si=-1e23, sf=1e23, verbose=False) -> None:
+        """
+        Trim the arbitrary magnetic field.
+
+        The trimming is performed on the current magnetic field stored in
+        MagneticStructure.magnetic_field. If the field has been recentered
+        (via recenter or configure), the trimming bounds si and sf are
+        interpreted in that recentered coordinate system.
+
+        Parameters
+        ----------
+        - si, sf (float): lower and upper trimming bounds [m] in the
+            current coordinate system (usually recentered).
+        - verbose (bool): if True, prints to the prompt
+
+        Raises
+        ------
+        ValueError
+            If trimming removes all samples, or if the magnetic field
+            dictionary is missing mandatory keys.
+        """
+        self._ensure_original_field()
+
+        mf = self.MagneticStructure.magnetic_field
+        if mf is None:
+            raise ValueError(
+                "magnetic_field dictionary is not set in MagneticStructure "
+                "(magnet_type='arbitrary' expected)."
+            )
 
         try:
             s = np.asarray(mf["s"], dtype=float)
@@ -750,25 +824,11 @@ class ArbitraryMagnetSource(SynchrotronSource):
             else:
                 mf_trim[k] = v
 
-        mid = 0.5 * (s_trim[0] + s_trim[-1])
-        center_val = mid if center is None else float(center)
-
-        delta = center_val - mid
-        if delta != 0.0:
-            mf_trim["s"] = mf_trim["s"] + delta
-
         self.MagneticStructure.magnetic_field = mf_trim
-        self.MagneticStructure.center = center_val
+        self.MagneticStructure.center = (mf_trim["s"][-1]+mf_trim["s"][0])/2
 
         if verbose:
-            s_out = mf_trim["s"]
-            print('\n>>>>>>>>>>> User-defined arbitrary magnetic field <<<<<<<<<<<\n')
-            print(f"\t>> Field recentered at s = {center_val:.6f} m")
-            print(f"\t>> Span: [{s_out[0]:.6f}, {s_out[-1]:.6f}] m")
-            if s_out.size > 1:
-                print(f"\t>> Step size: {s_out[1] - s_out[0]:.6g} m; N = {s_out.size}")
-            else:
-                print("Only one sample after trimming.")
+            self._verbose()
 
     def reset_field(self) -> None:
         """
@@ -782,6 +842,33 @@ class ArbitraryMagnetSource(SynchrotronSource):
 
         self.MagneticStructure.magnetic_field = deepcopy(self._original_magnetic_field)
         self.MagneticStructure.center = 0.0
+
+    def _ensure_original_field(self) -> None:
+        """
+        Internal helper to cache the original magnetic field.
+
+        Makes a deepcopy of MagneticStructure.magnetic_field on first use.
+        """
+        if self._original_magnetic_field is None:
+            if self.MagneticStructure.magnetic_field is None:
+                raise ValueError(
+                    "magnetic_field dictionary is not set in MagneticStructure "
+                    "(magnet_type='arbitrary' expected)."
+                )
+            self._original_magnetic_field = deepcopy(self.MagneticStructure.magnetic_field)
+
+    def _verbose(self) -> None:
+        """
+        Internal helper print info on current magnetic field.
+        """    
+        s_out = self.MagneticStructure.magnetic_field["s"]
+        print('\n>>>>>>>>>>> User-defined arbitrary magnetic field <<<<<<<<<<<\n')
+        print(f"\t>> Field (re)centered at s = {self.MagneticStructure.center:.6f} m")
+        print(f"\t>> Span: [{s_out[0]:.6f}, {s_out[-1]:.6f}] m")
+        if s_out.size > 1:
+            print(f"\t>> Step size: {s_out[1] - s_out[0]:.6g} m; N = {s_out.size}")
+        else:
+            print("Only one sample (no trimming).")
 
 # ------------------------------------------------------------------
 # Bending magnet

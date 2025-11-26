@@ -170,11 +170,11 @@ def barc4sr_dictionary(light_source: object, observation_point: float,
         beamline['Class'] = 'bm'
         beamline['Bh'] = None
         beamline['Bv'] = None
-        beamline['B'] = light_source.MagneticStructure.magnetic_field
-        beamline['R'] = light_source.MagneticStructure.radius
-        beamline['Leff'] = light_source.MagneticStructure.field_length
-        beamline['Ledge'] = light_source.MagneticStructure.edge_length
-        beamline['ExtAng'] = light_source.MagneticStructure.extraction_angle
+        beamline['B'] = light_source.B
+        beamline['R'] = light_source.radius
+        beamline['Leff'] = light_source.field_length
+        beamline['Ledge'] = light_source.edge_length
+        beamline['ExtAng'] = light_source.extraction_angle
     # bending magnet        
     if light_source.MagneticStructure.CLASS_NAME.startswith("A"):
         beamline['Class'] = 'arb'

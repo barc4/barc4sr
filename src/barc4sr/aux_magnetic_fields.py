@@ -11,6 +11,7 @@ __copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
 __created__ = '2024.11.25'
 __changed__ = '2025.11.04'
 
+import math
 import os
 from typing import List
 
@@ -230,8 +231,9 @@ def bm_magnetic_field(
         if m == "erf":
             sigma = delta / C_ERF
             denom = sigma * np.sqrt(2.0)
-            S_rise = lambda x: 0.5 * (1.0 + np.erf(x / denom))
-            S_fall = lambda x: 0.5 * (1.0 + np.erf(-x / denom))
+            verf = np.vectorize(math.erf)
+            S_rise = lambda x: 0.5 * (1.0 + verf(x / denom))
+            S_fall = lambda x: 0.5 * (1.0 + verf(-x / denom))
             return S_rise, S_fall
 
         if m == "arctan":
