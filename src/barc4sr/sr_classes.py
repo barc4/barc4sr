@@ -682,7 +682,7 @@ class ArbitraryMagnetSource(SynchrotronSource):
             )
         self._original_magnetic_field = None
 
-    def configure(self, *, si=-1e23, sf=1e23, dS=None, verbose=False) -> None:
+    def configure(self, *, si=-1e23, sf=1e23, dS=None, reset=False, verbose=False) -> None:
         """
         Configure an arbitrary magnetic source.
 
@@ -692,6 +692,8 @@ class ArbitraryMagnetSource(SynchrotronSource):
         ----------
         - si, sf (float): lower and upper trimming bounds [m]. 
         - dS (float): shift applied to the magnetic-field grid [m].
+        - reset (bool): if True, restore the original untrimmed field before
+            applying dS and trimming.
         - verbose (bool): if True, prints to the prompt
 
         Raises
@@ -700,6 +702,12 @@ class ArbitraryMagnetSource(SynchrotronSource):
             If trimming removes all samples, or if the magnetic field
             dictionary is missing mandatory keys.
         """
+
+        self._ensure_original_field()
+
+        if reset:
+            self.reset_field()
+
         if dS is not None:
             self.recenter(dS=dS, verbose=False)
         self.trim(si=si, sf=sf, verbose=False)
