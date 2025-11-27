@@ -546,67 +546,7 @@ def treat_periodic_signal(signal, axis, threshold=0.5):
 
     return periodic_signal_properties
 
-
-
-# def fit_gap_field_relation(gap_table: List[float], B_table: List[float], 
-#                            und_per: float) -> Tuple[float, float, float]:
-#     """
-#     Fit parameters coeff0, coeff1, and coeff2 for an undulator from the given tables:
-
-#     B0 = c0 * exp[c1(gap/und_per) + c2(gap/und_per)**2]
-
-#     Parameters:
-#         gap_table (List[float]): List of gap sizes in meters.
-#         B_table (List[float]): List of magnetic field values in Tesla corresponding to the gap sizes.
-#         und_per (float): Undulator period in meters.
-
-#     Returns:
-#         Tuple[float, float, float]: Fitted parameters (coeff0, coeff1, coeff2).
-#     """
-#     def _model(gp, c0, c1, c2):
-#         return c0 * np.exp(c1*gp + c2*gp**2)
-
-#     def _fit_parameters(gap, und_per, B):
-#         gp = gap / und_per
-#         popt, pcov = curve_fit(_model, gp, B, p0=(1, 1, 1)) 
-#         return popt
-
-#     popt = _fit_parameters(np.asarray(gap_table), und_per, np.asarray(B_table))
-#     coeff0_fit, coeff1_fit, coeff2_fit = popt
-
-#     print("Fitted parameters:")
-#     print("coeff0:", coeff0_fit)
-#     print("coeff1:", coeff1_fit)
-#     print("coeff2:", coeff2_fit)
-
-#     return coeff0_fit, coeff1_fit, coeff2_fit
-
-
-# def get_B_from_gap(gap: Union[float, np.ndarray], und_per: float, coeff: Tuple[float, float, float]) -> Union[float, np.ndarray, None]:
-#     """
-#     Calculate the magnetic field B from the given parameters:
-#        B0 = c0 * exp[c1(gap/und_per) + c2(gap/und_per)**2]
-
-#     Parameters:
-#         gap (Union[float, np.ndarray]): Gap size(s) in meters.
-#         und_per (float): Undulator period in meters.
-#         coeff (Tuple[float, float, float]): Fit coefficients.
-
-#     Returns:
-#         Union[float, np.ndarray, None]: Calculated magnetic field B if gap and period are positive, otherwise None.
-#     """
-#     if isinstance(gap, np.ndarray):
-#         if np.any(gap <= 0) or und_per <= 0:
-#             return None
-#         gp = gap / und_per
-#     else:
-#         if gap <= 0 or und_per <= 0:
-#             return None
-#         gp = gap / und_per
-
-#     B = coeff[0] * np.exp(coeff[1] * gp + coeff[2] * gp**2)
-#     return B
-#     
+     
 if __name__ == '__main__':
 
     file_name = os.path.basename(__file__)
