@@ -2,8 +2,10 @@
 # Copyright (c) 2025 Synchrotron SOLEIL
 
 """
-Unified public plotting API for barc4sr (plot_* functions only).
+Unified public plotting API for barc4sr.
 """
+
+from __future__ import annotations
 
 from .trajectory import (
     plot_electron_trajectory,

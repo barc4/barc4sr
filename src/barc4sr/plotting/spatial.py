@@ -2,7 +2,7 @@
 # Copyright (c) 2025 Synchrotron SOLEIL
 
 """
-spatial.py - plots for 2D spatial maps: wavefronts, power density, and CSD.
+Plots for 2D spatial maps: wavefronts, power density, and CSD.
 """
 
 from __future__ import annotations

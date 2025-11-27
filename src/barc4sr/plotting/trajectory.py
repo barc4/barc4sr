@@ -1,5 +1,8 @@
+# SPDX-License-Identifier: CECILL-2.1
+# Copyright (c) 2025 Synchrotron SOLEIL
+
 """
-trajectory.py - plotting of particle trajectories and magnetic fields.
+Plotting of particle trajectories and magnetic fields.
 """
 
 from __future__ import annotations

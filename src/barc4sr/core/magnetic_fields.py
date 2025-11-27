@@ -5,9 +5,9 @@
 magnetic_fields.py - general magnetic field functions for accelerators and SR.
 """
 
+from __future__ import annotations
 
 import math
-import os
 from typing import List
 
 import numpy as np

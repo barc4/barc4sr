@@ -1,23 +1,16 @@
-#!/bin/python
+# SPDX-License-Identifier: CECILL-2.1
+# Copyright (c) 2025 Synchrotron SOLEIL
 
 """
-This module provides interfacing functions for SYNED and barc4sr
+mapping.py - interfacing functions for SYNED and barc4sr
 """
 
-__author__ = ['Rafael Celestre']
-__contact__ = 'rafael.celestre@synchrotron-soleil.fr'
-__license__ = 'CC BY-NC-SA 4.0'
-__copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
-__created__ = '25/NOV/2024'
-__changed__ = '26/JUN/2025'
+from __future__ import annotations
 
 import json
 
 import numpy as np
 
-#***********************************************************************************
-# functions
-#***********************************************************************************
 
 def write_syned_file(json_file: str, light_source_name: str, ElectronBeamClass: object, 
                      MagneticStructureClass: object) -> None:
@@ -120,7 +113,6 @@ def syned_dictionary(json_file: str, observation_point: float,
     beamline['slitVcenter'] = ver_slit_cen
   
     return beamline
-
 
 def barc4sr_dictionary(light_source: object, observation_point: float,
                        hor_slit: float, ver_slit: float, hor_slit_cen: float, ver_slit_cen: float) -> dict:

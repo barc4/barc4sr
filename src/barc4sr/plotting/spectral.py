@@ -2,7 +2,7 @@
 # Copyright (c) 2025 Synchrotron SOLEIL
 
 """
-spectral.py - plots for spectra, tuning curves, and beamline acceptance scans.
+Plots for spectra, tuning curves, and beamline acceptance scans.
 """
 
 from __future__ import annotations

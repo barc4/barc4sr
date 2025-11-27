@@ -2,7 +2,7 @@
 # Copyright (c) 2025 Synchrotron SOLEIL
 
 """
-style.py - common plotting helpers, styles, and colormaps.
+Common plotting helpers, styles, and colormaps.
 """
 
 from __future__ import annotations

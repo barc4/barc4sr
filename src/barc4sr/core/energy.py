@@ -5,6 +5,8 @@
 energy.py - helper functions for energy, wavelength and related SR quantities.
 """
 
+from __future__ import annotations
+
 import os
 
 import numpy as np

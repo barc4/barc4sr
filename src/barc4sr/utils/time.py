@@ -5,6 +5,8 @@
 time.py - Small helpers for measuring and printing elapsed wall-clock time.
 """
 
+from __future__ import annotations
+
 from time import time
 
 

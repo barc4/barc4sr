@@ -1,10 +1,11 @@
-#!/bin/python
 # SPDX-License-Identifier: CECILL-2.1
 # Copyright (c) 2025 Synchrotron SOLEIL
 
 """
-rw.py - read/write helpers for barc4sr results in HDF5 format.
+Read/Write helpers for barc4sr results in HDF5 format.
 """
+
+from __future__ import annotations
 
 import os
 import pickle
