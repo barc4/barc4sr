@@ -1,15 +1,10 @@
-#!/bin/python
+# SPDX-License-Identifier: CECILL-2.1
+# Copyright (c) 2025 Synchrotron SOLEIL
 
 """
-This module provides several auxiliary magnetic field functions
+magnetic_fields.py - general magnetic field functions for accelerators and SR.
 """
 
-__author__ = ['Rafael Celestre']
-__contact__ = 'rafael.celestre@synchrotron-soleil.fr'
-__license__ = 'CC BY-NC-SA 4.0'
-__copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
-__created__ = '2024.11.25'
-__changed__ = '2025.11.04'
 
 import math
 import os
@@ -18,9 +13,9 @@ from typing import List
 import numpy as np
 from scipy.signal import find_peaks
 
-#***********************************************************************************
-# Arbitrary magnetic fields
-#***********************************************************************************
+# ---------------------------------------------------------------------------
+# Validation of magnetic field dictionary
+# ---------------------------------------------------------------------------
 
 def check_magnetic_field_dictionary(magnetic_field_dictionary: dict) -> bool:
     """
@@ -84,9 +79,9 @@ def check_magnetic_field_dictionary(magnetic_field_dictionary: dict) -> bool:
 
     return True
 
-#***********************************************************************************
-# Bending magnets
-#***********************************************************************************
+# ---------------------------------------------------------------------------
+# bending magnets
+# ---------------------------------------------------------------------------
 
 def bm_magnetic_field(
     magnet: dict,
@@ -514,10 +509,10 @@ def multi_arb_magnetic_field(
 
     return {"s": s, "B": B_vec}
 
-#***********************************************************************************
-# periodic signal treatment
-#***********************************************************************************
-    
+# ---------------------------------------------------------------------------
+# Miscellaneous
+# ---------------------------------------------------------------------------
+
 def treat_periodic_signal(signal, axis, threshold=0.5):
     """
     Count the number of periods in a sinusoidal signal with a threshold on amplitude.
@@ -578,10 +573,3 @@ def treat_periodic_signal(signal, axis, threshold=0.5):
     }
 
     return periodic_signal_properties
-
-     
-if __name__ == '__main__':
-
-    file_name = os.path.basename(__file__)
-
-    print(f"This is the barc4sr.{file_name} module!")
