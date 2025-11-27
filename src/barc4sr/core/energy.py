@@ -1,15 +1,9 @@
-#!/bin/python
+# SPDX-License-Identifier: CECILL-2.1
+# Copyright (c) 2025 Synchrotron SOLEIL
 
 """
-This module provides auxiliary functions for energy relations
+energy.py - helper functions for energy, wavelength and related SR quantities.
 """
-
-__author__ = ['Rafael Celestre']
-__contact__ = 'rafael.celestre@synchrotron-soleil.fr'
-__license__ = 'CC BY-NC-SA 4.0'
-__copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
-__created__ = '25/NOV/2024'
-__changed__ = '07/JUL/2024'
 
 import os
 
@@ -27,13 +21,13 @@ MASS = physical_constants["electron mass"][0]
 
 def get_gamma(E: float) -> float:
     """
-    Calculate the Lorentz factor (γ) based on the energy of electrons in GeV.
+    Calculate the Lorentz factor (gamma) based on the energy of electrons in GeV.
 
     Parameters:
         E (float): Energy of electrons in GeV.
 
     Returns:
-        float: Lorentz factor (γ).
+        float: Lorentz factor (gamma).
     """
     return E * 1e9 / (MASS * LIGHT ** 2) * CHARGE
 
@@ -133,10 +127,3 @@ def get_undulator_emission_energy(und_per: float, K: float, ring_e: float, n: in
     emission_wavelength = und_per * (1 + (K ** 2) / 2 + (gamma * theta) ** 2) / (2 * n * gamma ** 2)
 
     return energy_wavelength(emission_wavelength, "m")
-
-
-if __name__ == '__main__':
-
-    file_name = os.path.basename(__file__)
-
-    print(f"This is the barc4sr.{file_name} module!")
