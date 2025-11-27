@@ -1,106 +1,17 @@
-#!/bin/python
+# SPDX-License-Identifier: CECILL-2.1
+# Copyright (c) 2025 Synchrotron SOLEIL
 
 """
-This module provides a collection of functions for processing and analyzing data related
- to undulator radiation, power density, and spectra. It includes functions for reading 
- data from XOPPY files (HDF5 format), SPECTRA files (JSON format), and processing the 
- data to calculate various properties such as spectral power, cumulated power, 
- integrated power, and power density. Additionally, it offers functions for selecting 
- specific energy ranges within 3D data sets, spatially trimming data, and generating 
- animated GIFs of energy scans in the 3D data-sets. Overall, this module facilitates 
- the analysis and visualization of data obtained from simulations related to synchrotron 
- radiation sources.
+Module for processing power density maps.
 """
 
-__author__ = ['Rafael Celestre']
-__contact__ = 'rafael.celestre@synchrotron-soleil.fr'
-__license__ = 'CC BY-NC-SA 4.0'
-__copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
-__created__ = '26/JAN/2024'
-__changed__ = '04/JUL/2025'
+from __future__ import annotations
 
-import json
-import multiprocessing
-import os
-import pickle
-import sys
-from typing import Any, Dict, List, Optional, Tuple, Union
 from copy import copy
-import h5py as h5
-import imageio
-import matplotlib.pyplot as plt
+
 import numpy as np
-import scipy.integrate as integrate
-from PIL import Image, ImageDraw, ImageFont
-from scipy.constants import physical_constants
 from scipy.interpolate import RegularGridInterpolator
 
-try:
-    import srwpy.srwlib as srwlib
-    USE_SRWLIB = True
-except:
-    import oasys_srw.srwlib as srwlib
-    USE_SRWLIB = True
-if USE_SRWLIB is False:
-     raise AttributeError("SRW is not available")
-
-CHARGE = physical_constants["atomic unit of charge"][0]
-
-
-#***********************************************************************************
-# Wavefront
-#***********************************************************************************
-
-def integrate_wavefront_window(wfrDict, hor_slit, ver_slit):
-    """
-    Integrates the wavefront intensity within a rectangular window.
-
-    Parameters:
-        wfrDict (dict): Dictionary containing wavefront data as produced by write_wavefront.
-        hor_slit (tuple or float): (x_min, x_max) limits of window [m], or positive float interpreted as (-w/2, +w/2).
-        ver_slit (tuple or float): (y_min, y_max) limits of window [m], or positive float interpreted as (-w/2, +w/2).
-
-    Returns:
-        dict: Dictionary with structure {polarisation: integrated_intensity, ...}, plus the window used.
-    """
-
-    x_axis = wfrDict['axis']['x']
-    y_axis = wfrDict['axis']['y']
-
-    if isinstance(hor_slit, (int, float)):
-        if hor_slit <= 0:
-            raise ValueError("hor_slit must be positive if passed as float.")
-        half_w = hor_slit / 2
-        hor_slit = (-half_w, half_w)
-
-    if isinstance(ver_slit, (int, float)):
-        if ver_slit <= 0:
-            raise ValueError("ver_slit must be positive if passed as float.")
-        half_w = ver_slit / 2
-        ver_slit = (-half_w, +half_w)
-
-    x_min, x_max = hor_slit
-    y_min, y_max = ver_slit
-
-    x_mask = (x_axis >= x_min) & (x_axis <= x_max)
-    y_mask = (y_axis >= y_min) & (y_axis <= y_max)
-
-    dx = (x_axis[1] - x_axis[0]) * 1e3  # mm
-    dy = (y_axis[1] - y_axis[0]) * 1e3  # mm
-
-    results = {'hor_slit': hor_slit, 'ver_slit': ver_slit}
-
-    for pol in wfrDict['intensity']:
-        map2d = copy(wfrDict['intensity'][pol])
-        subarray = map2d[np.ix_(y_mask, x_mask)]
-        integrated = np.sum(subarray) * dx * dy
-        results[pol] = integrated
-
-    return results
-
-#***********************************************************************************
-# Power density
-#***********************************************************************************
 
 def integrate_power_density_window(pwrDict, hor_slit, ver_slit):
     """
@@ -153,7 +64,7 @@ def integrate_power_density_window(pwrDict, hor_slit, ver_slit):
     return results
 
 
-def trim_and_resample_power_density(pwrDict: Dict, **kwargs: Union[float, bool]) -> Dict:
+def trim_and_resample_power_density(pwrDict,  **kwargs):
     """
     Trims and optionally resamples the power density maps for all polarisations in pwrDict.
 
@@ -254,11 +165,3 @@ def trim_and_resample_power_density(pwrDict: Dict, **kwargs: Union[float, bool])
               f"Peak density: {resultDict[pol]['peak']:.3f} W/mm^2")
 
     return resultDict
-
-
-if __name__ == '__main__':
-
-    file_name = os.path.basename(__file__)
-
-    print(f"This is the barc4sr.{file_name} module!")
-
