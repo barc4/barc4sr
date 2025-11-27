@@ -92,7 +92,8 @@ def bm_magnetic_field(
     magnet: dict,
     *,
     padding: float = 0.0,
-    step_size: float = 1e-3,
+    step_size: float | None = None,
+    n_steps: int | None = None,
     verbose: bool = False,
 ) -> dict:
     """
@@ -107,7 +108,7 @@ def bm_magnetic_field(
                 "length": float,      # effective magnetic length [m]
                 "s0": float, optional # center position [m] (default 0.0)
                 "soft_edge": {        # optional, see below
-                    "mode": {"none","tanh","erf","arctan","gompertz","srw"},
+                    "mode": {"none","tanh","erf","arctan","gompertz","srw"},  # default "gompertz"
                     "edge_length": float,  # 10-90% rise distance [m]
                     "center_on": {"midpoint","left","right"}  # default "midpoint"
                 }
@@ -125,7 +126,10 @@ def bm_magnetic_field(
     padding : float, optional
         Zero-field padding [m] added on both sides of the magnet (default 0).
     step_size : float, optional
-        Sampling step [m] (default 1e-3).
+        Sampling step [m] (default 1e-3 if n_steps not provided).
+        Cannot be used together with n_steps.
+    n_steps : int, optional
+        Number of sampling steps. Cannot be used together with step_size.
     verbose : bool, optional
         If True, prints a short summary.
 
@@ -142,7 +146,8 @@ def bm_magnetic_field(
     TypeError
         If `magnet` is not a dict with required keys.
     ValueError
-        If parameters are invalid (e.g., non-positive length/step) or soft_edge fails validation.
+        If parameters are invalid (e.g., non-positive length/step) or soft_edge fails validation,
+        or if both step_size and n_steps are provided, or if neither is provided.
     """
 
     if not isinstance(magnet, dict):
@@ -156,10 +161,18 @@ def bm_magnetic_field(
     center = float(magnet.get("s0", 0.0))
     if length <= 0:
         raise ValueError("length must be positive.")
-    if step_size <= 0:
-        raise ValueError("step_size must be positive.")
     if padding < 0:
         raise ValueError("padding must be non-negative.")
+    
+    # Validate step_size and n_steps
+    if step_size is not None and n_steps is not None:
+        raise ValueError("Cannot specify both step_size and n_steps; provide only one.")
+    if step_size is None and n_steps is None:
+        step_size = 1e-3  # default
+    if step_size is not None and step_size <= 0:
+        raise ValueError("step_size must be positive.")
+    if n_steps is not None and n_steps <= 0:
+        raise ValueError("n_steps must be positive.")
 
     soft_edge = magnet.get("soft_edge", None)
 
@@ -168,7 +181,7 @@ def bm_magnetic_field(
             return {"mode": "none"}
         if not isinstance(se, dict):
             raise ValueError("magnet['soft_edge'] must be a dict.")
-        mode = str(se.get("mode", "none")).lower()
+        mode = str(se.get("mode", "gompertz")).lower()
         if mode not in {"none","tanh","erf","arctan","gompertz","srw"}:
             raise ValueError("soft_edge['mode'] must be one of {'none','tanh','erf','arctan','gompertz','srw'}.")
         if mode == "none":
@@ -191,8 +204,10 @@ def bm_magnetic_field(
     s_min = center - half_total
     s_max = center + half_total
     total_span = s_max - s_min
-    n_steps = max(1, int(round(total_span / step_size)))
-    s_max = s_min + n_steps * step_size
+    
+    if n_steps is None:
+        n_steps = max(1, int(round(total_span / step_size)))
+    s_max = s_min + n_steps * step_size if step_size is not None else s_min + total_span
     s = np.linspace(s_min, s_max, n_steps + 1)
 
     L_edge = center - half_active
@@ -244,8 +259,8 @@ def bm_magnetic_field(
 
         if m == "gompertz":
             # Flipped Gompertz with correct opposite asymmetry on fall:
-            #   rise: S↑(x) = 1 - exp(-ln2 * exp(+c x))  → long left, short right
-            #   fall: S↓(x) = 1 - exp(-ln2 * exp(-c x))  → short left, long right
+            #   rise: S(x) = 1 - exp(-ln2 * exp(+c x)) -> long left, short right
+            #   fall: S(x) = 1 - exp(-ln2 * exp(-c x)) -> short left, long right
             c = C_GOMP / delta
             S_rise = lambda x: 1.0 - np.exp(-LN2 * np.exp(+c * x))
             S_fall = lambda x: 1.0 - np.exp(-LN2 * np.exp(-c * x))
@@ -301,15 +316,14 @@ def bm_magnetic_field(
 def multi_bm_magnetic_field(
     magnets: List[dict],
     padding: float = 0.0,
-    step_size: float = 1e-3,
+    step_size: float | None = None,
+    n_steps: int | None = None,
     verbose: bool = False,
 ) -> dict:
     """
     Construct a composite magnetic field from multiple bending-magnet elements.
-
     Each magnet is defined like in `bm_magnetic_field`, including an optional
     per-magnet soft-edge specification nested inside the magnet dict.
-
     Parameters
     ----------
     magnets : list of dict
@@ -321,26 +335,28 @@ def multi_bm_magnetic_field(
             # optional:
             "padding": float,       # per-magnet padding [m] (defaults to global `padding`)
             "soft_edge": {          # OPTIONAL, same structure as in bm_magnetic_field
-               "mode": "none" | "tanh" | "erf" | "arctan" | "gompertz" | "srw",
+               "mode": "none" | "tanh" | "erf" | "arctan" | "gompertz" | "srw",  # default "gompertz"
                "edge_length": float,  # 10-90 width [m] (required if mode != "none")
-               "center_on": "midpoint" | "left" | "right"
+               "center_on": "midpoint" | "left" | "right"  # default "midpoint"
             }
           }
-
         Notes
         -----
         - "tanh" is a symmetric Bashmakov-like edge (dimensional tanh; no gap h).
         - "srw" uses the super-Lorentzian (order 2) CDF (SRW default padding family).
         - For preserving the full plateau length, set `soft_edge.center_on="right"`.
-
+        - When only "edge_length" is provided in soft_edge, defaults to mode="gompertz" 
+          and center_on="midpoint".
     padding : float, optional
         Global zero-field padding [m] added at both ends of *each* magnet's local grid
         unless a per-magnet "padding" overrides it. Default 0.
     step_size : float, optional
-        Sampling step along the global s-axis [m]. Default 1e-3.
+        Sampling step along the global s-axis [m] (default 1e-3 if n_steps not provided).
+        Cannot be used together with n_steps.
+    n_steps : int, optional
+        Number of sampling steps. Cannot be used together with step_size.
     verbose : bool, optional
         If True, prints per-magnet summaries from `bm_magnetic_field`.
-
     Returns
     -------
     dict
@@ -348,16 +364,24 @@ def multi_bm_magnetic_field(
             "s": np.ndarray,      # global axis [m], symmetric around 0
             "B": np.ndarray,      # shape (N,3): (Bx=0, By, Bz=0), composite field
         }
-
     Raises
     ------
     ValueError
-        If input list is empty or malformed.
+        If input list is empty or malformed, or if both step_size and n_steps are provided,
+        or if neither is provided.
     """
-
     if not isinstance(magnets, (list, tuple)) or not magnets:
         raise ValueError("magnets must be a non-empty list of dictionaries.")
-
+    
+    if step_size is not None and n_steps is not None:
+        raise ValueError("Cannot specify both step_size and n_steps; provide only one.")
+    if step_size is None and n_steps is None:
+        step_size = 1e-3  # default
+    if step_size is not None and step_size <= 0:
+        raise ValueError("step_size must be positive.")
+    if n_steps is not None and n_steps <= 0:
+        raise ValueError("n_steps must be positive.")
+    
     s_min_all, s_max_all = np.inf, -np.inf
     for m in magnets:
         if not all(k in m for k in ("B", "length", "s0")):
@@ -368,31 +392,40 @@ def multi_bm_magnetic_field(
         half_total = 0.5 * L + max(f_loc, 0.0)
         s_min_all = min(s_min_all, s0 - half_total)
         s_max_all = max(s_max_all, s0 + half_total)
-
     s_min_raw = s_min_all
     s_max_raw = s_max_all
     half_span = max(abs(s_min_raw), abs(s_max_raw))
-    s = np.arange(-half_span, half_span + 0.5 * step_size, step_size)
-
+    
+    # Create s-axis based on step_size or n_steps
+    if n_steps is not None:
+        s = np.linspace(-half_span, half_span, n_steps + 1)
+        actual_step_size = s[1] - s[0] if len(s) > 1 else 0.0
+    else:
+        s = np.arange(-half_span, half_span + 0.5 * step_size, step_size)
+        actual_step_size = step_size
+    
     By_total = np.zeros_like(s, dtype=float)
-
     for i, m in enumerate(magnets):
         if verbose:
             print(f"\n[Magnet {i+1}]")
         f_loc = float(m.get("padding", padding))
-        bm = bm_magnetic_field(
-            magnet=m,
-            padding=f_loc,
-            step_size=step_size,
-            verbose=verbose,
-        )
+        
+        bm_kwargs = {
+            "magnet": m,
+            "padding": f_loc,
+            "verbose": verbose,
+        }
+        if n_steps is not None:
+            bm_kwargs["step_size"] = actual_step_size
+        else:
+            bm_kwargs["step_size"] = step_size
+        
+        bm = bm_magnetic_field(**bm_kwargs)
         local_s = bm["s"]
         local_By = bm["B"][:, 1]
-
-        idx = np.round((local_s - s[0]) / step_size).astype(int)
+        idx = np.round((local_s - s[0]) / actual_step_size).astype(int)
         good = (idx >= 0) & (idx < s.size)
         np.add.at(By_total, idx[good], local_By[good])
-
     B_vec = np.column_stack([np.zeros_like(s), By_total, np.zeros_like(s)])
     return {"s": s, "B": B_vec}
 
