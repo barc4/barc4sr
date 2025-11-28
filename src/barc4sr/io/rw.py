@@ -1,15 +1,11 @@
-#!/bin/python
+# SPDX-License-Identifier: CECILL-2.1
+# Copyright (c) 2025 Synchrotron SOLEIL
 
 """
-This module provides a collection of functions for rading and saving barc4sr calculations
+Read/Write helpers for barc4sr results in HDF5 format.
 """
 
-__author__ = ['Rafael Celestre']
-__contact__ = 'rafael.celestre@synchrotron-soleil.fr'
-__license__ = 'CC BY-NC-SA 4.0'
-__copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
-__created__ = '26/JAN/2024'
-__changed__ = '16/JUL/2025'
+from __future__ import annotations
 
 import os
 import pickle
@@ -32,9 +28,9 @@ if USE_SRWLIB is False:
 
 CHARGE = physical_constants["atomic unit of charge"][0]
 
-#***********************************************************************************
+# ---------------------------------------------------------------------------
 # electron trajectory
-#***********************************************************************************
+# ---------------------------------------------------------------------------
 
 def write_electron_trajectory(file_name:str, eTraj: srwlib.SRWLPrtTrj) -> dict:
     """
@@ -173,9 +169,9 @@ def read_electron_trajectory_dat(file_path: str) -> dict:
 
     return eTrajDict
 
-#***********************************************************************************
-# Wavevfront
-#***********************************************************************************
+# ---------------------------------------------------------------------------
+# Wavefront
+# ---------------------------------------------------------------------------
    
 def write_wavefront(file_name: str, wfr: srwlib.SRWLWfr, selected_polarisations: list, 
                     number_macro_electrons: int, propagation_distance: float=None) -> dict:
@@ -337,9 +333,9 @@ def read_wavefront(file_name: str) -> dict:
         "phase": phase
     }
 
-#***********************************************************************************
+# ---------------------------------------------------------------------------
 # Power density
-#***********************************************************************************
+# ---------------------------------------------------------------------------
 
 def write_power_density(file_name: str, stks: srwlib.SRWLStokes, selected_polarisations: list) -> dict:
     """
@@ -444,9 +440,9 @@ def read_power_density(file_name: str) -> dict:
 
     return pwrDict
 
-#***********************************************************************************
-# spectrum
-#***********************************************************************************
+# ---------------------------------------------------------------------------
+# Spectrum
+# ---------------------------------------------------------------------------
 
 def write_spectrum(file_name: str, spectrum: dict) -> dict:
     """
@@ -561,9 +557,9 @@ def read_spectrum(file_name: str) -> dict:
 
     return spectrumDict
 
-#***********************************************************************************
-# coherent mode decomposition
-#***********************************************************************************
+# ---------------------------------------------------------------------------
+# Coherent mode decomposition
+# ---------------------------------------------------------------------------
 
 def write_cmd(file_name: str, cmd: dict) -> dict:
     """
@@ -656,9 +652,3 @@ def read_cmd(file_name: str) -> dict:
             }
 
     return cmdDict
-
-if __name__ == '__main__':
-
-    file_name = os.path.basename(__file__)
-
-    print(f"This is the barc4sr.{file_name} module!")

@@ -1,34 +1,88 @@
 # barc4sr
 **BARC** library for **S**ynchrotron **R**adiation
 
-This library was created for facilitating the use of [SRW](https://github.com/ochubar/SRW) for a few routine calculations 
-such as:
+This library was created for facilitating the use of [SRW](https://github.com/ochubar/SRW) 
+and [WOFRY](https://github.com/oasys-kit/wofry) for a few routine calculations.
 
-- undulator emission spectra - on axis or through a slit;
-- power (density) through a slit;
-- undulator radiation spectral and spatial distribution;
+It provides:
 
-All calculations take either an ideal magnetic field or a tabulated measurement. In the 
-case of a tabulated measurement, a Monte-Carlo sampling of the electron-beam phase space 
-is necessary for a few calculations and recommended for others. 
+- canonical beam and magnet classes (ElectronBeam, MagneticStructure, SynchrotronSource, …)
+- magnetic-field generators (bending magnets, arbitrary fields, multi-element fields)
+- SRW-powered computations (electron trajectories, wavefronts, power density)
+- Wofry-powered computations (CMD)
 
-This module is inspired by [xoppy](https://github.com/oasys-kit/xoppylib), but but with 
-the "multi-electron" calculations and parallelisation of a few routines. 
+# Features
 
-## installation
+### Core modelling
+- **ElectronBeam**: canonical storage of second-order moments  
+- **MagneticStructure**: bending magnets, arbitrary fields; undulators/ wigglers planned  
+- **SynchrotronSource** hierarchy:
+  - `BendingMagnetSource`
+  - `ArbitraryMagnetSource`
 
-bar4sr is on PyPi! So it can be installed as ```pip install barc4sr``` _hooray_!!! Otherwise,
-clone the project, fix the (many bugs) and help improve it...
+### Magnetic-field generation
+- `bm_magnetic_field()` – soft-edge bending magnet model  
+- `arb_magnetic_field()` – arbitrary user-defined magnetic fields  
+- `multi_bm_magnetic_field()` – composite bending-magnet lattices  
+- `multi_arb_magnetic_field()` – multi-field arbitrary lattices  
 
-## TODO:
+### SRW-based radiation calculations
+- `electron_trajectory()`  
+- `wavefront()`  
+- `power_density()`  
 
-Ideally, I want to add the same functionalities to bending-magnets and wigglers through SRW.
-I am also considering interfacing [SPECTRA](https://spectrax.org/spectra/index.html), but only if there is the need for that.
+All return backend-agnostic dictionaries (NumPy arrays + metadata).
+
+### Plotting
+Available via `barc4sr.plotting`:
+- `plot_electron_trajectory`  
+- `plot_wavefront`  
+- `plot_power_density`  
+- Shared colormaps, styles, and layout helpers  
+
+### I/O utilities
+- Save/load: trajectories, wavefronts, power-density maps  
+- Simple `.dat` and `.json` formats for interoperability  
+
+---
+
+# Installation
+
+## Basic installation
+
+```
+pip install barc4sr
+```
+
+This installs the core models, magnetic-field utilities, plotting tools, and I/O helpers.
+
+---
+
+## Enable SRW-based radiation calculations
+
+To perform wavefront, power-density, and trajectory calculations, install SRW bindings:
+
+### Option 1 (recommended if it works on your setup)
+
+```
+pip install srwpy
+```
+
+### Option 2 (fallback)
+
+```
+pip install oasys-srwpy
+```
+
+If neither is available for your platform, you can also build SRW from source;  
+`barc4sr` will still import, but SRW-based calculations will be unavailable.
+
 
 ## Examples:
 Check the examples! You can learn a lot from them.
 
 
----
-
- <p xmlns:cc="http://creativecommons.org/ns#" xmlns:dct="http://purl.org/dc/terms/"><a property="dct:title" rel="cc:attributionURL" href="https://github.com/barc4/barc4sr">barc library for synchrotron radiation</a> by <span property="cc:attributionName">Rafael Celestre, Synchrotron SOLEIL</span> is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/?ref=chooser-v1" target="_blank" rel="license noopener noreferrer" style="display:inline-block;">CC BY-NC-SA 4.0<img style="height:22px!important;margin-left:3px;vertical-align:text-bottom;" src="https://mirrors.creativecommons.org/presskit/icons/cc.svg?ref=chooser-v1" alt=""><img style="height:22px!important;margin-left:3px;vertical-align:text-bottom;" src="https://mirrors.creativecommons.org/presskit/icons/by.svg?ref=chooser-v1" alt=""><img style="height:22px!important;margin-left:3px;vertical-align:text-bottom;" src="https://mirrors.creativecommons.org/presskit/icons/nc.svg?ref=chooser-v1" alt=""><img style="height:22px!important;margin-left:3px;vertical-align:text-bottom;" src="https://mirrors.creativecommons.org/presskit/icons/sa.svg?ref=chooser-v1" alt=""></a></p> 
+[![PyPI](https://img.shields.io/pypi/v/barc4sr.svg)](https://pypi.org/project/barc4sr/)
+[![Documentation Status](https://readthedocs.org/projects/barc4sr/badge/?version=latest)](https://barc4sr.readthedocs.io/en/latest/)
+[![License: CeCILL-2.1](https://img.shields.io/badge/license-CeCILL--2.1-blue.svg)](https://opensource.org/licenses/CECILL-2.1)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.0000000.svg)](https://doi.org/10.5281/zenodo.0000000)

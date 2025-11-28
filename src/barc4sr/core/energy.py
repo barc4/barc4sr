@@ -1,15 +1,11 @@
-#!/bin/python
+# SPDX-License-Identifier: CECILL-2.1
+# Copyright (c) 2025 Synchrotron SOLEIL
 
 """
-This module provides auxiliary functions for energy relations
+energy.py - helper functions for energy, wavelength and related SR quantities.
 """
 
-__author__ = ['Rafael Celestre']
-__contact__ = 'rafael.celestre@synchrotron-soleil.fr'
-__license__ = 'CC BY-NC-SA 4.0'
-__copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
-__created__ = '25/NOV/2024'
-__changed__ = '07/JUL/2024'
+from __future__ import annotations
 
 import os
 
@@ -21,19 +17,19 @@ LIGHT = physical_constants["speed of light in vacuum"][0]
 CHARGE = physical_constants["atomic unit of charge"][0]
 MASS = physical_constants["electron mass"][0]
 
-#***********************************************************************************
-# functions
-#***********************************************************************************
+# ---------------------------------------------------------------------------
+# General functions
+# ---------------------------------------------------------------------------
 
 def get_gamma(E: float) -> float:
     """
-    Calculate the Lorentz factor (γ) based on the energy of electrons in GeV.
+    Calculate the Lorentz factor (gamma) based on the energy of electrons in GeV.
 
     Parameters:
         E (float): Energy of electrons in GeV.
 
     Returns:
-        float: Lorentz factor (γ).
+        float: Lorentz factor (gamma).
     """
     return E * 1e9 / (MASS * LIGHT ** 2) * CHARGE
 
@@ -70,6 +66,10 @@ def energy_wavelength(value: float, unity: str) -> float:
         raise ValueError("Invalid unit provided: {}".format(unity))
 
     return PLANCK * LIGHT / CHARGE / (value * factor)
+
+# ---------------------------------------------------------------------------
+# Energy array generators
+# ---------------------------------------------------------------------------
 
 def generate_logarithmic_energy_array(emin: float, emax: float, resonant_energy: float, 
                                       stepsize: float, verbose: bool=True) -> np.ndarray:
@@ -115,6 +115,10 @@ def smart_split_energy(energy_array, num_cores):
         energy_chunks = [energy_array[split_indices[i]:split_indices[i+1]] for i in range(num_cores)]
         return energy_chunks
     
+# ---------------------------------------------------------------------------
+# Miscellaneous functions
+# ---------------------------------------------------------------------------
+
 def get_undulator_emission_energy(und_per: float, K: float, ring_e: float, n: int = 1, theta: float = 0) -> float:
     """
     Calculate the energy of an undulator emission in a storage ring.
@@ -133,10 +137,3 @@ def get_undulator_emission_energy(und_per: float, K: float, ring_e: float, n: in
     emission_wavelength = und_per * (1 + (K ** 2) / 2 + (gamma * theta) ** 2) / (2 * n * gamma ** 2)
 
     return energy_wavelength(emission_wavelength, "m")
-
-
-if __name__ == '__main__':
-
-    file_name = os.path.basename(__file__)
-
-    print(f"This is the barc4sr.{file_name} module!")

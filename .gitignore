@@ -175,4 +175,4 @@ cython_debug/
 *.txt
 docs/build/*
 !docs/build/html/
-*examples*
+*.h5

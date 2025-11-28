@@ -1,25 +1,21 @@
-#!/bin/python
+# SPDX-License-Identifier: CECILL-2.1
+# Copyright (c) 2025 Synchrotron SOLEIL
 
 """
-This module provides several auxiliary magnetic field functions
+magnetic_fields.py - general magnetic field functions for accelerators and SR.
 """
 
-__author__ = ['Rafael Celestre']
-__contact__ = 'rafael.celestre@synchrotron-soleil.fr'
-__license__ = 'CC BY-NC-SA 4.0'
-__copyright__ = 'Synchrotron SOLEIL, Saint Aubin, France'
-__created__ = '2024.11.25'
-__changed__ = '2025.11.04'
+from __future__ import annotations
 
-import os
+import math
 from typing import List
 
 import numpy as np
 from scipy.signal import find_peaks
 
-#***********************************************************************************
-# Arbitrary magnetic fields
-#***********************************************************************************
+# ---------------------------------------------------------------------------
+# Validation of magnetic field dictionary
+# ---------------------------------------------------------------------------
 
 def check_magnetic_field_dictionary(magnetic_field_dictionary: dict) -> bool:
     """
@@ -83,15 +79,16 @@ def check_magnetic_field_dictionary(magnetic_field_dictionary: dict) -> bool:
 
     return True
 
-#***********************************************************************************
-# Bending magnets
-#***********************************************************************************
+# ---------------------------------------------------------------------------
+# bending magnets
+# ---------------------------------------------------------------------------
 
 def bm_magnetic_field(
     magnet: dict,
     *,
     padding: float = 0.0,
-    step_size: float = 1e-3,
+    step_size: float | None = None,
+    n_steps: int | None = None,
     verbose: bool = False,
 ) -> dict:
     """
@@ -106,7 +103,7 @@ def bm_magnetic_field(
                 "length": float,      # effective magnetic length [m]
                 "s0": float, optional # center position [m] (default 0.0)
                 "soft_edge": {        # optional, see below
-                    "mode": {"none","tanh","erf","arctan","gompertz","srw"},
+                    "mode": {"none","tanh","erf","arctan","gompertz","srw"},  # default "gompertz"
                     "edge_length": float,  # 10-90% rise distance [m]
                     "center_on": {"midpoint","left","right"}  # default "midpoint"
                 }
@@ -124,7 +121,10 @@ def bm_magnetic_field(
     padding : float, optional
         Zero-field padding [m] added on both sides of the magnet (default 0).
     step_size : float, optional
-        Sampling step [m] (default 1e-3).
+        Sampling step [m] (default 1e-3 if n_steps not provided).
+        Cannot be used together with n_steps.
+    n_steps : int, optional
+        Number of sampling steps. Cannot be used together with step_size.
     verbose : bool, optional
         If True, prints a short summary.
 
@@ -141,7 +141,8 @@ def bm_magnetic_field(
     TypeError
         If `magnet` is not a dict with required keys.
     ValueError
-        If parameters are invalid (e.g., non-positive length/step) or soft_edge fails validation.
+        If parameters are invalid (e.g., non-positive length/step) or soft_edge fails validation,
+        or if both step_size and n_steps are provided, or if neither is provided.
     """
 
     if not isinstance(magnet, dict):
@@ -155,10 +156,18 @@ def bm_magnetic_field(
     center = float(magnet.get("s0", 0.0))
     if length <= 0:
         raise ValueError("length must be positive.")
-    if step_size <= 0:
-        raise ValueError("step_size must be positive.")
     if padding < 0:
         raise ValueError("padding must be non-negative.")
+    
+    # Validate step_size and n_steps
+    if step_size is not None and n_steps is not None:
+        raise ValueError("Cannot specify both step_size and n_steps; provide only one.")
+    if step_size is None and n_steps is None:
+        step_size = 1e-3  # default
+    if step_size is not None and step_size <= 0:
+        raise ValueError("step_size must be positive.")
+    if n_steps is not None and n_steps <= 0:
+        raise ValueError("n_steps must be positive.")
 
     soft_edge = magnet.get("soft_edge", None)
 
@@ -167,7 +176,7 @@ def bm_magnetic_field(
             return {"mode": "none"}
         if not isinstance(se, dict):
             raise ValueError("magnet['soft_edge'] must be a dict.")
-        mode = str(se.get("mode", "none")).lower()
+        mode = str(se.get("mode", "gompertz")).lower()
         if mode not in {"none","tanh","erf","arctan","gompertz","srw"}:
             raise ValueError("soft_edge['mode'] must be one of {'none','tanh','erf','arctan','gompertz','srw'}.")
         if mode == "none":
@@ -190,8 +199,10 @@ def bm_magnetic_field(
     s_min = center - half_total
     s_max = center + half_total
     total_span = s_max - s_min
-    n_steps = max(1, int(round(total_span / step_size)))
-    s_max = s_min + n_steps * step_size
+    
+    if n_steps is None:
+        n_steps = max(1, int(round(total_span / step_size)))
+    s_max = s_min + n_steps * step_size if step_size is not None else s_min + total_span
     s = np.linspace(s_min, s_max, n_steps + 1)
 
     L_edge = center - half_active
@@ -230,8 +241,9 @@ def bm_magnetic_field(
         if m == "erf":
             sigma = delta / C_ERF
             denom = sigma * np.sqrt(2.0)
-            S_rise = lambda x: 0.5 * (1.0 + np.erf(x / denom))
-            S_fall = lambda x: 0.5 * (1.0 + np.erf(-x / denom))
+            verf = np.vectorize(math.erf)
+            S_rise = lambda x: 0.5 * (1.0 + verf(x / denom))
+            S_fall = lambda x: 0.5 * (1.0 + verf(-x / denom))
             return S_rise, S_fall
 
         if m == "arctan":
@@ -242,8 +254,8 @@ def bm_magnetic_field(
 
         if m == "gompertz":
             # Flipped Gompertz with correct opposite asymmetry on fall:
-            #   rise: S↑(x) = 1 - exp(-ln2 * exp(+c x))  → long left, short right
-            #   fall: S↓(x) = 1 - exp(-ln2 * exp(-c x))  → short left, long right
+            #   rise: S(x) = 1 - exp(-ln2 * exp(+c x)) -> long left, short right
+            #   fall: S(x) = 1 - exp(-ln2 * exp(-c x)) -> short left, long right
             c = C_GOMP / delta
             S_rise = lambda x: 1.0 - np.exp(-LN2 * np.exp(+c * x))
             S_fall = lambda x: 1.0 - np.exp(-LN2 * np.exp(-c * x))
@@ -299,15 +311,14 @@ def bm_magnetic_field(
 def multi_bm_magnetic_field(
     magnets: List[dict],
     padding: float = 0.0,
-    step_size: float = 1e-3,
+    step_size: float | None = None,
+    n_steps: int | None = None,
     verbose: bool = False,
 ) -> dict:
     """
     Construct a composite magnetic field from multiple bending-magnet elements.
-
     Each magnet is defined like in `bm_magnetic_field`, including an optional
     per-magnet soft-edge specification nested inside the magnet dict.
-
     Parameters
     ----------
     magnets : list of dict
@@ -319,26 +330,28 @@ def multi_bm_magnetic_field(
             # optional:
             "padding": float,       # per-magnet padding [m] (defaults to global `padding`)
             "soft_edge": {          # OPTIONAL, same structure as in bm_magnetic_field
-               "mode": "none" | "tanh" | "erf" | "arctan" | "gompertz" | "srw",
+               "mode": "none" | "tanh" | "erf" | "arctan" | "gompertz" | "srw",  # default "gompertz"
                "edge_length": float,  # 10-90 width [m] (required if mode != "none")
-               "center_on": "midpoint" | "left" | "right"
+               "center_on": "midpoint" | "left" | "right"  # default "midpoint"
             }
           }
-
         Notes
         -----
         - "tanh" is a symmetric Bashmakov-like edge (dimensional tanh; no gap h).
         - "srw" uses the super-Lorentzian (order 2) CDF (SRW default padding family).
         - For preserving the full plateau length, set `soft_edge.center_on="right"`.
-
+        - When only "edge_length" is provided in soft_edge, defaults to mode="gompertz" 
+          and center_on="midpoint".
     padding : float, optional
         Global zero-field padding [m] added at both ends of *each* magnet's local grid
         unless a per-magnet "padding" overrides it. Default 0.
     step_size : float, optional
-        Sampling step along the global s-axis [m]. Default 1e-3.
+        Sampling step along the global s-axis [m] (default 1e-3 if n_steps not provided).
+        Cannot be used together with n_steps.
+    n_steps : int, optional
+        Number of sampling steps. Cannot be used together with step_size.
     verbose : bool, optional
         If True, prints per-magnet summaries from `bm_magnetic_field`.
-
     Returns
     -------
     dict
@@ -346,16 +359,24 @@ def multi_bm_magnetic_field(
             "s": np.ndarray,      # global axis [m], symmetric around 0
             "B": np.ndarray,      # shape (N,3): (Bx=0, By, Bz=0), composite field
         }
-
     Raises
     ------
     ValueError
-        If input list is empty or malformed.
+        If input list is empty or malformed, or if both step_size and n_steps are provided,
+        or if neither is provided.
     """
-
     if not isinstance(magnets, (list, tuple)) or not magnets:
         raise ValueError("magnets must be a non-empty list of dictionaries.")
-
+    
+    if step_size is not None and n_steps is not None:
+        raise ValueError("Cannot specify both step_size and n_steps; provide only one.")
+    if step_size is None and n_steps is None:
+        step_size = 1e-3  # default
+    if step_size is not None and step_size <= 0:
+        raise ValueError("step_size must be positive.")
+    if n_steps is not None and n_steps <= 0:
+        raise ValueError("n_steps must be positive.")
+    
     s_min_all, s_max_all = np.inf, -np.inf
     for m in magnets:
         if not all(k in m for k in ("B", "length", "s0")):
@@ -366,38 +387,194 @@ def multi_bm_magnetic_field(
         half_total = 0.5 * L + max(f_loc, 0.0)
         s_min_all = min(s_min_all, s0 - half_total)
         s_max_all = max(s_max_all, s0 + half_total)
-
     s_min_raw = s_min_all
     s_max_raw = s_max_all
     half_span = max(abs(s_min_raw), abs(s_max_raw))
-    s = np.arange(-half_span, half_span + 0.5 * step_size, step_size)
-
+    
+    # Create s-axis based on step_size or n_steps
+    if n_steps is not None:
+        s = np.linspace(-half_span, half_span, n_steps + 1)
+        actual_step_size = s[1] - s[0] if len(s) > 1 else 0.0
+    else:
+        s = np.arange(-half_span, half_span + 0.5 * step_size, step_size)
+        actual_step_size = step_size
+    
     By_total = np.zeros_like(s, dtype=float)
-
     for i, m in enumerate(magnets):
         if verbose:
             print(f"\n[Magnet {i+1}]")
         f_loc = float(m.get("padding", padding))
-        bm = bm_magnetic_field(
-            magnet=m,
-            padding=f_loc,
-            step_size=step_size,
-            verbose=verbose,
-        )
+        
+        bm_kwargs = {
+            "magnet": m,
+            "padding": f_loc,
+            "verbose": verbose,
+        }
+        if n_steps is not None:
+            bm_kwargs["step_size"] = actual_step_size
+        else:
+            bm_kwargs["step_size"] = step_size
+        
+        bm = bm_magnetic_field(**bm_kwargs)
         local_s = bm["s"]
         local_By = bm["B"][:, 1]
-
-        idx = np.round((local_s - s[0]) / step_size).astype(int)
+        idx = np.round((local_s - s[0]) / actual_step_size).astype(int)
         good = (idx >= 0) & (idx < s.size)
         np.add.at(By_total, idx[good], local_By[good])
-
     B_vec = np.column_stack([np.zeros_like(s), By_total, np.zeros_like(s)])
     return {"s": s, "B": B_vec}
+
+# ---------------------------------------------------------------------------
+# Arbitrary magnetic fields
+# ---------------------------------------------------------------------------
+
+def arb_magnetic_field(
+    magnet: dict,
+    *,
+    padding: float = 0.0,
+    step_size: float | None = None,
+    n_steps: int | None = None,
+    verbose: bool = False,
+) -> dict:
+    """
+    Process a single arbitrary magnetic-field profile with optional resampling.
+
+    Parameters
+    ----------
+    magnet : dict
+        Magnet specification:
+            {
+                "s": array_like,      # local coordinate axis [m], typically centered at 0
+                "B": array_like,      # field values [T], (N,) or (N,3)
+                                      # if 1D, treated as By; if 2D, column 1 is By
+                "s0": float, optional # center position [m] (default 0.0)
+            }
+    padding : float, optional
+        Zero-field padding [m] added on both sides (default 0).
+    step_size : float, optional
+        Sampling step [m] for resampling (default 1e-3 if n_steps not provided).
+        Cannot be used together with n_steps.
+        If None and n_steps is None, returns original sampling.
+    n_steps : int, optional
+        Number of sampling steps for resampling. Cannot be used together with step_size.
+    verbose : bool, optional
+        If True, prints a short summary.
+
+    Returns
+    -------
+    dict
+        {
+            "s": np.ndarray,      # 1D axis [m], shifted by s0 and with padding
+            "B": np.ndarray,      # shape (N,3): (Bx=0, By, Bz=0)
+        }
+
+    Raises
+    ------
+    TypeError
+        If `magnet` is not a dict with required keys.
+    ValueError
+        If parameters are invalid or both/neither step_size and n_steps are provided.
+    """
+    
+    if not isinstance(magnet, dict):
+        raise TypeError("magnet must be a dictionary with keys 's', 'B', and optionally 's0'.")
+    
+    if not all(k in magnet for k in ("s", "B")):
+        raise ValueError("magnet must contain 's' and 'B' keys.")
+    
+    if step_size is not None and n_steps is not None:
+        raise ValueError("Cannot specify both step_size and n_steps; provide only one.")
+    
+    if step_size is not None and step_size <= 0:
+        raise ValueError("step_size must be positive.")
+    if n_steps is not None and n_steps <= 0:
+        raise ValueError("n_steps must be positive.")
+    
+    if padding < 0:
+        raise ValueError("padding must be non-negative.")
+    
+    s_local = np.asarray(magnet["s"], dtype=float)
+    B_local = np.asarray(magnet["B"], dtype=float)
+    s0 = float(magnet.get("s0", 0.0))
+    
+    if s_local.ndim != 1:
+        raise ValueError("'s' must be a 1D array.")
+    
+    if B_local.ndim == 1:
+        if len(B_local) != len(s_local):
+            raise ValueError("'B' length must match 's' length.")
+        By_local = B_local
+    elif B_local.ndim == 2:
+        if B_local.shape[0] != len(s_local):
+            raise ValueError("'B' first dimension must match 's' length.")
+        if B_local.shape[1] < 2:
+            raise ValueError("'B' must have at least 2 columns if 2D.")
+        By_local = B_local[:, 1] 
+    else:
+        raise ValueError("'B' must be 1D or 2D array.")
+    
+    if not (np.isfinite(s_local).all() and np.isfinite(By_local).all()):
+        raise ValueError("'s' and 'B' must not contain NaN or Inf values.")
+    
+    order = np.argsort(s_local)
+    s_local = s_local[order]
+    By_local = By_local[order]
+    
+    s_min_local = s_local.min()
+    s_max_local = s_local.max()
+    
+    s_min = s_min_local - padding
+    s_max = s_max_local + padding
+    total_span = s_max - s_min
+    
+    if n_steps is not None:
+        s_new = np.linspace(s_min, s_max, n_steps + 1)
+        By_new = np.interp(s_new, s_local, By_local, left=0.0, right=0.0)
+    elif step_size is not None:
+        n_steps_calc = max(1, int(round(total_span / step_size)))
+        s_new = np.linspace(s_min, s_max, n_steps_calc + 1)
+        By_new = np.interp(s_new, s_local, By_local, left=0.0, right=0.0)
+    else:
+        if padding > 0:
+            ds = np.median(np.diff(s_local))
+            n_pad_left = int(np.ceil(padding / ds))
+            n_pad_right = int(np.ceil(padding / ds))
+            
+            s_pad_left = s_min + np.arange(n_pad_left) * ds
+            s_pad_right = s_max + np.arange(1, n_pad_right + 1) * ds
+            
+            s_new = np.concatenate([s_pad_left, s_local, s_pad_right])
+            By_new = np.concatenate([
+                np.zeros(n_pad_left),
+                By_local,
+                np.zeros(n_pad_right)
+            ])
+        else:
+            s_new = s_local.copy()
+            By_new = By_local.copy()
+    
+    s_final = s_new + s0
+    
+    B_vec = np.column_stack([
+        np.zeros_like(By_new),
+        By_new,
+        np.zeros_like(By_new)
+    ])
+    
+    if verbose:
+        ds = np.median(np.diff(s_final))
+        print(f"s-axis center: {s0:.6f} m | span: [{s_final[0]:.6f}, {s_final[-1]:.6f}] m")
+        print(f"sampling: N = {s_final.size} | step: {ds:.3e} m")
+        print(f"mag. field range: [{By_new.min():+.3e}, {By_new.max():+.3e}] T")
+        print(f"padding = {padding:.6f} m")
+    
+    return {"s": s_final, "B": B_vec}
 
 def multi_arb_magnetic_field(
     magnets: list,
     padding: float = 0.0,
-    step_size: float = 1e-3,
+    step_size: float | None = None,
+    n_steps: int | None = None,
     verbose: bool = False,
 ) -> dict:
     """
@@ -414,11 +591,16 @@ def multi_arb_magnetic_field(
           - 's'  : ndarray, local coordinate axis [m], typically centered at 0.
           - 'B'  : ndarray, (N,) or (N,3); vertical field in By or column 1.
           - 's0' : float,  center position on the global axis [m].
+          - 'padding' : float, optional, per-magnet padding [m] (defaults to global `padding`).
 
     padding : float, optional
-        Extra padding [m] on both sides of the global grid. Default is 0.
+        Global zero-field padding [m] added at both ends of *each* magnet's local grid
+        unless a per-magnet "padding" overrides it. Default is 0.
     step_size : float, optional
-        Step size [m] for the uniform global grid. Default is 1e-3.
+        Step size [m] for the uniform global grid (default 1e-3 if n_steps not provided).
+        Cannot be used together with n_steps.
+    n_steps : int, optional
+        Number of sampling steps. Cannot be used together with step_size.
     verbose : bool, optional
         If True, prints per-element diagnostics and global summary.
 
@@ -429,60 +611,88 @@ def multi_arb_magnetic_field(
             's': np.ndarray,  # uniform, centered at 0 [m]
             'B': np.ndarray,  # (N,3) composite field (Bx=0, By, Bz=0)
         }
+    
+    Raises
+    ------
+    ValueError
+        If input list is empty or malformed, or if both step_size and n_steps are provided,
+        or if neither is provided.
     """
-    if step_size <= 0:
+    if not isinstance(magnets, (list, tuple)) or not magnets:
+        raise ValueError("magnets must be a non-empty list of dictionaries.")
+    
+    if step_size is not None and n_steps is not None:
+        raise ValueError("Cannot specify both step_size and n_steps; provide only one.")
+    if step_size is None and n_steps is None:
+        step_size = 1e-3  # default
+    if step_size is not None and step_size <= 0:
         raise ValueError("step_size must be positive.")
+    if n_steps is not None and n_steps <= 0:
+        raise ValueError("n_steps must be positive.")
     if padding < 0:
         raise ValueError("padding must be non-negative.")
-    if not magnets:
-        raise ValueError("magnets list is empty.")
-
-    s_all = []
+    
+    s_min_all, s_max_all = np.inf, -np.inf
     for m in magnets:
         if not all(k in m for k in ("s", "B", "s0")):
-            raise ValueError("Each magnet must have keys 's', 'B', and 's0'.")
-        s_local = np.asarray(m["s"], float)
-        s_all.append(s_local + float(m["s0"]))
-    s_all = np.concatenate(s_all)
-    s_min_raw, s_max_raw = s_all.min() - padding, s_all.max() + padding
-    half_span = max(abs(s_min_raw), abs(s_max_raw))
-    s = np.arange(-half_span, half_span + step_size/2, step_size)
-
-    By_total = np.zeros_like(s, float)
-
-    for i, m in enumerate(magnets, start=1):
-        s_local = np.asarray(m["s"], float)
+            raise ValueError("Each magnet must define 's', 'B', and 's0'.")
+        s_local = np.asarray(m["s"], dtype=float)
         s0 = float(m["s0"])
-        B_local = np.asarray(m["B"], float)
-        if B_local.ndim == 2:
-            B_local = B_local[:, 1]
-        order = np.argsort(s_local)
-        s_local, B_local = s_local[order], B_local[order]
-        s_shift = s_local + s0
-
-        By_interp = np.interp(s, s_shift, B_local, left=0.0, right=0.0)
-        By_total += By_interp
-
+        f_loc = float(m.get("padding", padding))
+        
+        s_min_local = s_local.min() - f_loc
+        s_max_local = s_local.max() + f_loc
+        
+        s_min_all = min(s_min_all, s0 + s_min_local)
+        s_max_all = max(s_max_all, s0 + s_max_local)
+    
+    half_span = max(abs(s_min_all), abs(s_max_all))
+    
+    if n_steps is not None:
+        s = np.linspace(-half_span, half_span, n_steps + 1)
+        actual_step_size = s[1] - s[0] if len(s) > 1 else 0.0
+    else:
+        s = np.arange(-half_span, half_span + 0.5 * step_size, step_size)
+        actual_step_size = step_size
+    
+    By_total = np.zeros_like(s, dtype=float)
+    
+    for i, m in enumerate(magnets, start=1):
         if verbose:
-            ds = np.median(np.diff(s_local))
-            print(f"[Magnet {i}]")
-            print(f"  s-axis center: {s0:+.6f} m | span: [{s_shift.min():+.3f}, {s_shift.max():+.3f}] m")
-            print(f"  sampling: N = {s_local.size} | step: {ds:.3e} m")
-            print(f"  mag. field range: length = [{B_local.min():+.3e}, {B_local.max():+.3e}] T")
-            print(f"  padding = {padding:.6f} m")
-
-    B_vec = np.column_stack([np.zeros_like(By_total), By_total, np.zeros_like(By_total)])
-
+            print(f"\n[Magnet {i}]")
+        
+        f_loc = float(m.get("padding", padding))
+        
+        arb_kwargs = {
+            "magnet": m,
+            "padding": f_loc,
+            "verbose": verbose,
+        }
+        if n_steps is not None:
+            arb_kwargs["step_size"] = actual_step_size
+        else:
+            arb_kwargs["step_size"] = step_size
+        
+        arb = arb_magnetic_field(**arb_kwargs)
+        local_s = arb["s"]
+        local_By = arb["B"][:, 1]
+        
+        idx = np.round((local_s - s[0]) / actual_step_size).astype(int)
+        good = (idx >= 0) & (idx < s.size)
+        np.add.at(By_total, idx[good], local_By[good])
+    
+    B_vec = np.column_stack([np.zeros_like(s), By_total, np.zeros_like(s)])
+    
     if verbose:
         print(f"Global grid: [{s[0]:+.3f}, {s[-1]:+.3f}] m")
-        print(f"  step_size = {step_size:.3e} m, total N = {s.size}")
-
+        print(f"  step_size = {actual_step_size:.3e} m, total N = {s.size}")
+    
     return {"s": s, "B": B_vec}
 
-#***********************************************************************************
-# periodic signal treatment
-#***********************************************************************************
-    
+# ---------------------------------------------------------------------------
+# Miscellaneous
+# ---------------------------------------------------------------------------
+
 def treat_periodic_signal(signal, axis, threshold=0.5):
     """
     Count the number of periods in a sinusoidal signal with a threshold on amplitude.
@@ -543,70 +753,3 @@ def treat_periodic_signal(signal, axis, threshold=0.5):
     }
 
     return periodic_signal_properties
-
-
-
-# def fit_gap_field_relation(gap_table: List[float], B_table: List[float], 
-#                            und_per: float) -> Tuple[float, float, float]:
-#     """
-#     Fit parameters coeff0, coeff1, and coeff2 for an undulator from the given tables:
-
-#     B0 = c0 * exp[c1(gap/und_per) + c2(gap/und_per)**2]
-
-#     Parameters:
-#         gap_table (List[float]): List of gap sizes in meters.
-#         B_table (List[float]): List of magnetic field values in Tesla corresponding to the gap sizes.
-#         und_per (float): Undulator period in meters.
-
-#     Returns:
-#         Tuple[float, float, float]: Fitted parameters (coeff0, coeff1, coeff2).
-#     """
-#     def _model(gp, c0, c1, c2):
-#         return c0 * np.exp(c1*gp + c2*gp**2)
-
-#     def _fit_parameters(gap, und_per, B):
-#         gp = gap / und_per
-#         popt, pcov = curve_fit(_model, gp, B, p0=(1, 1, 1)) 
-#         return popt
-
-#     popt = _fit_parameters(np.asarray(gap_table), und_per, np.asarray(B_table))
-#     coeff0_fit, coeff1_fit, coeff2_fit = popt
-
-#     print("Fitted parameters:")
-#     print("coeff0:", coeff0_fit)
-#     print("coeff1:", coeff1_fit)
-#     print("coeff2:", coeff2_fit)
-
-#     return coeff0_fit, coeff1_fit, coeff2_fit
-
-
-# def get_B_from_gap(gap: Union[float, np.ndarray], und_per: float, coeff: Tuple[float, float, float]) -> Union[float, np.ndarray, None]:
-#     """
-#     Calculate the magnetic field B from the given parameters:
-#        B0 = c0 * exp[c1(gap/und_per) + c2(gap/und_per)**2]
-
-#     Parameters:
-#         gap (Union[float, np.ndarray]): Gap size(s) in meters.
-#         und_per (float): Undulator period in meters.
-#         coeff (Tuple[float, float, float]): Fit coefficients.
-
-#     Returns:
-#         Union[float, np.ndarray, None]: Calculated magnetic field B if gap and period are positive, otherwise None.
-#     """
-#     if isinstance(gap, np.ndarray):
-#         if np.any(gap <= 0) or und_per <= 0:
-#             return None
-#         gp = gap / und_per
-#     else:
-#         if gap <= 0 or und_per <= 0:
-#             return None
-#         gp = gap / und_per
-
-#     B = coeff[0] * np.exp(coeff[1] * gp + coeff[2] * gp**2)
-#     return B
-#     
-if __name__ == '__main__':
-
-    file_name = os.path.basename(__file__)
-
-    print(f"This is the barc4sr.{file_name} module!")

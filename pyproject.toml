@@ -4,24 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "barc4sr"
-version = "2025.06.13"
+version = "2025.11.28"
 description = "A Python package for Synchrotron Radiation calculations"
 readme = "README.md"
-requires-python = ">=3.6"
-license = { file = "LICENSE" }
-authors = [
-    { name = "Rafael Celestre", email = "rafael.celestre@synchrotron-soleil.fr" }
-]
+license = "CECILL-2.1"
+authors = [{ name = "Rafael Celestre", email = "rafael.celestre@synchrotron-soleil.fr"}]
 keywords = ["synchrotron", "radiation", "x-ray", "physics"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "License :: Other/Proprietary License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.6",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9"
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Physics"
 ]
+requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.20",
     "numba>=0.53.1",
@@ -31,8 +26,13 @@ dependencies = [
     "matplotlib>=3.3.0",
     "Pillow>=7.0.0",
     "imageio>=2.9.0",
-    "scikit-image>=0.17.2"
+    "scikit-image>=0.17.2",
+    "srwpy"
 ]
+
+[project.urls]
+Homepage = "https://github.com/barc4/barc4sr"
+Repository = "https://github.com/barc4/barc4sr"
 
 [tool.setuptools.packages.find]
 where = ["src"]
