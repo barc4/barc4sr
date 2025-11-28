@@ -120,7 +120,7 @@ def plot_magnetic_field(eBeamTraj: dict, direction: str, **kwargs) -> None:
         frst_field_integral,
         scnd_field_integral
     ]
-    labels = ['B [T]', '$\int$B$\cdot$d$s$ [T$\cdot$m]', '$\iint$B$\cdot$d$s$² [T$\cdot$m²]']
+    labels = ['B [T]', r'$\int$B$\cdot$d$s$ [T$\cdot$m]', r'$\iint$B$\cdot$d$s$² [T$\cdot$m²]']
 
     for ax, y, color, label in zip(axes, ys, colors, labels):
         ax.set_facecolor('white')
