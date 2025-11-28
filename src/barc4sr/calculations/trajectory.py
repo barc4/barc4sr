@@ -7,11 +7,11 @@ Electron trajectory.
 
 from __future__ import annotations
 
-from time import time
+import time
 
 from barc4sr.backend.srw.interface import set_light_source
 from barc4sr.io.rw import write_electron_trajectory
-from barc4sr.syned import barc4sr_dictionary, syned_dictionary
+from barc4sr.syned.mapping import barc4sr_dictionary, syned_dictionary
 from barc4sr.utils.time import print_elapsed_time
 
 
