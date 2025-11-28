@@ -195,7 +195,6 @@ def plot_wavefront(
             ax.set_ylabel("y [mm]")
             ax.grid(True, linestyle=":", linewidth=0.5)
             cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-            cb.set_label("phase [rad]")
             plt.show()
 
             if cuts:
@@ -220,7 +219,7 @@ def plot_wavefront(
                 plt.show()
 
 # ---------------------------------------------------------------------------
-# Wavefront
+# Power density
 # ---------------------------------------------------------------------------
 
 def plot_power_density(pwr: dict, cuts: bool = True, **kwargs) -> None:
@@ -264,7 +263,6 @@ def plot_power_density(pwr: dict, cuts: bool = True, **kwargs) -> None:
         ax.set_ylabel('y [mm]')
         ax.grid(True, linestyle=':', linewidth=0.5)
         cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)#, format='%.1e')
-        cb.set_label('power density [W/mm²]')
         plt.show()
 
         if cuts:

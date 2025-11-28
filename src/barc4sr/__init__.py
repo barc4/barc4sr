@@ -17,6 +17,7 @@ from .core.sources import (
 )
 from .core.magnetic_fields import (
     bm_magnetic_field,
+    arb_magnetic_field,
     multi_bm_magnetic_field,
     multi_arb_magnetic_field
 )
@@ -48,6 +49,7 @@ __all__ = [
     "BendingMagnetSource",
     "ArbitraryMagnetSource",
     "bm_magnetic_field",
+    "arb_magnetic_field",
     "multi_bm_magnetic_field",
     "multi_arb_magnetic_field",
 
