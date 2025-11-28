@@ -85,4 +85,4 @@ Check the examples! You can learn a lot from them.
 [![PyPI](https://img.shields.io/pypi/v/barc4sr.svg)](https://pypi.org/project/barc4sr/)
 [![Documentation Status](https://readthedocs.org/projects/barc4sr/badge/?version=latest)](https://barc4sr.readthedocs.io/en/latest/)
 [![License: CeCILL-2.1](https://img.shields.io/badge/license-CeCILL--2.1-blue.svg)](https://opensource.org/licenses/CECILL-2.1)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.0000000.svg)](https://doi.org/10.5281/zenodo.0000000)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17751318.svg)](https://doi.org/10.5281/zenodo.17751318)
