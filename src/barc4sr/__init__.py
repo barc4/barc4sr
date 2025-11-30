@@ -29,6 +29,9 @@ from .calculations.radiation import (
     power_density,
 )
 
+from .calculations.rays import trace_chief_rays
+
+
 from . import plotting
 
 from .io.rw import (
@@ -57,6 +60,7 @@ __all__ = [
     "electron_trajectory",
     "wavefront",
     "power_density",
+    "trace_chief_rays",
 
     # plotting namespace
     "plotting",
