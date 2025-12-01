@@ -12,12 +12,12 @@ import time
 import numpy as np
 
 from barc4sr.backend.srw.interface import (
-    set_light_source,
     srwlibCalcElecFieldSR,
     srwlibCalcPowDenSR,
+    spectral_srwlibCalcStokesUR,
+    spectral_srwlibCalcElecFieldSR
 )
 from barc4sr.io.rw import write_power_density, write_spectrum, write_wavefront
-from barc4sr.syned.mapping import barc4sr_dictionary, syned_dictionary
 from barc4sr.utils.time import print_elapsed_time
 
 from .shared import initialize_calculation

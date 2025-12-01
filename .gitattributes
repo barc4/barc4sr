@@ -1,0 +1,4 @@
+# Strip all Jupyter outputs at commit time
+*.ipynb filter=nbstripout
+*.zpln filter=nbstripout
+*.ipynb diff=ipynb
