@@ -226,7 +226,7 @@ def trace_chief_rays(
 
     magnetic_field = {
         "s": Z.copy(),
-        "B": Bmag.copy(),
+        "B": np.column_stack([Bx, By, Bz]).astype(float),
     }
 
     trajectory = {

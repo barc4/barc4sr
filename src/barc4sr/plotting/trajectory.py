@@ -114,24 +114,26 @@ def plot_chief_rays(
     d = direction.lower()
     if d in ("x", "h", "hor", "horizontal"):
         axis = "X"
-        slope_col_full = "Xp"         
+        slope_col_full = "Xp"
         axis_label = "x"
         B_label = "By [T]"
         title = "Horizontal chief rays on electron trajectory"
+        field_component = "By"
+        comp_index = 1
     elif d in ("y", "v", "ver", "vertical"):
         axis = "Y"
         slope_col_full = "Yp"
         axis_label = "y"
         B_label = "Bx [T]"
         title = "Vertical chief rays on electron trajectory"
+        field_component = "Bx"
+        comp_index = 0
     else:
         raise ValueError("Direction must be 'horizontal'/'x' or 'vertical'/'y'.")
 
-
-
-    Z_full = np.asarray(traj["Z"], dtype=float)         
-    R_full = np.asarray(traj[axis], dtype=float)        
-    Rp_full = np.asarray(traj[slope_col_full], dtype=float)  
+    Z_full = np.asarray(traj["Z"], dtype=float)
+    R_full = np.asarray(traj[axis], dtype=float)
+    Rp_full = np.asarray(traj[slope_col_full], dtype=float)
 
     if not (Z_full.ndim == R_full.ndim == Rp_full.ndim == 1):
         raise ValueError("Trajectory arrays Z, X/Y, Xp/Yp must be 1D.")
@@ -143,27 +145,37 @@ def plot_chief_rays(
     Rp_full_mrad = Rp_full * 1e3
 
     df_sorted = df.sort_values("Z", kind="mergesort").reset_index(drop=True)
-    Zr = df_sorted["Z"].to_numpy(dtype=float)       
-    Rr = df_sorted[axis].to_numpy(dtype=float)      
-    dRr = df_sorted[f"d{axis}"].to_numpy(dtype=float)  
+    Zr = df_sorted["Z"].to_numpy(dtype=float)
+    Rr = df_sorted[axis].to_numpy(dtype=float)
+    dRr = df_sorted[f"d{axis}"].to_numpy(dtype=float)
     ids = df_sorted["id"].astype(str).to_numpy()
 
     Zr_mm = Zr * 1e3
     Rr_mm = Rr * 1e3
 
+    s = np.asarray(mf["s"], dtype=float)
+    B = np.asarray(mf["B"], dtype=float)
 
-    s = np.asarray(mf["s"], dtype=float)  
-    B = np.asarray(mf["B"], dtype=float)  
+    if s.ndim != 1:
+        raise ValueError("'magnetic_field['s']' must be 1D.")
 
-    if s.ndim != 1 or B.ndim != 1 or s.size != B.size:
-        raise ValueError("'magnetic_field' must contain 1D arrays 's' and 'B' of equal length.")
+    if B.ndim == 1:
+        if B.size != s.size:
+            raise ValueError("If 'B' is 1D, it must have the same length as 's'.")
+        B_comp = B
+    elif B.ndim == 2:
+        if B.shape[0] != s.size or B.shape[1] != 3:
+            raise ValueError("'B' must have shape (N, 3) with N == len(s).")
+        B_comp = B[:, comp_index]
+    else:
+        raise ValueError("'B' must be 1D or 2D with shape (N, 3).")
 
     s_mm = s * 1e3
 
     if s.size > 1:
-        B_at_Zr = np.interp(Zr, s, B)
+        B_at_Zr = np.interp(Zr, s, B_comp)
     else:
-        B_at_Zr = np.full_like(Zr, B[0] if B.size else 0.0)
+        B_at_Zr = np.full_like(Zr, B_comp[0] if B_comp.size else 0.0)
 
     if Z_full.size > 1:
         Rp_at_Zr_mrad = np.interp(Zr, Z_full, Rp_full_mrad)
@@ -189,7 +201,7 @@ def plot_chief_rays(
 
     ax = axes[0]
     ax.set_facecolor("white")
-    ax.plot(s_mm, B, color=colors[0], linewidth=1.5, label=labels[0])
+    ax.plot(s_mm, B_comp, color=colors[0], linewidth=1.5, label=labels[0])
 
     for seg_id in unique_ids:
         mask = (ids == seg_id)
