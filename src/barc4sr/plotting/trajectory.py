@@ -10,6 +10,7 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.integrate as integrate
+from matplotlib import cm
 
 from .style import start_plotting
 
@@ -76,6 +77,224 @@ def plot_electron_trajectory(eBeamTraj: dict, direction: str, **kwargs) -> None:
     plt.tight_layout()
     plt.show()
 
+def plot_chief_rays(
+    result: dict,
+    direction: str = "horizontal",
+    *,
+    k: float = 1.0,
+    ray_length: float = 1.0,
+) -> None:
+    """
+    Plot chief rays on top of the electron trajectory with a magnetic-field panel.
+
+    Layout (matches plot_electron_trajectory):
+    - Panel 1: Magnetic field (Bx or By depending on direction) + chief-ray points
+    - Panel 2: Trajectory (x or y) with chief rays overlaid
+    - Panel 3: Trajectory angle (x' or y') with chief-ray points
+
+    """
+    start_plotting(k)
+
+    if "chief_rays" not in result:
+        raise KeyError("Input dict must contain key 'chief_rays' as returned by trace_chief_rays().")
+    if "magnetic_field" not in result:
+        raise KeyError("Input dict must contain key 'magnetic_field'.")
+    if "trajectory" not in result:
+        raise KeyError("Input dict must contain key 'trajectory' (full trajectory).")
+
+    df = result["chief_rays"]
+    mf = result["magnetic_field"]
+    traj = result["trajectory"]
+
+    required_cols = {"X", "Y", "Z", "dX", "dY", "id"}
+    missing = required_cols.difference(df.columns)
+    if missing:
+        raise ValueError(f"'chief_rays' DataFrame is missing required columns: {missing}.")
+
+    d = direction.lower()
+    if d in ("x", "h", "hor", "horizontal"):
+        axis = "X"
+        slope_col_full = "Xp"
+        axis_label = "x"
+        B_label = "By [T]"
+        title = "Horizontal chief rays on electron trajectory"
+        field_component = "By"
+        comp_index = 1
+    elif d in ("y", "v", "ver", "vertical"):
+        axis = "Y"
+        slope_col_full = "Yp"
+        axis_label = "y"
+        B_label = "Bx [T]"
+        title = "Vertical chief rays on electron trajectory"
+        field_component = "Bx"
+        comp_index = 0
+    else:
+        raise ValueError("Direction must be 'horizontal'/'x' or 'vertical'/'y'.")
+
+    Z_full = np.asarray(traj["Z"], dtype=float)
+    R_full = np.asarray(traj[axis], dtype=float)
+    Rp_full = np.asarray(traj[slope_col_full], dtype=float)
+
+    if not (Z_full.ndim == R_full.ndim == Rp_full.ndim == 1):
+        raise ValueError("Trajectory arrays Z, X/Y, Xp/Yp must be 1D.")
+    if not (Z_full.size == R_full.size == Rp_full.size):
+        raise ValueError("Z, X/Y, Xp/Yp must have the same length.")
+
+    Z_full_mm = Z_full * 1e3
+    R_full_mm = R_full * 1e3
+    Rp_full_mrad = Rp_full * 1e3
+
+    df_sorted = df.sort_values("Z", kind="mergesort").reset_index(drop=True)
+    Zr = df_sorted["Z"].to_numpy(dtype=float)
+    Rr = df_sorted[axis].to_numpy(dtype=float)
+    dRr = df_sorted[f"d{axis}"].to_numpy(dtype=float)
+    ids = df_sorted["id"].astype(str).to_numpy()
+
+    Zr_mm = Zr * 1e3
+    Rr_mm = Rr * 1e3
+
+    s = np.asarray(mf["s"], dtype=float)
+    B = np.asarray(mf["B"], dtype=float)
+
+    if s.ndim != 1:
+        raise ValueError("'magnetic_field['s']' must be 1D.")
+
+    if B.ndim == 1:
+        if B.size != s.size:
+            raise ValueError("If 'B' is 1D, it must have the same length as 's'.")
+        B_comp = B
+    elif B.ndim == 2:
+        if B.shape[0] != s.size or B.shape[1] != 3:
+            raise ValueError("'B' must have shape (N, 3) with N == len(s).")
+        B_comp = B[:, comp_index]
+    else:
+        raise ValueError("'B' must be 1D or 2D with shape (N, 3).")
+
+    s_mm = s * 1e3
+
+    if s.size > 1:
+        B_at_Zr = np.interp(Zr, s, B_comp)
+    else:
+        B_at_Zr = np.full_like(Zr, B_comp[0] if B_comp.size else 0.0)
+
+    if Z_full.size > 1:
+        Rp_at_Zr_mrad = np.interp(Zr, Z_full, Rp_full_mrad)
+    else:
+        Rp_at_Zr_mrad = np.full_like(Zr, Rp_full_mrad[0] if Rp_full_mrad.size else 0.0)
+
+    fig, axes = plt.subplots(
+        3, 1,
+        sharex=True,
+        figsize=(8, 8),
+        height_ratios=[1, 1, 1],
+    )
+    fig.suptitle(title, fontsize=16 * k)
+    fig.subplots_adjust(hspace=0.3)
+
+    colors = ["darkred", "olive", "steelblue"]
+    labels = [B_label, f"{axis_label} [mm]", f"{axis_label}' [mrad]"]
+
+    unique_ids = list(dict.fromkeys(ids))
+    n_seg = max(len(unique_ids), 1)
+    seg_colours = [cm.tab10(i / max(n_seg - 1, 1)) for i in range(n_seg)]
+    id_to_color = {seg_id: seg_colours[i] for i, seg_id in enumerate(unique_ids)}
+
+    ax = axes[0]
+    ax.set_facecolor("white")
+    ax.plot(s_mm, B_comp, color=colors[0], linewidth=1.5, label=labels[0])
+
+    for seg_id in unique_ids:
+        mask = (ids == seg_id)
+        if not np.any(mask):
+            continue
+        color = id_to_color[seg_id]
+        ax.plot(
+            Zr_mm[mask],
+            B_at_Zr[mask],
+            linestyle="none",
+            marker="o",
+            markersize=4,
+            color=color,
+            alpha=0.9,
+        )
+
+    ax.grid(True, which="both", color="gray", linestyle=":", linewidth=0.5)
+    ax.tick_params(direction="in", top=True, right=True)
+    for spine in ("top", "right", "bottom", "left"):
+        ax.spines[spine].set_visible(True)
+        ax.spines[spine].set_color("black")
+    ax.yaxis.label.set_color("black")
+    ax.legend(loc="upper right", frameon=True)
+
+    ax = axes[1]
+    ax.set_facecolor("white")
+    ax.plot(Z_full_mm, R_full_mm, color=colors[1], linewidth=1.5, label=labels[1])
+
+    for seg_id in unique_ids:
+        mask = (ids == seg_id)
+        Z0 = Zr[mask]
+        R0 = Rr[mask]
+        m = dRr[mask]
+
+        if Z0.size == 0:
+            continue
+
+        color = id_to_color[seg_id]
+
+        Z_ray_start = Z0
+        Z_ray_end = Z0 + ray_length
+        R_ray_start = R0
+        R_ray_end = R0 + m * (Z_ray_end - Z_ray_start)
+
+        for zs, ze, rs, re in zip(Z_ray_start, Z_ray_end, R_ray_start, R_ray_end):
+            ax.plot(
+                [zs * 1e3, ze * 1e3],
+                [rs * 1e3, re * 1e3],
+                color=color,
+                linewidth=0.9,
+                alpha=0.8,
+            )
+
+    ax.grid(True, which="both", color="gray", linestyle=":", linewidth=0.5)
+    ax.tick_params(direction="in", top=True, right=True)
+    for spine in ("top", "right", "bottom", "left"):
+        ax.spines[spine].set_visible(True)
+        ax.spines[spine].set_color("black")
+    ax.yaxis.label.set_color("black")
+    ax.legend(loc="upper right", frameon=True)
+
+    ax = axes[2]
+    ax.set_facecolor("white")
+    ax.plot(Z_full_mm, Rp_full_mrad, color=colors[2], linewidth=1.5, label=labels[2])
+
+    for seg_id in unique_ids:
+        mask = (ids == seg_id)
+        if not np.any(mask):
+            continue
+        color = id_to_color[seg_id]
+        ax.plot(
+            Zr_mm[mask],
+            Rp_at_Zr_mrad[mask],
+            linestyle="none",
+            marker="o",
+            markersize=3,
+            color=color,
+            alpha=0.9,
+        )
+
+    ax.grid(True, which="both", color="gray", linestyle=":", linewidth=0.5)
+    ax.tick_params(direction="in", top=True, right=True)
+    for spine in ("top", "right", "bottom", "left"):
+        ax.spines[spine].set_visible(True)
+        ax.spines[spine].set_color("black")
+    ax.yaxis.label.set_color("black")
+    ax.legend(loc="upper right", frameon=True)
+
+    axes[-1].set_xlabel("[mm]", color="black")
+
+    plt.tight_layout()
+    plt.show()
+
 # ---------------------------------------------------------------------------
 # Magnetic field
 # ---------------------------------------------------------------------------
@@ -120,7 +339,7 @@ def plot_magnetic_field(eBeamTraj: dict, direction: str, **kwargs) -> None:
         frst_field_integral,
         scnd_field_integral
     ]
-    labels = ['B [T]', '$\int$B$\cdot$d$s$ [T$\cdot$m]', '$\iint$B$\cdot$d$s$² [T$\cdot$m²]']
+    labels = ['B [T]', r'$\int$B$\cdot$d$s$ [T$\cdot$m]', r'$\iint$B$\cdot$d$s$² [T$\cdot$m²]']
 
     for ax, y, color, label in zip(axes, ys, colors, labels):
         ax.set_facecolor('white')

@@ -9,14 +9,18 @@ from __future__ import annotations
 
 import time
 
+import numpy as np
+
 from barc4sr.backend.srw.interface import (
-    set_light_source,
     srwlibCalcElecFieldSR,
     srwlibCalcPowDenSR,
+    spectral_srwlibCalcStokesUR,
+    spectral_srwlibCalcElecFieldSR
 )
-from barc4sr.io.rw import write_power_density, write_wavefront
-from barc4sr.syned.mapping import barc4sr_dictionary, syned_dictionary
+from barc4sr.io.rw import write_power_density, write_spectrum, write_wavefront
 from barc4sr.utils.time import print_elapsed_time
+
+from .shared import initialize_calculation
 
 
 def wavefront(photon_energy: float,
@@ -60,53 +64,24 @@ def wavefront(photon_energy: float,
     """
     t0 = time.time()
 
-    verbose = kwargs.get('verbose', True)
-    json_file = kwargs.get('json_file', None)
-    light_source = kwargs.get('light_source', None)
+    bl, eBeam, magFldCnt, eTraj, source_type, verbose = initialize_calculation(
+        kwargs,
+        observation_point=observation_point,
+        hor_slit=hor_slit,
+        ver_slit=ver_slit,
+        hor_slit_cen=kwargs.get('hor_slit_cen', 0),
+        ver_slit_cen=kwargs.get('ver_slit_cen', 0),
+        calc_etraj=False
+    )
+    
     file_name = kwargs.get('file_name', None)
-
-    if json_file is None and light_source is None:
-        raise ValueError("Please, provide either json_file or light_source (see function docstring)")
-    if json_file is not None and light_source is not None:
-        raise ValueError("Please, provide either json_file or light_source - not both (see function docstring)")
-
-    hor_slit_cen = kwargs.get('hor_slit_cen', 0)
-    ver_slit_cen = kwargs.get('ver_slit_cen', 0)
-
-    if json_file is not None:
-        bl = syned_dictionary(json_file, observation_point, 
-                              hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
-    if light_source is not None:
-        bl = barc4sr_dictionary(light_source, observation_point, 
-                                hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
-
-    calc_etraj = False
-
-    if bl['Class'] == 'bm':
-        source_type = 'bending magnet'
-    elif bl['Class'] == 'u':
-        source_type = 'undulator'
-    elif bl['Class'] == 'w':
-        source_type = 'wiggler'
-    elif bl['Class'] == 'arb':
-        source_type = 'arbitrary magnetic field'
-        
-    function_txt = f"{source_type} wavefront for a fixed energy using SRW:"
-
-    if verbose: print(f"{function_txt} please wait...")
-
     radiation_polarisation = kwargs.get('radiation_polarisation', 'T')
     number_macro_electrons = kwargs.get('number_macro_electrons', 1)
-
     parallel = kwargs.get('parallel', False)
-
-    ebeam_initial_condition = kwargs.get('ebeam_initial_condition', 6*[0])
-
-    eBeam, magFldCnt, eTraj = set_light_source(bl,
-                                               calc_etraj, 
-                                               ebeam_initial_condition,
-                                               verbose=verbose)
     
+    function_txt = f"{source_type} wavefront for a fixed energy using SRW:"
+    if verbose: print(f"{function_txt} please wait...")
+
     calc_txt = "> Performing monochromatic wavefront calculation (___CALC___ simulation)"
 
     if number_macro_electrons == 0:
@@ -142,7 +117,6 @@ def wavefront(photon_energy: float,
     if verbose: print_elapsed_time(t0)
 
     return wfrDict
-
 
 #***********************************************************************************
 # power distribution
@@ -184,70 +158,42 @@ def power_density(observation_point: float,
     """
 
     t0 = time.time()
-
-    verbose = kwargs.get('verbose', True)
-    json_file = kwargs.get('json_file', None)
-    light_source = kwargs.get('light_source', None)
+    
+    bl, eBeam, magFldCnt, eTraj, source_type, verbose = initialize_calculation(
+        kwargs,
+        observation_point=observation_point,
+        hor_slit=hor_slit,
+        ver_slit=ver_slit,
+        hor_slit_cen=kwargs.get('hor_slit_cen', 0),
+        ver_slit_cen=kwargs.get('ver_slit_cen', 0),
+        calc_etraj=False
+    )
+    
     file_name = kwargs.get('file_name', None)
-
-    if json_file is None and light_source is None:
-        raise ValueError("Please, provide either json_file or light_source (see function docstring)")
-    if json_file is not None and light_source is not None:
-        raise ValueError("Please, provide either json_file or light_source - not both (see function docstring)")
-
-    hor_slit_cen = kwargs.get('hor_slit_cen', 0)
-    ver_slit_cen = kwargs.get('ver_slit_cen', 0)
-
-    if json_file is not None:
-        bl = syned_dictionary(json_file, observation_point, 
-                              hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
-    if light_source is not None:
-        bl = barc4sr_dictionary(light_source, observation_point, 
-                                hor_slit, ver_slit, hor_slit_cen, ver_slit_cen)
-
-    calc_etraj = False
-
-    if bl['Class'] == 'bm':
-        source_type = 'bending magnet'
-    elif bl['Class'] == 'u':
-        source_type = 'undulator'
-    elif bl['Class'] == 'w':
-        source_type = 'wiggler'
-    elif bl['Class'] == 'arb':
-        source_type = 'arbitrary magnetic field'
-        
-    function_txt = f"{source_type} wavefront for a fixed energy using SRW:"
-
-    if verbose: print(f"{function_txt} please wait...")
-
     radiation_polarisation = kwargs.get('radiation_polarisation', 'T')
-
-    ebeam_initial_condition = kwargs.get('ebeam_initial_condition', 6*[0])
-
-    eBeam, magFldCnt, eTraj = set_light_source(bl,
-                                               calc_etraj, 
-                                               ebeam_initial_condition,
-                                               verbose=verbose)
+    
+    function_txt = f"{source_type} power density using SRW:"
+    if verbose: print(f"{function_txt} please wait...")
     
     pwr = srwlibCalcPowDenSR(bl, eBeam, magFldCnt, hor_slit_n, ver_slit_n)
-
+    
     pwrDict = write_power_density(file_name, pwr, radiation_polarisation)
-
+    
     if verbose:
         for pol in pwrDict:
             if pol == "axis":
                 continue
-
+            
             integrated = pwrDict[pol]["integrated"]
             peak = pwrDict[pol]["peak"]
-
+            
             print(f"Polarisation component {pol}")
             print(f">>> Total received power: {integrated:.3e} W")
             print(f">>> Peak power density: {peak:.2f} W/mm^2")
-
+    
     if verbose: print(f"{function_txt} finished.")
     if verbose: print_elapsed_time(t0)
-
+    
     return pwrDict
 
 #***********************************************************************************

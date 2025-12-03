@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from .trajectory import (
     plot_electron_trajectory,
+    plot_chief_rays,
     plot_magnetic_field,
     plot_field_and_twiss,
 )
@@ -28,6 +29,7 @@ from .spectral import (
 __all__ = [
     # trajectory
     "plot_electron_trajectory",
+    "plot_chief_rays",
     "plot_magnetic_field",
     "plot_field_and_twiss",
 
