@@ -122,24 +122,41 @@ def plot_chief_rays(
     - Panel 2: Trajectory (x or y) with chief rays overlaid
     - Panel 3: Trajectory angle (x' or y') with chief-ray points
 
+    Parameters
+    ----------
+    result : dict
+        Dictionary returned by trace_chief_rays(), with at least:
+          - "eTraj"     : dict with "Z", "X", "Y", "Xp", "Yp"
+          - "mag_field" : dict with "s", "B" (N, 3) for (Bx, By, Bz)
+          - "chief_rays": pandas.DataFrame with columns
+                ["X", "Y", "Z", "dX", "dY", "id", ...].
+    direction : str, optional
+        "horizontal"/"x" or "vertical"/"y".
+    k : float, optional
+        Global font/marker scaling factor passed to start_plotting().
+    ray_length : float, optional
+        Length of drawn ray segments along z *in meters* (default 1.0).
     """
     start_plotting(k)
 
     if "chief_rays" not in result:
-        raise KeyError("Input dict must contain key 'chief_rays' as returned by trace_chief_rays().")
-    if "magnetic_field" not in result:
-        raise KeyError("Input dict must contain key 'magnetic_field'.")
-    if "trajectory" not in result:
-        raise KeyError("Input dict must contain key 'trajectory' (full trajectory).")
+        raise KeyError(
+            "Input dict must contain key 'chief_rays' as returned by trace_chief_rays()."
+        )
+    if "mag_field" not in result:
+        raise KeyError("Input dict must contain key 'mag_field'.")
+    if "eTraj" not in result:
+        raise KeyError("Input dict must contain key 'eTraj' (full trajectory).")
 
     df = result["chief_rays"]
-    mf = result["magnetic_field"]
-    traj = result["trajectory"]
+    mf = result["mag_field"]
+    traj = result["eTraj"]
 
     required_cols = {"X", "Y", "Z", "dX", "dY", "id"}
     missing = required_cols.difference(df.columns)
     if missing:
-        raise ValueError(f"'chief_rays' DataFrame is missing required columns: {missing}.")
+        raise ValueError(
+            f"'chief_rays' DataFrame is missing required columns: {missing}.")
 
     d = direction.lower()
     if d in ("x", "h", "hor", "horizontal"):
@@ -148,7 +165,6 @@ def plot_chief_rays(
         axis_label = "x"
         B_label = "By [T]"
         title = "Horizontal chief rays on electron trajectory"
-        field_component = "By"
         comp_index = 1
     elif d in ("y", "v", "ver", "vertical"):
         axis = "Y"
@@ -156,8 +172,7 @@ def plot_chief_rays(
         axis_label = "y"
         B_label = "Bx [T]"
         title = "Vertical chief rays on electron trajectory"
-        field_component = "Bx"
-        comp_index = 0
+        comp_index = 0 
     else:
         raise ValueError("Direction must be 'horizontal'/'x' or 'vertical'/'y'.")
 
@@ -187,7 +202,7 @@ def plot_chief_rays(
     B = np.asarray(mf["B"], dtype=float)
 
     if s.ndim != 1:
-        raise ValueError("'magnetic_field['s']' must be 1D.")
+        raise ValueError("'mag_field[\"s\"]' must be 1D.")
 
     if B.ndim == 1:
         if B.size != s.size:
@@ -195,10 +210,10 @@ def plot_chief_rays(
         B_comp = B
     elif B.ndim == 2:
         if B.shape[0] != s.size or B.shape[1] != 3:
-            raise ValueError("'B' must have shape (N, 3) with N == len(s).")
+            raise ValueError("'mag_field[\"B\"]' must have shape (N, 3) with N == len(s).")
         B_comp = B[:, comp_index]
     else:
-        raise ValueError("'B' must be 1D or 2D with shape (N, 3).")
+        raise ValueError("'mag_field[\"B\"]' must be 1D or 2D with shape (N, 3).")
 
     s_mm = s * 1e3
 
@@ -212,12 +227,7 @@ def plot_chief_rays(
     else:
         Rp_at_Zr_mrad = np.full_like(Zr, Rp_full_mrad[0] if Rp_full_mrad.size else 0.0)
 
-    fig, axes = plt.subplots(
-        3, 1,
-        sharex=True,
-        figsize=(8, 8),
-        height_ratios=[1, 1, 1],
-    )
+    fig, axes = plt.subplots(3, 1, sharex=True, figsize=(8, 8), height_ratios=[1, 1, 1])
     fig.suptitle(title, fontsize=16 * k)
     fig.subplots_adjust(hspace=0.3)
 
@@ -234,7 +244,7 @@ def plot_chief_rays(
     ax.plot(s_mm, B_comp, color=colors[0], linewidth=1.5, label=labels[0])
 
     for seg_id in unique_ids:
-        mask = (ids == seg_id)
+        mask = ids == seg_id
         if not np.any(mask):
             continue
         color = id_to_color[seg_id]
@@ -261,7 +271,7 @@ def plot_chief_rays(
     ax.plot(Z_full_mm, R_full_mm, color=colors[1], linewidth=1.5, label=labels[1])
 
     for seg_id in unique_ids:
-        mask = (ids == seg_id)
+        mask = ids == seg_id
         Z0 = Zr[mask]
         R0 = Rr[mask]
         m = dRr[mask]
@@ -272,7 +282,7 @@ def plot_chief_rays(
         color = id_to_color[seg_id]
 
         Z_ray_start = Z0
-        Z_ray_end = Z0 + ray_length
+        Z_ray_end = Z0 + ray_length 
         R_ray_start = R0
         R_ray_end = R0 + m * (Z_ray_end - Z_ray_start)
 
@@ -298,7 +308,7 @@ def plot_chief_rays(
     ax.plot(Z_full_mm, Rp_full_mrad, color=colors[2], linewidth=1.5, label=labels[2])
 
     for seg_id in unique_ids:
-        mask = (ids == seg_id)
+        mask = ids == seg_id
         if not np.any(mask):
             continue
         color = id_to_color[seg_id]
