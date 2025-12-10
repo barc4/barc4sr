@@ -381,191 +381,243 @@ def write_wavefront(
     for polarisation, index in zip(selected_polarisations, selected_indices):
         _inPol = index
 
-        arInt = array('f', [0]*wfr_qpt.mesh.nx*wfr_qpt.mesh.ny)
-        srwlib.srwl.CalcIntFromElecField(arInt, wfr_qpt, _inPol, _inIntType, _inDepType, wfr_qpt.mesh.eStart, 0, 0)
-        wfrDict['intensity'].update({polarisation:np.asarray(arInt, dtype="float64").reshape((wfr_qpt.mesh.ny, wfr_qpt.mesh.nx))})
+        arInt = array("f", [0]*wfr_qpt.mesh.nx*wfr_qpt.mesh.ny)
+        srwlib.srwl.CalcIntFromElecField(arInt, wfr_qpt, _inPol, _inIntType, _inDepType,
+                                         wfr_qpt.mesh.eStart, 0, 0)
+        intensity = np.asarray(arInt, dtype="float64").reshape((wfr_qpt.mesh.ny, wfr_qpt.mesh.nx))
+        wfrDict["intensity"][polarisation] = intensity
 
-        arPh = array('d', [0]*wfr_qpt.mesh.nx*wfr_qpt.mesh.ny)
-        srwlib.srwl.CalcIntFromElecField(arPh, wfr_qpt, _inPol, 4, _inDepType, wfr_qpt.mesh.eStart, 0, 0)
+        arPh = array("d", [0] * wfr_qpt.mesh.nx * wfr_qpt.mesh.ny)
+        srwlib.srwl.CalcIntFromElecField(arPh, wfr_qpt, _inPol, 4, _inDepType, 
+                                         wfr_qpt.mesh.eStart, 0, 0)
         phase = np.asarray(arPh, dtype="float64").reshape((wfr_qpt.mesh.ny, wfr_qpt.mesh.nx))
-        wfrDict['phase'].update({polarisation:phase})
+        wfrDict["phase"][polarisation] = phase
 
     if file_name is not None:
-        with h5.File(f'{file_name}_wfr.h5', 'w') as f:
-            group = f.create_group('XOPPY_WAVEFRONT')
+        with h5.File(f"{file_name}_wfr.h5", "w") as f:
+            f.attrs["barc4sr_calc"] = "wavefront"
+            f.attrs["barc4sr_version"] = "1.0"
 
-            group.create_dataset('axis_x', data=wfrDict['axis']['x'] * 1e3)  # mm
-            group.create_dataset('axis_y', data=wfrDict['axis']['y'] * 1e3)
+            g_axis = f.create_group("axis")
+            g_axis.create_dataset("x", data=wfrDict["axis"]["x"])
+            g_axis.create_dataset("y", data=wfrDict["axis"]["y"])
 
-            intensity_group = group.create_group('Intensity')
-            for pol, img in wfrDict['intensity'].items():
-                intensity_group.create_dataset(pol, data=img)
+            g_meta = f.create_group("meta")
+            g_meta.attrs["energy"] = float(wfrDict["energy"])
+            g_meta.attrs["Rx"] = float(Rx)
+            g_meta.attrs["Ry"] = float(Ry)
+            g_meta.attrs["n_macro_electrons"] = int(number_macro_electrons)
+            g_meta.attrs["polarisations"] = ",".join(selected_polarisations)
 
-            phase_group = group.create_group('Phase')
-            for pol, img in wfrDict['phase'].items():
-                phase_group.create_dataset(pol, data=img)
+            g_int = f.create_group("intensity")
+            for pol, img in wfrDict["intensity"].items():
+                g_int.create_dataset(pol, data=img)
+
+            g_phase = f.create_group("phase")
+            for pol, img in wfrDict["phase"].items():
+                g_phase.create_dataset(pol, data=img)
 
             wfr_pickled = pickle.dumps(wfr)
-            group.create_dataset('wfr', data=np.void(wfr_pickled))
-    
+            f.create_dataset("wfr", data=np.void(wfr_pickled))
+
     return wfrDict
 
 def read_wavefront(file_name: str) -> dict:
     """
-    Reads wavefront data from an HDF5 file and reconstructs the full wavefront dictionary.
+    Read wavefront data from an HDF5 file written by ``write_wavefront``
+    and reconstruct the full wavefront dictionary.
 
-    Parameters:
-        file_name (str): Path to the HDF5 file containing wavefront data.
+    Parameters
+    ----------
+    file_name : str
+        Path to the HDF5 file containing wavefront data
+        (``*_undulator_wfr.h5``).
 
-    Returns:
-        dict: Dictionary with keys:
-            - 'wfr': the SRW wavefront object (unpickled).
-            - 'axis': dict with 'x' and 'y' numpy arrays (in meters).
-            - 'energy': photon energy (float).
-            - 'Rx': curvature radius in x (float).
-            - 'Ry': curvature radius in y (float).
-            - 'intensity': dict with polarisation labels as keys and 2D numpy arrays as values.
-            - 'phase': dict with polarisation labels as keys and 2D numpy arrays as values.
+    Returns
+    -------
+    dict
+        Dictionary with keys:
+            - 'wfr': SRW wavefront object (if present).
+            - 'axis': {'x', 'y'} in meters.
+            - 'energy': photon energy [eV] (if stored).
+            - 'Rx', 'Ry': curvature radii [m] (if stored).
+            - 'intensity': {pol: 2D numpy arrays}.
+            - 'phase': {pol: 2D numpy arrays}.
     """
     if not (file_name.endswith("h5") or file_name.endswith("hdf5")):
         raise ValueError("Only HDF5 format supported for this function.")
 
     with h5.File(file_name, "r") as f:
-        group = f["XOPPY_WAVEFRONT"]
+        calc = f.attrs.get("barc4sr_calc", None)
+        if calc not in (None, "wavefront"):
+            raise ValueError(f"Unexpected barc4sr_calc={calc!r} in file {file_name}.")
 
-        x = group["axis_x"][()] * 1e-3  # back to meters
-        y = group["axis_y"][()] * 1e-3
+        if "axis" not in f:
+            raise ValueError("Invalid file structure: missing 'axis' group.")
+        g_axis = f["axis"]
+        x = g_axis["x"][()]
+        y = g_axis["y"][()]
 
-        intensity = {}
-        for pol in group["Intensity"]:
-            intensity[pol] = group["Intensity"][pol][()]
+        if "intensity" not in f:
+            raise ValueError("Invalid file structure: missing 'intensity' group.")
+        g_int = f["intensity"]
+        intensity = {pol: g_int[pol][()] for pol in g_int.keys()}
 
-        phase = {}
-        for pol in group["Phase"]:
-            phase[pol] = group["Phase"][pol][()]
+        if "phase" not in f:
+            raise ValueError("Invalid file structure: missing 'phase' group.")
+        g_phase = f["phase"]
+        phase = {pol: g_phase[pol][()] for pol in g_phase.keys()}
 
-        wfr = pickle.loads(group["wfr"][()])
+        wfr = None
+        if "wfr" in f:
+            wfr = pickle.loads(f["wfr"][()].tobytes())
 
-    Rx = getattr(wfr, "Rx", None)
-    Ry = getattr(wfr, "Ry", None)
-    energy = getattr(wfr.mesh, "eStart", None)
+    Rx = getattr(wfr, "Rx", None) if wfr is not None else None
+    Ry = getattr(wfr, "Ry", None) if wfr is not None else None
+    energy = getattr(wfr.mesh, "eStart", None) if wfr is not None else None
 
     return {
         "wfr": wfr,
-        "axis": {
-            "x": x,
-            "y": y,
-        },
+        "axis": {"x": x, "y": y},
         "energy": energy,
         "Rx": Rx,
         "Ry": Ry,
         "intensity": intensity,
-        "phase": phase
+        "phase": phase,
     }
 
 # ---------------------------------------------------------------------------
 # Power density
 # ---------------------------------------------------------------------------
 
-def write_power_density(file_name: str, stks: srwlib.SRWLStokes, selected_polarisations: list) -> dict:
+def write_power_density(
+    file_name: str,
+    stks: srwlib.SRWLStokes,
+    selected_polarisations: list,
+) -> dict:
     """
-    Writes power density data () to an HDF5 file.
+    Write power density data to an HDF5 file and return a power dictionary.
 
-    Parameters:
-        file_name (str): Base file path for saving the wavefront data. The data will be stored
-                         in a file named '<file_name>_undulator_wfr.h5'.
-        wfr (srwlib.SRWLStokes): The SRW Stokes object containing the simulated power density.
-        selected_polarisations (list or str): List of polarisations to export. Can be a single
-                         string or a list of strings. Accepted values include: 'LH', 'LV', 
-                         'L45', 'L135', 'CR', 'CL', 'T'.
+    Parameters
+    ----------
+    file_name : str
+        Base file path for saving the power density data. The data is stored
+        in a file named ``"<file_name>_power_density.h5"``.
+    stks : SRWLStokes
+        SRW Stokes object containing the simulated power density.
+    selected_polarisations : list or str
+        Polarisations to export. Can be a single string or a list of
+        strings. Accepted values: 'LH', 'LV', 'L45', 'L135', 'CR', 'CL', 'T'.
 
-    Returns:
-        dict: A dictionary containing the wavefront object, computed axes, intensities for selected
-              polarisations, and phase image.
+    Returns
+    -------
+    dict
+        Dictionary with keys:
+            - 'axis': {'x', 'y'} in meters.
+            - for each polarisation:
+                - 'map': 2D power density map.
+                - 'integrated': total power [W].
+                - 'peak': peak power density [W/m^2].
     """
     if isinstance(selected_polarisations, str):
         selected_polarisations = [selected_polarisations]
     elif not isinstance(selected_polarisations, list):
-        raise ValueError("Input should be a list of strings.")
-    
+        raise ValueError("Input should be a list of strings or a string.")
+
     for i, s in enumerate(selected_polarisations):
         if not s.isupper():
             selected_polarisations[i] = s.upper()
 
-    pwrDict = {}
+    pwrDict: dict[str, object] = {}
 
-    pwrDict.update({'axis':{'x': np.linspace(stks.mesh.xStart, stks.mesh.xFin, stks.mesh.nx),
-                            'y': np.linspace(stks.mesh.yStart, stks.mesh.yFin, stks.mesh.ny)}})
+    pwrDict["axis"] = {
+        "x": np.linspace(stks.mesh.xStart, stks.mesh.xFin, stks.mesh.nx),
+        "y": np.linspace(stks.mesh.yStart, stks.mesh.yFin, stks.mesh.ny),
+    }
 
-    all_polarisations = ['LH', 'LV', 'L45', 'L135', 'CR', 'CL', 'T']
+    all_polarisations = ["LH", "LV", "L45", "L135", "CR", "CL", "T"]
     pol_map = {pol: i for i, pol in enumerate(all_polarisations)}
 
     selected_indices = [pol_map[pol] for pol in selected_polarisations if pol in pol_map]
 
     if not selected_indices:
         print(">>>>> No valid polarisation found - defaulting to 'T'")
-        return write_wavefront(file_name, stks, selected_polarisations=['T'])
-    
-    dx = (pwrDict['axis']['x'][1]-pwrDict['axis']['x'][0])*1E3
-    dy = (pwrDict['axis']['y'][1]-pwrDict['axis']['y'][0])*1E3
+        return write_power_density(file_name, stks, selected_polarisations=["T"])
+
+    dx = pwrDict["axis"]["x"][1] - pwrDict["axis"]["x"][0]
+    dy = pwrDict["axis"]["y"][1] - pwrDict["axis"]["y"][0]
 
     for polarisation, index in zip(selected_polarisations, selected_indices):
         _inPol = index
         pow_map = np.reshape(stks.to_int(_inPol), (stks.mesh.ny, stks.mesh.nx))
-        cum_pow = pow_map.sum()*dx*dy
-        pwrDict.update({polarisation:{'map': pow_map,
-                                      'integrated': cum_pow,
-                                      'peak': pow_map.max()}})
+        cum_pow = pow_map.sum() * dx * dy
+        pwrDict[polarisation] = {
+            "map": pow_map,
+            "integrated": cum_pow,
+            "peak": pow_map.max(),
+        }
 
     if file_name is not None:
-        with h5.File(f'{file_name}_power_density.h5', 'w') as f:
-            group = f.create_group('XOPPY_POWERDENSITY')
-            group.create_dataset('axis_x', data=pwrDict['axis']['x'] * 1e3)  # mm
-            group.create_dataset('axis_y', data=pwrDict['axis']['y'] * 1e3)  # mm
+        with h5.File(f"{file_name}_power_density.h5", "w") as f:
+            f.attrs["barc4sr_calc"] = "power_density"
+            f.attrs["barc4sr_version"] = "1.0"
+
+            f_axis = f.create_group("axis")
+            f_axis.create_dataset("x", data=pwrDict["axis"]["x"])
+            f_axis.create_dataset("y", data=pwrDict["axis"]["y"])
 
             for pol in selected_polarisations:
-                pol_group = group.create_group(pol)
-                pol_group.create_dataset('map', data=pwrDict[pol]['map'])
-                pol_group.attrs['integrated'] = pwrDict[pol]['integrated']
-                pol_group.attrs['peak'] = pwrDict[pol]['peak']
+                pol_group = f.create_group(pol)
+                pol_group.create_dataset("map", data=pwrDict[pol]["map"])
+                pol_group.attrs["integrated"] = pwrDict[pol]["integrated"]
+                pol_group.attrs["peak"] = pwrDict[pol]["peak"]
 
     return pwrDict
 
 def read_power_density(file_name: str) -> dict:
     """
-    Reads power density data from an HDF5 file and reconstructs the power dictionary.
+    Read power density data from an HDF5 file written by
+    ``write_power_density`` and reconstruct the power dictionary.
 
-    Parameters:
-        file_name (str): Path to the HDF5 file containing power density data.
+    Parameters
+    ----------
+    file_name : str
+        Path to the HDF5 file containing power density data.
 
-    Returns:
-        dict: Dictionary with keys:
-            - 'axis': dict with 'x' and 'y' numpy arrays (in meters).
-            - <polarisation>: for each polarisation, a dict with:
+    Returns
+    -------
+    dict
+        Dictionary with keys:
+            - 'axis': {'x', 'y'} in meters.
+            - <polarisation>: for each polarisation:
                 - 'map': 2D numpy array of power density.
-                - 'integrated': scalar total power [W].
-                - 'peak': scalar peak power density [W/m^2].
+                - 'integrated': total power [W].
+                - 'peak': peak power density [W/m^2].
     """
     if not (file_name.endswith("h5") or file_name.endswith("hdf5")):
         raise ValueError("Only HDF5 format supported for this function.")
 
     with h5.File(file_name, "r") as f:
-        group = f["XOPPY_POWERDENSITY"]
+        calc = f.attrs.get("barc4sr_calc", None)
+        if calc not in (None, "power_density"):
+            raise ValueError(f"Unexpected barc4sr_calc={calc!r} in file {file_name}.")
 
-        x = group["axis_x"][()] * 1e-3  # back to meters
-        y = group["axis_y"][()] * 1e-3
+        if "axis" not in f:
+            raise ValueError("Invalid file structure: missing 'axis' group.")
+        g_axis = f["axis"]
+        x = g_axis["x"][()]
+        y = g_axis["y"][()]
 
-        pwrDict = {"axis": {"x": x, "y": y}}
+        pwrDict: dict[str, object] = {"axis": {"x": x, "y": y}}
 
-        for pol in group:
-            if pol.startswith("axis_"):
-                continue  # skip axes
-
-            pol_group = group[pol]
-            pwrDict[pol] = {
+        for key in f.keys():
+            if key == "axis":
+                continue
+            pol_group = f[key]
+            pwrDict[key] = {
                 "map": pol_group["map"][()],
-                "integrated": pol_group.attrs["integrated"],
-                "peak": pol_group.attrs["peak"],
+                "integrated": float(pol_group.attrs["integrated"]),
+                "peak": float(pol_group.attrs["peak"]),
             }
 
     return pwrDict
@@ -576,7 +628,8 @@ def read_power_density(file_name: str) -> dict:
 
 def write_spectrum(file_name: str, spectrum: dict) -> dict:
     """
-    Saves computed spectrum data to an HDF5 file and returns a processed spectrum dictionary.
+    Save computed spectrum data to an HDF5 file and return a processed
+    spectrum dictionary.
 
     This function processes the input `spectrum` dictionary to compute:
         - Flux [ph/s/0.1%bw]
@@ -584,63 +637,70 @@ def write_spectrum(file_name: str, spectrum: dict) -> dict:
         - Cumulated power [W] (integrated from minimum energy up to each point)
         - Integrated power [W] (total power over the entire spectrum)
 
-    The data is saved in an HDF5 file under the 'XOPPY_SPECTRUM/Spectrum' group, with one subgroup per polarisation
-    containing the computed arrays.
+    The data is stored in an HDF5 file under a root group ``"spectrum"``,
+    with one subgroup per polarisation containing the computed arrays.
 
-    Parameters:
-        file_name (str): Base file path for saving the spectrum data. The data will be stored
-                         in a file named '<file_name>_spectrum.h5'.
-        spectrum (dict): Dictionary containing the simulated spectrum results with keys:
-            - 'energy': Energy axis array [eV].
-            - '<polarisation>': Data arrays per polarisation.
+    Parameters
+    ----------
+    file_name : str
+        Base file path for saving the spectrum data. The data is stored
+        in a file named ``"<file_name>_spectrum.h5"``.
+    spectrum : dict
+        Dictionary containing the simulated spectrum with keys:
+            - 'energy': 1D array of photon energies [eV].
+            - 'axis': {'x', 'y'} window sizes [m] or [rad].
+            - one key per polarisation, each a 1D flux array.
 
-    Returns:
-        dict: Processed spectrum dictionary with:
-            - 'energy': Energy axis array [eV].
-            - For each polarisation:
-                - 'flux': Flux array [ph/s/0.1%bw].
-                - 'spectral_power': Spectral power array [W/eV].
-                - 'cumulated_power': Cumulative integrated power array [W].
-                - 'integrated_power': Total integrated power scalar [W].
-
-    Example:
-        spectrumDict = write_spectrum("myfile", spectrum)
+    Returns
+    -------
+    dict
+        Processed spectrum dictionary with:
+            - 'energy'
+            - 'window': {'dx', 'dy'}
+            - for each polarisation:
+                - 'flux'
+                - 'spectral_power'
+                - 'cumulated_power'
+                - 'integrated_power'
     """
-
-    spectrumDict = {
-        'energy': spectrum['energy'],
-        'window': {
-            'dx': spectrum['axis']['x'],
-            'dy': spectrum['axis']['y'],
-        }
+    spectrumDict: dict[str, object] = {
+        "energy": spectrum["energy"],
+        "window": {
+            "dx": spectrum["axis"]["x"],
+            "dy": spectrum["axis"]["y"],
+        },
     }
 
     for polarisation, data in spectrum.items():
-        if polarisation in ['energy', 'axis']:
+        if polarisation in ["energy", "axis"]:
             continue
 
-        flux = data.reshape(len(spectrum['energy']))
-        spectral_power = flux * CHARGE * 1E3
-        cumulated_power = integrate.cumulative_trapezoid(spectral_power, spectrum['energy'], initial=0)
-        integrated_power = integrate.trapezoid(spectral_power, spectrum['energy'])
+        flux = data.reshape(len(spectrum["energy"]))
+        spectral_power = flux * CHARGE * 1e3
+        cumulated_power = integrate.cumulative_trapezoid(
+            spectral_power, spectrum["energy"], initial=0
+        )
+        integrated_power = cumulated_power[-1]
 
         spectrumDict[polarisation] = {
-            'flux': flux,
-            'spectral_power': spectral_power,
-            'cumulated_power': cumulated_power,
-            'integrated_power': integrated_power,
+            "flux": flux,
+            "spectral_power": spectral_power,
+            "cumulated_power": cumulated_power,
+            "integrated_power": integrated_power,
         }
 
     if file_name is not None:
         with h5.File(f"{file_name}_spectrum.h5", "w") as f:
-            group = f.create_group("XOPPY_SPECTRUM")
-            spec_group = group.create_group("Spectrum")
+            f.attrs["barc4sr_calc"] = "spectrum"
+            f.attrs["barc4sr_version"] = "1.0"
 
-            spec_group.create_dataset("energy", data=spectrumDict['energy'])
+            spec_group = f.create_group("spectrum")
+
+            spec_group.create_dataset("energy", data=spectrumDict["energy"])
 
             window_group = spec_group.create_group("window")
-            window_group.create_dataset("dx", data=spectrumDict['window']['dx'])
-            window_group.create_dataset("dy", data=spectrumDict['window']['dy'])
+            window_group.create_dataset("dx", data=spectrumDict["window"]["dx"])
+            window_group.create_dataset("dy", data=spectrumDict["window"]["dy"])
 
             for pol, pol_data in spectrumDict.items():
                 if pol in ["energy", "window"]:
@@ -652,24 +712,38 @@ def write_spectrum(file_name: str, spectrum: dict) -> dict:
 
     return spectrumDict
 
-
 def read_spectrum(file_name: str) -> dict:
     """
-    Reads a spectrum HDF5 file saved by write_spectrum and returns the dictionary.
+    Read a spectrum HDF5 file written by ``write_spectrum`` and return
+    the spectrum dictionary.
 
-    Parameters:
-        file_name (str): Path to the spectrum HDF5 file (without '_spectrum.h5' extension).
+    Parameters
+    ----------
+    file_name : str
+        Base path (without ``"_spectrum.h5"`` suffix).
 
-    Returns:
-        dict: Spectrum dictionary with energy and polarisation data.
+    Returns
+    -------
+    dict
+        Spectrum dictionary with keys:
+            - 'energy'
+            - 'window': {'dx', 'dy'}
+            - one key per polarisation, each a dict with
+              'flux', 'spectral_power', 'cumulated_power', 'integrated_power'.
     """
-    spectrumDict = {}
+    spectrumDict: dict[str, object] = {}
     with h5.File(f"{file_name}_spectrum.h5", "r") as f:
-        spec_group = f["XOPPY_SPECTRUM"]["Spectrum"]
+        calc = f.attrs.get("barc4sr_calc", None)
+        if calc not in (None, "spectrum"):
+            raise ValueError(f"Unexpected barc4sr_calc={calc!r} in file {file_name}.")
+
+        if "spectrum" not in f:
+            raise ValueError("Invalid file structure: missing 'spectrum' group.")
+
+        spec_group = f["spectrum"]
 
         spectrumDict["energy"] = spec_group["energy"][:]
 
-        # Read window group
         window_group = spec_group["window"]
         spectrumDict["window"] = {
             "dx": window_group["dx"][:],
@@ -693,92 +767,120 @@ def read_spectrum(file_name: str) -> dict:
 
 def write_cmd(file_name: str, cmd: dict) -> dict:
     """
-    Saves coherent mode decomposition (CMD) data to an HDF5 file and returns a processed CMD dictionary.
+    Save coherent mode decomposition (CMD) data to an HDF5 file and return
+    a processed CMD dictionary.
 
-    Parameters:
-        file_name (str): Base file path for saving the CMD data. The data will be stored
-                         in a file named '<file_name>_cmd.h5'.
-        cmd (dict): Dictionary containing the CMD results with keys:
+    Parameters
+    ----------
+    file_name : str
+        Base file path for saving the CMD data. The data is stored
+        in a file named ``"<file_name>_cmd.h5"``.
+    cmd : dict
+        Dictionary containing the CMD results with keys:
             - 'energy': photon energy [eV].
-            - 'src_h_cmd' and 'src_v_cmd': CMD objects with attributes 'eigenvalues', 'abscissas', 'CSD'.
+            - 'src_h_cmd', 'src_v_cmd': CMD objects with attributes
+              'eigenvalues', 'abscissas', 'CSD'.
 
-    Returns:
-        dict: Processed CMD dictionary with energy and, for each direction ('H', 'V'):
-            - 'eigenvalues': Eigenvalues array.
-            - 'axis': Abscissas array.
-            - 'occupation': Normalised occupation array.
-            - 'cumulated': Cumulative sum of occupation array.
-            - 'CF': Coherent fraction (first mode occupation).
-            - 'CSD': Cross-spectral density matrix (absolute value).
+    Returns
+    -------
+    dict
+        Processed CMD dictionary:
+
+        {
+            'energy': float,
+            'source': {
+                'H': {
+                    'eigenvalues', 'axis', 'occupation',
+                    'cumulated', 'CF', 'CSD'
+                },
+                'V': {...}
+            }
+        }
     """
-    cmdDict = {'energy': cmd['energy'], 'source': {}}
+    cmdDict = {"energy": cmd["energy"], "source": {}}
 
-    for direction in ['h', 'v']:
-        eigenvalues = cmd[f'src_{direction}_cmd'].eigenvalues
-        axis = cmd[f'src_{direction}_cmd'].abscissas 
+    for direction in ["h", "v"]:
+        eigenvalues = cmd[f"src_{direction}_cmd"].eigenvalues
+        axis = cmd[f"src_{direction}_cmd"].abscissas
         occupation = eigenvalues / eigenvalues.sum()
         cumulated = np.cumsum(occupation)
         CF = occupation[0]
-        CSD = np.abs(cmd[f'src_{direction}_cmd'].CSD)
+        CSD = np.abs(cmd[f"src_{direction}_cmd"].CSD)
 
-        cmdDict['source'].update({
-            f'{direction.upper()}': {
-                'eigenvalues': eigenvalues,
-                'axis': axis,
-                'occupation': occupation,
-                'cumulated': cumulated,
-                'CF': CF,
-                'CSD': CSD
+        cmdDict["source"].update(
+            {
+                direction.upper(): {
+                    "eigenvalues": eigenvalues,
+                    "axis": axis,
+                    "occupation": occupation,
+                    "cumulated": cumulated,
+                    "CF": CF,
+                    "CSD": CSD,
+                }
             }
-        })
+        )
 
     if file_name is not None:
         with h5.File(f"{file_name}_cmd.h5", "w") as f:
-            group = f.create_group("XOPPY_CMD")
-            group.attrs["energy"] = cmdDict['energy']
+            f.attrs["barc4sr_calc"] = "cmd"
+            f.attrs["barc4sr_version"] = "1.0"
 
-            for direction in ['H', 'V']:
-                dir_group = group.create_group(direction)
-                dir_group.create_dataset("eigenvalues", data=cmdDict['source'][direction]['eigenvalues'])
-                dir_group.create_dataset("axis", data=cmdDict['source'][direction]['axis'])
-                dir_group.create_dataset("occupation", data=cmdDict['source'][direction]['occupation'])
-                dir_group.create_dataset("cumulated", data=cmdDict['source'][direction]['cumulated'])
-                dir_group.attrs["CF"] = cmdDict['source'][direction]['CF']
-                dir_group.create_dataset("CSD", data=cmdDict['source'][direction]['CSD'])
+            f.attrs["energy"] = float(cmdDict["energy"])
+
+            for direction in ["H", "V"]:
+                src = cmdDict["source"][direction]
+                dir_group = f.create_group(direction)
+                dir_group.create_dataset("eigenvalues", data=src["eigenvalues"])
+                dir_group.create_dataset("axis", data=src["axis"])
+                dir_group.create_dataset("occupation", data=src["occupation"])
+                dir_group.create_dataset("cumulated", data=src["cumulated"])
+                dir_group.attrs["CF"] = float(src["CF"])
+                dir_group.create_dataset("CSD", data=src["CSD"])
 
     return cmdDict
 
+
 def read_cmd(file_name: str) -> dict:
     """
-    Reads CMD data from an HDF5 file and reconstructs the CMD dictionary.
+    Read CMD data from an HDF5 file written by ``write_cmd`` and return
+    the CMD dictionary.
 
-    Parameters:
-        file_name (str): Path to the HDF5 file containing CMD data (ending with '_cmd.h5').
+    Parameters
+    ----------
+    file_name : str
+        Path to the HDF5 file containing CMD data (``*_cmd.h5``).
 
-    Returns:
-        dict: CMD dictionary with energy and, for each direction ('H', 'V'):
-            - 'eigenvalues': Eigenvalues array.
-            - 'axis': Abscissas array.
-            - 'occupation': Normalised occupation array.
-            - 'cumulated': Cumulative sum of occupation array.
-            - 'CF': Coherent fraction (first mode occupation).
-            - 'CSD': Cross-spectral density matrix.
+    Returns
+    -------
+    dict
+        CMD dictionary:
+
+        {
+            'energy': float,
+            'source': {
+                'H': {...},
+                'V': {...}
+            }
+        }
     """
-    cmdDict = {'source': {}}
+    cmdDict = {"source": {}}
 
     with h5.File(file_name, "r") as f:
-        group = f["XOPPY_CMD"]
-        cmdDict['energy'] = group.attrs["energy"]
+        calc = f.attrs.get("barc4sr_calc", None)
+        if calc not in (None, "cmd"):
+            raise ValueError(f"Unexpected barc4sr_calc={calc!r} in file {file_name}.")
 
-        for direction in ['H', 'V']:
-            dir_group = group[direction]
-            cmdDict['source'][direction] = {
-                'eigenvalues': dir_group["eigenvalues"][:],
-                'axis': dir_group["axis"][:],
-                'occupation': dir_group["occupation"][:],
-                'cumulated': dir_group["cumulated"][:],
-                'CF': dir_group.attrs["CF"],
-                'CSD': dir_group["CSD"][:]
+        cmdDict["energy"] = float(f.attrs["energy"])
+
+        for direction in ["H", "V"]:
+            dir_group = f[direction]
+            cmdDict["source"][direction] = {
+                "eigenvalues": dir_group["eigenvalues"][:],
+                "axis": dir_group["axis"][:],
+                "occupation": dir_group["occupation"][:],
+                "cumulated": dir_group["cumulated"][:],
+                "CF": float(dir_group.attrs["CF"]),
+                "CSD": dir_group["CSD"][:],
             }
 
     return cmdDict
