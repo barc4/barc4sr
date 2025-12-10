@@ -17,6 +17,8 @@ import numpy as np
 import scipy.integrate as integrate
 from scipy.constants import physical_constants
 
+from barc4sr.core.energy import get_gamma
+
 try:
     import srwpy.srwlib as srwlib
     USE_SRWLIB = True
@@ -32,213 +34,341 @@ CHARGE = physical_constants["atomic unit of charge"][0]
 # electron trajectory
 # ---------------------------------------------------------------------------
 
-def write_electron_trajectory(file_name:str, eTraj: srwlib.SRWLPrtTrj) -> dict:
+def write_electron_trajectory(file_name:str, eTraj: srwlib.SRWLPrtTrj, energy: float) -> dict:
     """
-    Saves electron trajectory data to an HDF5 file and returns a dictionary containing the trajectory data.
+    Save electron trajectory data to an HDF5 file and return a structured
+    dictionary containing the trajectory, magnetic field, and metadata.
 
-    This function processes the trajectory data from an `SRWLPrtTrj` object and stores it in both an HDF5 file 
-    and a Python dictionary. 
+    Parameters
+    ----------
+    file_name : str or None
+        Base file path for saving the trajectory data. The data is saved
+        in a file with the suffix ``"_eTraj.h5"``. If None, no file is written.
+    eTraj : SRWLPrtTrj
+        SRW particle trajectory object containing arrays:
+            arX, arXp, arY, arYp, arZ, arZp, arBx, arBy, arBz
 
-    Parameters:
-        file_name (str): Base file path for saving the trajectory data. The data will be saved 
-                         in a file with the suffix '_eTraj.h5'.
-        eTraj (SRWLPrtTrj): SRW library object containing the electron trajectory data. The object must include:
-            - `arX`: Array of horizontal positions [m].
-            - `arXp`: Array of horizontal relative velocities (trajectory angles) [rad].
-            - `arY`: Array of vertical positions [m].
-            - `arYp`: Array of vertical relative velocities (trajectory angles) [rad].
-            - `arZ`: Array of longitudinal positions [m].
-            - `arZp`: Array of longitudinal relative velocities (trajectory angles) [rad].
-            - `arBx` (optional): Array of horizontal magnetic field components [T].
-            - `arBy` (optional): Array of vertical magnetic field components [T].
-            - `arBz` (optional): Array of longitudinal magnetic field components [T].
-            - `np`: Number of trajectory points.
-            - `ctStart`: Start value of the independent variable (c*t) for the trajectory [m].
-            - `ctEnd`: End value of the independent variable (c*t) for the trajectory [m].
+    energy : float
+        Electron beam energy in GeV used to generate this trajectory.
 
-    Returns:
-        dict: A dictionary containing the trajectory data with the following keys:
-              - "ct": List of time values corresponding to the trajectory points.
-              - "X", "Y", "Z": Lists of positions in the respective axes.
-              - "Xp", "Yp", "Zp": Lists of velocity components (trajectory angles) in the respective axes.
-              - "Bx", "By", "Bz" (optional): Lists of magnetic field components in the respective axes, if present.
+    Returns
+    -------
+    dict
+        Dictionary with the following structure:
+
+        {
+            "eTraj": {
+                "ct", "X", "Xp", "Y", "Yp", "Z", "Zp"
+            },
+            "mag_field": {
+                "s": array_like (N,),
+                "B": array_like (N, 3)
+            },
+            "meta": {
+                "energy", "gamma", "n_points",
+                "ct_start", "ct_end"
+            }
+        }
     """
 
-    eTrajDict = {"eTraj":{
-        "ct": [],
-        "X": [],
-        "Xp": [],
-        "Y": [],
-        "Yp": [],
-        "Z": [],
-        "Zp": [],
-    }}
+    n_points = int(eTraj.np)
 
-    if hasattr(eTraj, 'arBx'):
-        eTrajDict["eTraj"]["Bx"] = []
-    if hasattr(eTraj, 'arBy'):
-        eTrajDict["eTraj"]["By"] = []
-    if hasattr(eTraj, 'arBz'):
-        eTrajDict["eTraj"]["Bz"] = []
+    ct = np.linspace(float(eTraj.ctStart), float(eTraj.ctEnd), n_points)
+
+    eTraj_dict = {
+        "eTraj": {
+            "ct": ct,
+            "X": np.asarray(eTraj.arX, dtype=float),
+            "Xp": np.asarray(eTraj.arXp, dtype=float),
+            "Y": np.asarray(eTraj.arY, dtype=float),
+            "Yp": np.asarray(eTraj.arYp, dtype=float),
+            "Z": np.asarray(eTraj.arZ, dtype=float),
+            "Zp": np.asarray(eTraj.arZp, dtype=float),
+        }
+    }
+
+    s = np.asarray(eTraj.arZ, dtype=float)
+    B = np.column_stack(
+        [
+            np.asarray(eTraj.arBx, dtype=float),
+            np.asarray(eTraj.arBy, dtype=float),
+            np.asarray(eTraj.arBz, dtype=float),
+        ]
+    )
+
+    eTraj_dict["mag_field"] = {"s": s, "B": B}
+
+    eTraj_dict["meta"] = {
+        "energy_GeV": float(energy),
+        "gamma": float(get_gamma(energy)),
+        "n_points": n_points,
+        "ct_start": float(eTraj.ctStart),
+        "ct_end": float(eTraj.ctEnd),
+    }
 
     if file_name is not None:
         with h5.File(f"{file_name}_eTraj.h5", "w") as f:
-            group = f.create_group("XOPPY_ETRAJ")
-            intensity_group = group.create_group("eTraj")
-            
-            intensity_group.create_dataset("ct", data=np.zeros(eTraj.np))
-            intensity_group.create_dataset("X", data=eTraj.arX)
-            intensity_group.create_dataset("Xp", data=eTraj.arXp)
-            intensity_group.create_dataset("Y", data=eTraj.arY)
-            intensity_group.create_dataset("Yp", data=eTraj.arYp)
-            intensity_group.create_dataset("Z", data=eTraj.arZ)
-            intensity_group.create_dataset("Zp", data=eTraj.arZp)
-            if hasattr(eTraj, 'arBx'):
-                intensity_group.create_dataset("Bx", data=eTraj.arBx)
-            if hasattr(eTraj, 'arBy'):
-                intensity_group.create_dataset("By", data=eTraj.arBy)
-            if hasattr(eTraj, 'arBz'):
-                intensity_group.create_dataset("Bz", data=eTraj.arBz)
+            f.attrs["barc4sr_calc"] = "electron_trajectory"
+            f.attrs["barc4sr_version"] = "1.0"
 
-    eTrajDict["eTraj"]["ct"] = np.zeros(eTraj.np)
-    eTrajDict["eTraj"]["X"] = np.asarray(eTraj.arX)
-    eTrajDict["eTraj"]["Xp"] = np.asarray(eTraj.arXp)
-    eTrajDict["eTraj"]["Y"] = np.asarray(eTraj.arY)
-    eTrajDict["eTraj"]["Yp"] = np.asarray(eTraj.arYp)
-    eTrajDict["eTraj"]["Z"] = np.asarray(eTraj.arZ)
-    eTrajDict["eTraj"]["Zp"] = np.asarray(eTraj.arZ)
-    eTrajDict["eTraj"]["Bx"] = np.asarray(eTraj.arBx)
-    eTrajDict["eTraj"]["By"] = np.asarray(eTraj.arBy)
-    eTrajDict["eTraj"]["Bz"] = np.asarray(eTraj.arBz)
+            g_t = f.create_group("eTraj")
+            for key, arr in eTraj_dict["eTraj"].items():
+                g_t.create_dataset(key, data=arr)
 
-    return eTrajDict
+            g_B = f.create_group("mag_field")
+            g_B.create_dataset("s", data=s)
+            g_B.create_dataset("B", data=B)
+
+            g_m = f.create_group("meta")
+            for key, val in eTraj_dict["meta"].items():
+                g_m.attrs[key] = val
+
+    return eTraj_dict
     
 
 def read_electron_trajectory(file_path: str) -> dict:
     """
-    Reads SRW electron trajectory data from a .h5 file (XOPPY_ETRAJ format).
+    Read an electron trajectory from an HDF5 file written by
+    ``write_electron_trajectory``.
 
-    Args:
-        file_path (str): The path to the .h5 file containing electron trajectory data.
+    The function reconstructs the full structured dictionary:
 
-    Returns:
-        dict: A dictionary where keys are the column names (ct, X, Xp, Y, Yp, Z, Zp, Bx, By, Bz),
-            and values are lists containing the corresponding column data from the file.
+        {
+            "eTraj": { ... },
+            "mag_field": { "s", "B" },
+            "meta": { ... }
+        }
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the ``*_eTraj.h5`` file.
+
+    Returns
+    -------
+    dict
+        A dictionary with the following structure:
+
+        - ``"eTraj"`` :
+            {"ct", "X", "Xp", "Y", "Yp", "Z", "Zp"} as NumPy arrays.
+
+        - ``"mag_field"`` :
+            {"s", "B"} where:
+                - "s" is an array of shape (N,)
+                - "B" is an array of shape (N, 3),
+            compatible with ``check_magnetic_field_dictionary``.
+
+        - ``"meta"`` :
+            Metadata stored as attributes:
+                {"energy_GeV", "gamma", "n_points", "ct_start", "ct_end"}.
+
+    Raises
+    ------
+    ValueError
+        If the file does not contain the expected HDF5 groups.
     """
-    result = {"eTraj": {}}
+    result: dict[str, dict] = {
+        "eTraj": {},
+        "mag_field": {},
+        "meta": {},
+    }
 
     with h5.File(file_path, "r") as f:
-        try:
-            trajectory_group = f["XOPPY_ETRAJ"]["eTraj"]
-        except KeyError:
-            raise ValueError(f"Invalid file structure: {file_path} does not contain 'XOPPY_ETRAJ/eTraj'.")
+        calc = f.attrs.get("barc4sr_calc", None)
+        if calc not in (None, "electron_trajectory"):
+            raise ValueError(
+                f"Unexpected barc4sr_calc={calc!r} in file {file_path}."
+            )
 
-        # Read datasets
-        for key in trajectory_group.keys():
-            result["eTraj"][key] = trajectory_group[key][:].tolist()
+        if "eTraj" not in f:
+            raise ValueError(
+                f"Invalid file structure: missing 'eTraj' group."
+            )
+        g_t = f["eTraj"]
+        for key in g_t.keys():
+            result["eTraj"][key] = g_t[key][:].astype(float)
+
+        if "mag_field" not in f:
+            raise ValueError(
+                f"Invalid file structure: missing 'mag_field' group."
+            )
+        g_B = f["mag_field"]
+        result["mag_field"]["s"] = g_B["s"][:].astype(float)
+        result["mag_field"]["B"] = g_B["B"][:].astype(float)
+
+        if "meta" not in f:
+            raise ValueError(
+                f"Invalid file structure: missing 'meta' group."
+            )
+        g_m = f["meta"]
+        for key, value in g_m.attrs.items():
+            result["meta"][key] = float(value)
 
     return result
 
 
 def read_electron_trajectory_dat(file_path: str) -> dict:
     """
-    Reads SRW electron trajectory data from a .dat file (SRW native format).
+    Read SRW electron trajectory data from a .dat file (SRW native text format)
+    and convert it into the standard barc4sr electron trajectory structure:
 
-    Args:
-        file_path (str): The path to the .dat file containing electron trajectory data.
+        {
+            "eTraj": {
+                "ct", "X", "Xp", "Y", "Yp", "Z", "Zp"
+            },
+            "mag_field": {
+                "s": Z-array,
+                "B": (N, 3) array with columns [Bx, By, Bz]
+            },
+            "meta": {
+                "energy_GeV": NaN,
+                "gamma": NaN,
+                "n_points": N,
+                "ct_start": ct[0],
+                "ct_end": ct[-1]
+            }
+        }
 
-    Returns:
-        dict: A dictionary where keys are the column names extracted from the header
-            (ct, X, Xp, Y, Yp, Z, Zp, Bx, By, Bz),
-            and values are lists containing the corresponding column data from the file.
+    Parameters
+    ----------
+    file_path : str
+        Path to the SRW .dat trajectory file.
+
+    Returns
+    -------
+    dict
+        Electron trajectory dictionary in the new barc4sr format.
     """
-    data = []
-    header = None
-    with open(file_path, 'r') as file:
-        header_line = next(file).strip()
-        header = [col.split()[0] for col in header_line.split(',')]
-        header[0] = header[0].replace("#","")
-        for line in file:
-            values = line.strip().split('\t')
-            values = [float(value) if value != '' else None for value in values]
-            data.append(values)
-            
-    eTrajDict = {}
-    for i, key in enumerate(header):
-        eTrajDict[key] = np.asarray([row[i] for row in data])
+    data_rows = []
+    with open(file_path, "r") as f:
+        header_line = next(f).strip()
+        header = [col.split()[0] for col in header_line.split(",")]
+        header[0] = header[0].lstrip("#")
 
-    return eTrajDict
+        for line in f:
+            values = line.strip().split("\t")
+            data_rows.append([float(v) if v != "" else np.nan for v in values])
+
+    data = np.asarray(data_rows)
+    n_points = data.shape[0]
+
+    def col(name):
+        try:
+            idx = header.index(name)
+            return data[:, idx]
+        except ValueError:
+            return np.full(n_points, np.nan)
+
+    eTraj_block = {
+        "ct": col("ct"),
+        "X": col("X"),
+        "Xp": col("Xp"),
+        "Y": col("Y"),
+        "Yp": col("Yp"),
+        "Z": col("Z"),
+        "Zp": col("Zp"),
+    }
+
+    s = eTraj_block["Z"]
+    B = np.column_stack([col("Bx"), col("By"), col("Bz")])
+
+    mag_field_block = {"s": s, "B": B}
+
+    meta_block = {
+        "energy_GeV": np.nan,
+        "gamma": np.nan,
+        "n_points": n_points,
+        "ct_start": eTraj_block["ct"][0] if n_points > 0 else np.nan,
+        "ct_end": eTraj_block["ct"][-1] if n_points > 0 else np.nan,
+    }
+
+    return {
+        "eTraj": eTraj_block,
+        "mag_field": mag_field_block,
+        "meta": meta_block,
+    }
 
 # ---------------------------------------------------------------------------
 # Wavefront
 # ---------------------------------------------------------------------------
    
-def write_wavefront(file_name: str, wfr: srwlib.SRWLWfr, selected_polarisations: list, 
-                    number_macro_electrons: int, propagation_distance: float=None) -> dict:
+def write_wavefront(
+    file_name: str,
+    wfr: srwlib.SRWLWfr,
+    selected_polarisations: list,
+    number_macro_electrons: int,
+    propagation_distance: float | None = None,
+) -> dict:
     """
-    Writes wavefront data (intensity, phase, and wavefront object) to an HDF5 file.
+    Write wavefront data (intensity, phase, and wavefront object) to an HDF5
+    file and return the corresponding dictionary.
 
-    Parameters:
-        file_name (str): Base file path for saving the wavefront data. The data will be stored
-                         in a file named '<file_name>_undulator_wfr.h5'.
-        wfr (srwlib.SRWLWfr): The SRW wavefront object containing the simulated electric field.
-        selected_polarisations (list or str): List of polarisations to export. Can be a single
-                         string or a list of strings. Accepted values include: 'LH', 'LV', 
-                         'L45', 'L135', 'CR', 'CL', 'T'.
-        number_macro_electrons (int): Number of macro electrons.
+    Parameters
+    ----------
+    file_name : str
+        Base file path for saving the wavefront data. The data is stored
+        in a file named ``"<file_name>_undulator_wfr.h5"``.
+    wfr : SRWLWfr
+        SRW wavefront object containing the simulated electric field.
+    selected_polarisations : list or str
+        Polarisations to export. Can be a single string or a list of
+        strings. Accepted values: 'LH', 'LV', 'L45', 'L135', 'CR', 'CL', 'T'.
+    number_macro_electrons : int
+        Number of macro electrons used in the simulation.
+    propagation_distance : float or None, optional
+        Propagation distance used for curvature estimation. If None,
+        Rx and Ry are taken from the wavefront object itself.
 
-    Returns:
-        dict: A dictionary containing the wavefront object, computed axes, intensities for selected
-              polarisations, and phase image.
+    Returns
+    -------
+    dict
+        Dictionary with keys:
+            - 'wfr': the SRW wavefront object.
+            - 'axis': {'x', 'y'} in meters.
+            - 'energy': photon energy [eV].
+            - 'Rx', 'Ry': curvature radii [m].
+            - 'intensity': {pol: 2D array}.
+            - 'phase': {pol: 2D array}.
     """
 
     if isinstance(selected_polarisations, str):
         selected_polarisations = [selected_polarisations]
     elif not isinstance(selected_polarisations, list):
-        raise ValueError("Input should be a list of strings.")
-    
+        raise ValueError("Input should be a list of strings or a string.")
+
     for i, s in enumerate(selected_polarisations):
         if not s.isupper():
             selected_polarisations[i] = s.upper()
 
     wfr_qpt = deepcopy(wfr)
-    wfrDict = {'wfr': wfr}
+    wfrDict: dict[str, object] = {"wfr": wfr}
 
-    wfrDict.update({'axis':{'x': np.linspace(wfr.mesh.xStart, wfr.mesh.xFin, wfr.mesh.nx),
-                            'y': np.linspace(wfr.mesh.yStart, wfr.mesh.yFin, wfr.mesh.ny)}})
+    wfrDict["axis"] = {
+        "x": np.linspace(wfr.mesh.xStart, wfr.mesh.xFin, wfr.mesh.nx),
+        "y": np.linspace(wfr.mesh.yStart, wfr.mesh.yFin, wfr.mesh.ny),
+    }
 
-    all_polarisations = ['LH', 'LV', 'L45', 'L135', 'CR', 'CL', 'T']
+    all_polarisations = ["LH", "LV", "L45", "L135", "CR", "CL", "T"]
     pol_map = {pol: i for i, pol in enumerate(all_polarisations)}
 
     selected_indices = [pol_map[pol] for pol in selected_polarisations if pol in pol_map]
 
     if not selected_indices:
         print(">>>>> No valid polarisation found - defaulting to 'T'")
-        return write_wavefront(file_name, wfr, ['T'], number_macro_electrons)
-    
+        return write_wavefront(file_name, wfr, ["T"], number_macro_electrons)
+
     if propagation_distance is None:
         Rx, Ry = wfr.Rx, wfr.Ry
     else:
         Rx, Ry = propagation_distance, propagation_distance
 
-    wfrDict.update({'energy':wfr.mesh.eStart})
-    wfrDict.update({'intensity':{}})
-    wfrDict.update({'phase':{}})
-    wfrDict.update({'Rx':Rx, 'Ry':Ry})
+    wfrDict["energy"] = wfr.mesh.eStart
+    wfrDict["intensity"] = {}
+    wfrDict["phase"] = {}
+    wfrDict["Rx"], wfrDict["Ry"] = Rx, Ry
 
     _inIntType = int(number_macro_electrons)
     _inDepType = 3
-
-    # X, Y = np.meshgrid(wfrDict['axis']['x'], wfrDict['axis']['y'])
-    # spherical_phase = Rx - np.sqrt(Rx**2 - X**2 - (Rx/Ry)**2 * Y**2)
-    # amplitude_transmission = np.ones((wfr.mesh.ny, wfr.mesh.nx), dtype='float64')
-    # arTr = np.empty((2 * wfr.mesh.nx * wfr.mesh.ny), dtype=spherical_phase.dtype)
-    # arTr[0::2] = np.reshape(amplitude_transmission,(wfr.mesh.nx*wfr.mesh.ny))
-    # arTr[1::2] = np.reshape(-spherical_phase,(wfr.mesh.nx*wfr.mesh.ny))
-    # spherical_wave = srwlib.SRWLOptT(wfr.mesh.nx, wfr.mesh.ny, 
-    #                                  wfrDict['axis']['x'][-1]-wfrDict['axis']['x'][0],
-    #                                  wfrDict['axis']['y'][-1]-wfrDict['axis']['y'][0],
-    #                                  _arTr=arTr, _extTr=1, _Fx=Rx, _Fy=Ry, _x=0, _y=0)
 
     quadratic_phase_term = srwlib.SRWLOptL(_Fx=Rx, _Fy=Ry)
     pp_spherical_wave =  [0, 0, 1.0, 1, 0, 1., 1., 1., 1., 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
@@ -261,7 +391,7 @@ def write_wavefront(file_name: str, wfr: srwlib.SRWLWfr, selected_polarisations:
         wfrDict['phase'].update({polarisation:phase})
 
     if file_name is not None:
-        with h5.File(f'{file_name}_undulator_wfr.h5', 'w') as f:
+        with h5.File(f'{file_name}_wfr.h5', 'w') as f:
             group = f.create_group('XOPPY_WAVEFRONT')
 
             group.create_dataset('axis_x', data=wfrDict['axis']['x'] * 1e3)  # mm
