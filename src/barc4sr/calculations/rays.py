@@ -13,19 +13,17 @@ import numpy as np
 import pandas as pd
 
 import barc4beams
-
-from .trajectory import electron_trajectory
+from barc4sr.core.energy import energy_wavelength
 
 
 def trace_chief_rays(
     *,
-    eTraj: Optional[Dict[str, Any]] = None,
+    eTraj: dict,
     n_rays: Optional[int] = None,
     B_rel_threshold: float = 0.01,
-    wavelength_A: float = 1.0,
-    id_prefix: str = "seg",
-    **traj_kwargs: Any,
-) -> Dict[str, Any]:
+    wavelength: float = 1.0e-10,
+    id_prefix: str = "segment",
+) -> dict:
     """
     Build a chief-ray beam from an electron trajectory.
 
@@ -39,10 +37,14 @@ def trace_chief_rays(
 
     Parameters
     ----------
-    eTraj : dict, optional
-        Electron trajectory dictionary with key "eTraj" containing
-        arrays "Z", "X", "Y", "Xp", "Yp" and optionally "Bx", "By", "Bz".
-        If provided, `traj_kwargs` must be empty.
+    eTraj : dict
+        Electron trajectory dictionary in the barc4sr format, with keys:
+          - "eTraj": dict with at least 1D arrays
+                "Z", "X", "Y", "Xp", "Yp".
+          - "mag_field": dict with:
+                "s": array_like, shape (N,)
+                "B": array_like, shape (N, 3) ordered as (Bx, By, Bz).
+          - "meta": dict with metadata (energy_GeV, gamma, etc.).
     n_rays : int or None, optional
         Number of rays *per magnetic segment*. See behaviour above.
     B_rel_threshold : float, default 0.01
@@ -51,56 +53,42 @@ def trace_chief_rays(
             mask = |B| >= B_rel_threshold * max(|B|)
         If <= 0 or max(|B|) <= 0, the full trajectory is treated as one
         emitting segment.
-    wavelength_A : float, default 1.0
-        Wavelength assigned to all rays [Å].
+    wavelength : float, default 1e-10
+        Wavelength assigned to all rays [m].
     id_prefix : str, default "seg"
         Prefix used to tag rays belonging to the same magnetic segment
         in the "id" column of the returned beam.
-    **traj_kwargs :
-        Keyword arguments forwarded to `electron_trajectory` if `eTraj`
-        is not supplied.
 
     Returns
     -------
     dict
-        {
-          "magnetic_field": {"s": Z, "B": |B|(Z)},
-          "chief_rays": beam_df,         # standard barc4beams beam
-          "trajectory": {
-              "Z": Z, "X": X, "Y": Y, "Xp": Xp, "Yp": Yp,
-          },
-        }
+        The input trajectory dictionary, augmented with:
+
+          - "chief_rays": pandas.DataFrame
+                Standard barc4beams beam with columns:
+                ["energy", "X", "Y", "Z", "dX", "dY", "dZ",
+                 "wavelength", "intensity",
+                 "intensity_s-pol", "intensity_p-pol",
+                 "lost_ray_flag", "id"].
     """
-    has_traj_dict = eTraj is not None
-    has_traj_kwargs = bool(traj_kwargs)
-
-    if has_traj_dict and has_traj_kwargs:
-        raise ValueError("Make up your mind, user!!! "
-                         "Provide either `eTraj` or trajectory kwargs, not both.")
-    if not has_traj_dict and not has_traj_kwargs:
-        raise ValueError("Provide either `eTraj` or trajectory kwargs for "
-                         "`electron_trajectory()`.")
-
     if n_rays is not None:
         n_rays = int(n_rays)
         if n_rays <= 0:
             raise ValueError("n_rays must be a positive integer or None.")
 
-    if eTraj is None:
-        traj_dict = electron_trajectory(**traj_kwargs)
-    else:
-        traj_dict = eTraj
-
-    if "eTraj" not in traj_dict:
+    if "eTraj" not in eTraj:
         raise KeyError("Trajectory dictionary must contain key 'eTraj'.")
+    if "mag_field" not in eTraj:
+        raise KeyError("Trajectory dictionary must contain key 'mag_field'.")
 
-    data = traj_dict["eTraj"]
+    data = eTraj["eTraj"]
+    mag_field = eTraj["mag_field"]
 
-    Z  = np.asarray(data["Z"],  dtype=float)   # [m]
-    X  = np.asarray(data["X"],  dtype=float)
-    Y  = np.asarray(data["Y"],  dtype=float)
-    Xp = np.asarray(data["Xp"], dtype=float)   # [rad]
-    Yp = np.asarray(data["Yp"], dtype=float)   # [rad]
+    Z = np.asarray(data["Z"], dtype=float)   
+    X = np.asarray(data["X"], dtype=float)
+    Y = np.asarray(data["Y"], dtype=float)
+    Xp = np.asarray(data["Xp"], dtype=float)  
+    Yp = np.asarray(data["Yp"], dtype=float)  
 
     if not (Z.ndim == X.ndim == Y.ndim == Xp.ndim == Yp.ndim == 1):
         raise ValueError("Trajectory arrays Z, X, Y, Xp, Yp must be 1D.")
@@ -109,12 +97,17 @@ def trace_chief_rays(
 
     n_points = Z.size
 
-    # optional B-field components
-    Bx = np.asarray(data.get("Bx", np.zeros(n_points)), dtype=float)
-    By = np.asarray(data.get("By", np.zeros(n_points)), dtype=float)
-    Bz = np.asarray(data.get("Bz", np.zeros(n_points)), dtype=float)
-    if Bx.size != n_points or By.size != n_points or Bz.size != n_points:
-        raise ValueError("Bx, By, Bz (if present) must have the same length as Z.")
+    s = np.asarray(mag_field["s"], dtype=float)
+    B = np.asarray(mag_field["B"], dtype=float)
+
+    if s.ndim != 1:
+        raise ValueError("mag_field['s'] must be 1D.")
+    if B.ndim != 2 or B.shape[1] != 3:
+        raise ValueError("mag_field['B'] must have shape (N, 3) for (Bx, By, Bz).")
+    if s.size != n_points or B.shape[0] != n_points:
+        raise ValueError("mag_field['s'] and 'B' must have the same length as Z.")
+
+    Bx, By, Bz = B[:, 0], B[:, 1], B[:, 2]
 
     Bmag = np.sqrt(Bx**2 + By**2 + Bz**2)
     B_abs = np.abs(Bmag)
@@ -149,7 +142,7 @@ def trace_chief_rays(
         for idx in seg_inds:
             index_to_seg[int(idx)] = seg_id
 
-    chosen_indices_list: list[int] = []
+    chosen_indices_list: list[np.ndarray] = []
     for seg_inds in segments:
         seg_inds = np.asarray(seg_inds, dtype=int)
         seg_len = seg_inds.size
@@ -158,16 +151,13 @@ def trace_chief_rays(
             chosen = seg_inds
         else:
             if n_rays == 1:
-                # only one ray: take segment centre
                 centre = seg_inds[seg_len // 2]
                 chosen = np.array([centre], dtype=int)
             elif n_rays == 2:
-                # first and last only
                 chosen = np.array([seg_inds[0], seg_inds[-1]], dtype=int)
             else:
                 n_inner = n_rays - 2
                 inner = seg_inds[1:-1]
-                # uniformly spaced indices in the interior
                 inner_idx = np.linspace(0, inner.size - 1, n_inner, dtype=int)
                 chosen = np.concatenate(
                     ([seg_inds[0]], inner[inner_idx], [seg_inds[-1]])
@@ -176,7 +166,7 @@ def trace_chief_rays(
         chosen_indices_list.append(chosen)
 
     chosen_indices = np.concatenate(chosen_indices_list)
-    chosen_indices = np.unique(chosen_indices)  # in case segments touch
+    chosen_indices = np.unique(chosen_indices)
 
     n_chief = chosen_indices.size
     if n_chief == 0:
@@ -189,11 +179,10 @@ def trace_chief_rays(
     dY = Yp[chosen_indices]
     dZ = np.sqrt(np.clip(1.0 - dX**2 - dY**2, 0.0, None))
 
-    wavelength_m = float(wavelength_A) * 1e-10
-    energy_eV = 12_398.4193 / float(wavelength_A)
+    energy_eV = energy_wavelength(float(wavelength), "m")
 
     E = np.full(n_chief, energy_eV)
-    W = np.full(n_chief, wavelength_m)
+    W = np.full(n_chief, wavelength)
     I = np.ones(n_chief)
     Is = np.ones(n_chief)
     Ip = np.ones(n_chief)
@@ -224,21 +213,6 @@ def trace_chief_rays(
     )
     barc4beams.schema.validate_beam(beam_df)
 
-    magnetic_field = {
-        "s": Z.copy(),
-        "B": np.column_stack([Bx, By, Bz]).astype(float),
-    }
-
-    trajectory = {
-        "Z": Z.copy(),
-        "X": X.copy(),
-        "Y": Y.copy(),
-        "Xp": Xp.copy(),
-        "Yp": Yp.copy(),
-    }
-
-    return {
-        "magnetic_field": magnetic_field,
-        "chief_rays": beam_df,
-        "trajectory": trajectory,
-    }
+    out = dict(eTraj)
+    out["chief_rays"] = beam_df
+    return out

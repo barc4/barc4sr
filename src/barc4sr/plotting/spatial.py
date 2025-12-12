@@ -13,6 +13,8 @@ from matplotlib.colors import LogNorm
 from skimage.restoration import unwrap_phase
 
 from .style import igor_cmap, srw_cmap, start_plotting
+from barc4sr.processing.wavefront import integrate_wavefront_window
+from barc4sr.processing.power import integrate_power_density_window
 
 # ---------------------------------------------------------------------------
 # Wavefront
@@ -23,6 +25,7 @@ def plot_wavefront(
     cuts: bool = True,
     show_phase: bool = True,
     log_intensity: bool = False,
+    observation_plane: float = None,
     **kwargs,
 ) -> None:
     """
@@ -47,6 +50,9 @@ def plot_wavefront(
     log_intensity : bool, optional
         If True, use log scale for intensity (2D via LogNorm, cuts via semilogy).
         Phase is always plotted in linear scale (default: False).
+    observation_plane : float, optional
+        Distance to observation plane in meters. If provided, axes are shown in mrad
+        and intensity is converted to ph/s/mrad²/0.1%bw (default: None).
     **kwargs :
         k : float, optional
             Scaling factor for fonts and titles (default: 1).
@@ -62,12 +68,24 @@ def plot_wavefront(
                 - 'srw'  : black → white
                 - 'igor' : black → navy → darkred → red → orange → yellow
             Default is 'jet'.
+        xmin : float, optional
+            Minimum x-axis limit (in mm or mrad depending on observation_plane).
+        xmax : float, optional
+            Maximum x-axis limit (in mm or mrad depending on observation_plane).
+        ymin : float, optional
+            Minimum y-axis limit (in mm or mrad depending on observation_plane).
+        ymax : float, optional
+            Maximum y-axis limit (in mm or mrad depending on observation_plane).
     """
     k = kwargs.get("k", 1)
     vmin = kwargs.get("vmin", None)
     vmax = kwargs.get("vmax", None)
     unwrap = kwargs.get("unwrap", True)
     cmap_name = kwargs.get("cmap", "jet")
+    xmin = kwargs.get("xmin", None)
+    xmax = kwargs.get("xmax", None)
+    ymin = kwargs.get("ymin", None)
+    ymax = kwargs.get("ymax", None)
 
     if cmap_name == "srw":
         cmap_intensity = srw_cmap
@@ -78,34 +96,101 @@ def plot_wavefront(
 
     start_plotting(k)
 
-    x = wfr["axis"]["x"] * 1e3  # mm
-    y = wfr["axis"]["y"] * 1e3  # mm
+    x_m = wfr["axis"]["x"]
+    y_m = wfr["axis"]["y"]
+    x_mm = x_m * 1e3
+    y_mm = y_m * 1e3
+
+    dx_mm = x_m[1] - x_m[0]
+    dy_mm = y_m[1] - y_m[0]
+
+    if observation_plane is not None:
+        x = 2 * np.arctan(x_m / 2 / observation_plane) * 1e3
+        y = 2 * np.arctan(y_m / 2 / observation_plane) * 1e3
+        
+        dx_mrad_mean = np.mean(np.diff(x))
+        dy_mrad_mean = np.mean(np.diff(y))
+        
+        intensity_factor = (dx_mm * 1e3 * dy_mm * 1e3) / (dx_mrad_mean * dy_mrad_mean)
+        
+        unit_label = "mrad"
+        intensity_unit = r"ph/s/mrad$^2$/0.1%bw"
+        
+        if xmin is not None or xmax is not None or ymin is not None or ymax is not None:
+            x_lim_mrad = [xmin if xmin is not None else x.min(), 
+                          xmax if xmax is not None else x.max()]
+            y_lim_mrad = [ymin if ymin is not None else y.min(), 
+                          ymax if ymax is not None else y.max()]
+            
+
+            x_lim_m = [2 * observation_plane * np.tan(xl / 2e3) for xl in x_lim_mrad]
+            y_lim_m = [2 * observation_plane * np.tan(yl / 2e3) for yl in y_lim_mrad]
+            
+            hor_slit = tuple(x_lim_m)
+            ver_slit = tuple(y_lim_m)
+        else:
+            hor_slit = None
+            ver_slit = None
+    else:
+        x = x_mm
+        y = y_mm
+        intensity_factor = 1.0
+        unit_label = "mm"
+        intensity_unit = r"ph/s/mm$^2$/0.1%bw"
+        
+        if xmin is not None or xmax is not None or ymin is not None or ymax is not None:
+            x_lim_mm = [xmin if xmin is not None else x.min(), 
+                        xmax if xmax is not None else x.max()]
+            y_lim_mm = [ymin if ymin is not None else y.min(), 
+                        ymax if ymax is not None else y.max()]
+            
+            hor_slit = tuple([xl / 1e3 for xl in x_lim_mm])
+            ver_slit = tuple([yl / 1e3 for yl in y_lim_mm])
+        else:
+            hor_slit = None
+            ver_slit = None
+
     X, Y = np.meshgrid(x, y)
 
-    dx = wfr["axis"]["x"][1] - wfr["axis"]["x"][0]
-    dy = wfr["axis"]["y"][1] - wfr["axis"]["y"][0]
-
-    fctr = (wfr["axis"]["x"][-1] - wfr["axis"]["x"][0]) / (
-        wfr["axis"]["y"][-1] - wfr["axis"]["y"][0]
-    )
+    if xmin is not None or xmax is not None:
+        x_range_min = xmin if xmin is not None else x.min()
+        x_range_max = xmax if xmax is not None else x.max()
+    else:
+        x_range_min = x.min()
+        x_range_max = x.max()
+    
+    if ymin is not None or ymax is not None:
+        y_range_min = ymin if ymin is not None else y.min()
+        y_range_max = ymax if ymax is not None else y.max()
+    else:
+        y_range_min = y.min()
+        y_range_max = y.max()
+    
+    fctr = (x_range_max - x_range_min) / (y_range_max - y_range_min)
 
     for pol, data in wfr["intensity"].items():
-        flux = np.sum(data * dx * 1e3 * dy * 1e3)
+        if hor_slit is not None and ver_slit is not None:
+            flux_dict = integrate_wavefront_window(wfr, hor_slit, ver_slit)
+            flux = flux_dict[pol]
+        else:
+            flux = np.sum(data * dx_mm * 1e3 * dy_mm * 1e3)
+
+        data_converted = data * intensity_factor
 
         if log_intensity:
-            data_masked = np.ma.masked_less_equal(data, 0.0)
-            positive = data[data > 0]
+            data_masked = np.ma.masked_less_equal(data_converted, 0.0)
+            positive = data_converted[data_converted > 0]
 
             if positive.size == 0:
                 continue
 
             vmin_eff = vmin if (vmin is not None and vmin > 0) else positive.min()
-            vmax_eff = vmax if (vmax is not None and vmax > vmin_eff) else data.max()
+            vmax_eff = vmax if (vmax is not None and vmax > vmin_eff) else data_converted.max()
             norm = LogNorm(vmin=vmin_eff, vmax=vmax_eff)
             vmin_lin = None
             vmax_lin = None
         else:
-            data_masked = data
+            data_masked = data_converted
             norm = None
             vmin_lin = vmin
             vmax_lin = vmax
@@ -130,8 +215,18 @@ def plot_wavefront(
         )
 
         ax.set_aspect("equal")
-        ax.set_xlabel("x [mm]")
-        ax.set_ylabel("y [mm]")
+        ax.set_xlabel(f"x [{unit_label}]")
+        ax.set_ylabel(f"y [{unit_label}]")
+        
+        if xmin is not None:
+            ax.set_xlim(left=xmin)
+        if xmax is not None:
+            ax.set_xlim(right=xmax)
+        if ymin is not None:
+            ax.set_ylim(bottom=ymin)
+        if ymax is not None:
+            ax.set_ylim(top=ymax)
+        
         ax.grid(True, linestyle=":", linewidth=0.5)
 
         cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
@@ -143,8 +238,8 @@ def plot_wavefront(
             ix0 = np.argmin(np.abs(x))
             iy0 = np.argmin(np.abs(y))
 
-            hor = data[iy0, :]
-            ver = data[:, ix0]
+            hor = data_converted[iy0, :]
+            ver = data_converted[:, ix0]
 
             if log_intensity:
                 hor_plot = np.where(hor > 0, hor, np.nan)
@@ -157,15 +252,25 @@ def plot_wavefront(
                 ax2.plot(y, ver, color="darkred", lw=1.5)
 
             ax1.set_title("Hor. cut (y=0)")
-            ax1.set_xlabel("x [mm]")
-            ax1.set_ylabel(r"ph/s/mm$^2$/0.1%bw")
+            ax1.set_xlabel(f"x [{unit_label}]")
+            ax1.set_ylabel(intensity_unit)
             ax1.grid(True, linestyle=":", linewidth=0.5)
             ax1.tick_params(direction="in", top=True, right=True)
+            
+            if xmin is not None:
+                ax1.set_xlim(left=xmin)
+            if xmax is not None:
+                ax1.set_xlim(right=xmax)
 
             ax2.set_title("Ver. cut (x=0)")
-            ax2.set_xlabel("y [mm]")
+            ax2.set_xlabel(f"y [{unit_label}]")
             ax2.grid(True, linestyle=":", linewidth=0.5)
             ax2.tick_params(direction="in", top=True, right=True)
+            
+            if ymin is not None:
+                ax2.set_xlim(left=ymin)
+            if ymax is not None:
+                ax2.set_xlim(right=ymax)
 
             plt.tight_layout(rect=[0, 0, 1, 0.95])
             plt.show()
@@ -191,8 +296,18 @@ def plot_wavefront(
             ax = fig.add_subplot(111)
             im = ax.pcolormesh(X, Y, phase, shading="auto", cmap=cmapref)
             ax.set_aspect("equal")
-            ax.set_xlabel("x [mm]")
-            ax.set_ylabel("y [mm]")
+            ax.set_xlabel(f"x [{unit_label}]")
+            ax.set_ylabel(f"y [{unit_label}]")
+            
+            if xmin is not None:
+                ax.set_xlim(left=xmin)
+            if xmax is not None:
+                ax.set_xlim(right=xmax)
+            if ymin is not None:
+                ax.set_ylim(bottom=ymin)
+            if ymax is not None:
+                ax.set_ylim(top=ymax)
+            
             ax.grid(True, linestyle=":", linewidth=0.5)
             cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
             plt.show()
@@ -204,16 +319,26 @@ def plot_wavefront(
 
                 ax1.plot(x, phase[iy0, :], color="darkred", lw=1.5)
                 ax1.set_title("Hor. cut (y=0)")
-                ax1.set_xlabel("x [mm]")
+                ax1.set_xlabel(f"x [{unit_label}]")
                 ax1.set_ylabel("rad")
                 ax1.grid(True, linestyle=":", linewidth=0.5)
                 ax1.tick_params(direction="in", top=True, right=True)
+                
+                if xmin is not None:
+                    ax1.set_xlim(left=xmin)
+                if xmax is not None:
+                    ax1.set_xlim(right=xmax)
 
                 ax2.plot(y, phase[:, ix0], color="darkred", lw=1.5)
                 ax2.set_title("Ver. cut (x=0)")
-                ax2.set_xlabel("y [mm]")
+                ax2.set_xlabel(f"y [{unit_label}]")
                 ax2.grid(True, linestyle=":", linewidth=0.5)
                 ax2.tick_params(direction="in", top=True, right=True)
+                
+                if ymin is not None:
+                    ax2.set_xlim(left=ymin)
+                if ymax is not None:
+                    ax2.set_xlim(right=ymax)
 
                 plt.tight_layout(rect=[0, 0, 1, 0.95])
                 plt.show()
@@ -222,7 +347,12 @@ def plot_wavefront(
 # Power density
 # ---------------------------------------------------------------------------
 
-def plot_power_density(pwr: dict, cuts: bool = True, **kwargs) -> None:
+def plot_power_density(
+    pwr: dict,
+    cuts: bool = True,
+    observation_distance: float | None = None,
+    **kwargs,
+) -> None:
     """
     Plot power density maps from a power dictionary.
 
@@ -230,39 +360,194 @@ def plot_power_density(pwr: dict, cuts: bool = True, **kwargs) -> None:
         - If cuts=True: 2D power map + horizontal (y=0) and vertical (x=0) cuts.
         - If cuts=False: Only the 2D power map.
 
-    Args:
-        pwr (dict): Dictionary returned by `write_power_density` or `read_power_density`.
-        cuts (bool): Whether to include 1D cuts in the plot.
-        **kwargs: Optional keyword arguments, e.g., scaling factor `k`, vmin, vmax.
+    Power density can be shown either in the native spatial units (mm) or, if
+    observation_distance is provided, in angular units (mrad) using a small-angle
+    mapping from the observation plane.
+
+    Parameters
+    ----------
+    pwr : dict
+        Dictionary returned by `write_power_density` or `read_power_density`.
+    cuts : bool, optional
+        Whether to include 1D cuts in the plot (default: True).
+    observation_distance : float, optional
+        Distance to the observation plane in meters. If provided, axes are shown
+        in mrad and power density is converted to W/mrad² (default: None).
+    **kwargs :
+        k : float, optional
+            Scaling factor for fonts and titles (default: 1).
+        vmin : float, optional
+            Minimum value for color scale (linear units).
+        vmax : float, optional
+            Maximum value for color scale (linear units).
+        cmap : str, optional
+            Colormap for power. Can be any Matplotlib cmap name (e.g. 'plasma'),
+            or the special keywords:
+                - 'srw'  : black → white
+                - 'igor' : black → navy → darkred → red → orange → yellow
+            Default is 'plasma'.
+        xmin : float, optional
+            Minimum x-axis limit (in mm or mrad depending on observation_distance).
+        xmax : float, optional
+            Maximum x-axis limit (in mm or mrad depending on observation_distance).
+        ymin : float, optional
+            Minimum y-axis limit (in mm or mrad depending on observation_distance).
+        ymax : float, optional
+            Maximum y-axis limit (in mm or mrad depending on observation_distance).
     """
-    k = kwargs.get('k', 1)
-    vmin = kwargs.get('vmin', None)
-    vmax = kwargs.get('vmax', None)
+    k = kwargs.get("k", 1)
+    vmin = kwargs.get("vmin", None)
+    vmax = kwargs.get("vmax", None)
+    cmap_name = kwargs.get("cmap", "plasma")
+    xmin = kwargs.get("xmin", None)
+    xmax = kwargs.get("xmax", None)
+    ymin = kwargs.get("ymin", None)
+    ymax = kwargs.get("ymax", None)
+
+    if cmap_name == "srw":
+        cmap_power = srw_cmap
+    elif cmap_name == "igor":
+        cmap_power = igor_cmap
+    else:
+        cmap_power = cmap_name
 
     start_plotting(k)
 
-    x = pwr['axis']['x'] * 1e3  # mm
-    y = pwr['axis']['y'] * 1e3  # mm
+    x_m = pwr["axis"]["x"]
+    y_m = pwr["axis"]["y"]
+    x_mm = x_m * 1e3
+    y_mm = y_m * 1e3
+
+    dx_mm = x_m[1] - x_m[0] 
+    dy_mm = y_m[1] - y_m[0]
+
+
+    if observation_distance is not None:
+
+        x = 2 * np.arctan(x_m / (2 * observation_distance)) * 1e3  # mrad
+        y = 2 * np.arctan(y_m / (2 * observation_distance)) * 1e3  # mrad
+
+        dx_mrad_mean = np.mean(np.diff(x))
+        dy_mrad_mean = np.mean(np.diff(y))
+
+        power_factor = (dx_mm * 1e3 * dy_mm * 1e3) / (dx_mrad_mean * dy_mrad_mean)
+
+        unit_label = "mrad"
+        power_unit = r"W/mrad$^2$"
+
+        if xmin is not None or xmax is not None or ymin is not None or ymax is not None:
+            x_lim_mrad = [
+                xmin if xmin is not None else x.min(),
+                xmax if xmax is not None else x.max(),
+            ]
+            y_lim_mrad = [
+                ymin if ymin is not None else y.min(),
+                ymax if ymax is not None else y.max(),
+            ]
+
+            x_lim_m = [2 * observation_distance * np.tan(xl / 2e3) for xl in x_lim_mrad]
+            y_lim_m = [2 * observation_distance * np.tan(yl / 2e3) for yl in y_lim_mrad]
+
+            hor_slit = tuple(x_lim_m)
+            ver_slit = tuple(y_lim_m)
+        else:
+            hor_slit = None
+            ver_slit = None
+    else:
+        x = x_mm
+        y = y_mm
+        power_factor = 1.0
+        unit_label = "mm"
+        power_unit = r"W/mm$^2$"
+
+        if xmin is not None or xmax is not None or ymin is not None or ymax is not None:
+            x_lim_mm = [
+                xmin if xmin is not None else x.min(),
+                xmax if xmax is not None else x.max(),
+            ]
+            y_lim_mm = [
+                ymin if ymin is not None else y.min(),
+                ymax if ymax is not None else y.max(),
+            ]
+
+            hor_slit = tuple([xl / 1e3 for xl in x_lim_mm])
+            ver_slit = tuple([yl / 1e3 for yl in y_lim_mm])
+        else:
+            hor_slit = None
+            ver_slit = None
+
     X, Y = np.meshgrid(x, y)
 
-    fctr = (x[-1] - x[0]) / (y[-1] - y[0])
+    if xmin is not None or xmax is not None:
+        x_range_min = xmin if xmin is not None else x.min()
+        x_range_max = xmax if xmax is not None else x.max()
+    else:
+        x_range_min = x.min()
+        x_range_max = x.max()
 
-    for pol in [p for p in pwr if p != 'axis']:
-        data = pwr[pol]['map']
-        integrated = pwr[pol]['integrated']
-        peak = pwr[pol]['peak']
+    if ymin is not None or ymax is not None:
+        y_range_min = ymin if ymin is not None else y.min()
+        y_range_max = ymax if ymax is not None else y.max()
+    else:
+        y_range_min = y.min()
+        y_range_max = y.max()
+
+    fctr = (x_range_max - x_range_min) / (y_range_max - y_range_min)
+
+    if hor_slit is not None and ver_slit is not None:
+        window_power = integrate_power_density_window(pwr, hor_slit, ver_slit)
+    else:
+        window_power = None
+
+    for pol, pdata in pwr.items():
+        if pol == "axis":
+            continue
+
+        data = pdata["map"]
+
+        if window_power is not None:
+            integrated = window_power[pol]
+        else:
+            integrated = pdata.get(
+                "integrated",
+                np.sum(data) * dx_mm * 1e3 * dy_mm * 1e3,
+            )
+
+        data_converted = data * power_factor
+        peak_converted = data_converted.max()
 
         fig = plt.figure(figsize=(4.2 * fctr, 4))
-        fig.suptitle(f"({pol}) | power: {integrated:.3e} W | peak: {peak:.2f} W/mm²",
-                     fontsize=16 * k, x=0.5)
+        fig.suptitle(
+            f"({pol}) | power: {integrated:.3e} W | peak: {peak_converted:.2f} {power_unit}",
+            fontsize=16 * k,
+            x=0.5,
+        )
 
         ax = fig.add_subplot(111)
-        im = ax.pcolormesh(X, Y, data, shading='auto', cmap='plasma', vmin=vmin, vmax=vmax)
-        ax.set_aspect('equal')
-        ax.set_xlabel('x [mm]')
-        ax.set_ylabel('y [mm]')
-        ax.grid(True, linestyle=':', linewidth=0.5)
-        cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)#, format='%.1e')
+        im = ax.pcolormesh(
+            X,
+            Y,
+            data_converted,
+            shading="auto",
+            cmap=cmap_power,
+            vmin=vmin,
+            vmax=vmax,
+        )
+        ax.set_aspect("equal")
+        ax.set_xlabel(f"x [{unit_label}]")
+        ax.set_ylabel(f"y [{unit_label}]")
+
+        if xmin is not None:
+            ax.set_xlim(left=xmin)
+        if xmax is not None:
+            ax.set_xlim(right=xmax)
+        if ymin is not None:
+            ax.set_ylim(bottom=ymin)
+        if ymax is not None:
+            ax.set_ylim(top=ymax)
+
+        ax.grid(True, linestyle=":", linewidth=0.5)
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         plt.show()
 
         if cuts:
@@ -270,18 +555,29 @@ def plot_power_density(pwr: dict, cuts: bool = True, **kwargs) -> None:
             ix0 = np.argmin(np.abs(x))
             iy0 = np.argmin(np.abs(y))
 
-            ax1.plot(x, data[iy0, :], color='darkred', lw=1.5)
-            ax1.set_title('Hor. cut (y=0)')
-            ax1.set_xlabel('x [mm]')
-            ax1.set_ylabel('power density [W/mm²]')
-            ax1.grid(True, linestyle=':', linewidth=0.5)
-            ax1.tick_params(direction='in', top=True, right=True)
+            hor = data_converted[iy0, :]
+            ver = data_converted[:, ix0]
 
-            ax2.plot(y, data[:, ix0], color='darkred', lw=1.5)
-            ax2.set_title('Ver. cut (x=0)')
-            ax2.set_xlabel('y [mm]')
-            ax2.grid(True, linestyle=':', linewidth=0.5)
-            ax2.tick_params(direction='in', top=True, right=True)
+            ax1.plot(x, hor, color="darkred", lw=1.5)
+            ax1.set_title("Hor. cut (y=0)")
+            ax1.set_xlabel(f"x [{unit_label}]")
+            ax1.set_ylabel(f"power density [{power_unit}]")
+            ax1.grid(True, linestyle=":", linewidth=0.5)
+            ax1.tick_params(direction="in", top=True, right=True)
+            if xmin is not None:
+                ax1.set_xlim(left=xmin)
+            if xmax is not None:
+                ax1.set_xlim(right=xmax)
+
+            ax2.plot(y, ver, color="darkred", lw=1.5)
+            ax2.set_title("Ver. cut (x=0)")
+            ax2.set_xlabel(f"y [{unit_label}]")
+            ax2.grid(True, linestyle=":", linewidth=0.5)
+            ax2.tick_params(direction="in", top=True, right=True)
+            if ymin is not None:
+                ax2.set_xlim(left=ymin)
+            if ymax is not None:
+                ax2.set_xlim(right=ymax)
 
             plt.tight_layout(rect=[0, 0, 1, 0.95])
             plt.show()

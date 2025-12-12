@@ -176,3 +176,4 @@ cython_debug/
 docs/build/*
 !docs/build/html/
 *.h5
+*sandbox*

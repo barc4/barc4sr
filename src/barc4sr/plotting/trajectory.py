@@ -22,58 +22,88 @@ def plot_electron_trajectory(eBeamTraj: dict, direction: str, **kwargs) -> None:
     """
     Plot horizontal or vertical electron trajectory from simulation data.
 
-    Args:
-        eBeamTraj: Dictionary containing electron trajectory data.
-        direction: 'horizontal', 'vertical', or 'both'.
-        **kwargs: Optional keyword arguments, e.g., scaling factor `k`.
+    Parameters
+    ----------
+    eBeamTraj : dict
+        Electron trajectory dictionary in the barc4sr format, with at least:
+          - 'eTraj': {
+                'Z', 'X', 'Xp', 'Y', 'Yp'
+            }
+          - 'mag_field': {
+                's', 'B'
+            }
+        where 'mag_field'['B'] has shape (N, 3) ordered as (Bx, By, Bz).
+    direction : str
+        'horizontal', 'vertical', or 'both'.
+    **kwargs
+        Optional keyword arguments, e.g. scaling factor ``k``.
     """
-    k = kwargs.get('k', 1)
+    k = kwargs.get("k", 1)
     start_plotting(k)
 
-    colors = ['darkred', 'olive', 'steelblue']
-    s = eBeamTraj['eTraj']['Z']*1E3
+    colors = ["darkred", "olive", "steelblue"]
 
-    if direction.lower() in ['x', 'h', 'hor', 'horizontal']:
-        B = eBeamTraj['eTraj']['By']
-        graph_title = 'Horizontal electron trajectory'
-        axis = 'X'
-        label_B = 'By [T]'
-    elif direction.lower() in ['y', 'v', 'ver', 'vertical']:
-        B = eBeamTraj['eTraj']['Bx']
-        graph_title = 'Vertical electron trajectory'
-        axis = 'Y'
-        label_B = 'Bx [T]'
-    elif direction.lower() in ['b', 'both']:
-        plot_electron_trajectory(eBeamTraj, 'horizontal', **kwargs)
-        plot_electron_trajectory(eBeamTraj, 'vertical', **kwargs)
+    Z = np.asarray(eBeamTraj["eTraj"]["Z"], dtype=float)
+    s_traj_mm = Z * 1e3
+
+    mf = eBeamTraj.get("mag_field", None)
+    if mf is None:
+        raise KeyError("Input dict must contain key 'mag_field' with {'s', 'B'}.")
+
+    s_B = np.asarray(mf["s"], dtype=float)
+    B = np.asarray(mf["B"], dtype=float)
+    if B.ndim != 2 or B.shape[1] != 3:
+        raise ValueError("'mag_field[\"B\"]' must have shape (N, 3) for (Bx, By, Bz).")
+
+    d = direction.lower()
+    if d in ["x", "h", "hor", "horizontal"]:
+        B_comp = B[:, 1]
+        graph_title = "Horizontal electron trajectory"
+        axis = "X"
+        label_B = "By [T]"
+    elif d in ["y", "v", "ver", "vertical"]:
+        B_comp = B[:, 0]
+        graph_title = "Vertical electron trajectory"
+        axis = "Y"
+        label_B = "Bx [T]"
+    elif d in ["b", "both"]:
+        plot_electron_trajectory(eBeamTraj, "horizontal", **kwargs)
+        plot_electron_trajectory(eBeamTraj, "vertical", **kwargs)
         return
     else:
         raise ValueError("Direction must be 'horizontal', 'vertical', or 'both'.")
 
-    fig, axes = plt.subplots(3, 1, sharex=True, figsize=(8, 8), height_ratios=[1, 1, 1])
-    fig.suptitle(graph_title, fontsize=16)
+    fig, axes = plt.subplots(
+        3, 1, sharex=True, figsize=(8, 8), height_ratios=[1, 1, 1]
+    )
+    fig.suptitle(graph_title, fontsize=16 * k)
     fig.subplots_adjust(hspace=0.3)
 
+    if s_B.size > 1:
+        B_on_traj = np.interp(Z, s_B, B_comp)
+    else:
+        B_on_traj = np.full_like(Z, B_comp[0] if B_comp.size else 0.0)
+
     ys = [
-        B,
-        eBeamTraj['eTraj'][axis] * 1e3,
-        eBeamTraj['eTraj'][f'{axis}p'] * 1e3
+        B_on_traj,
+        np.asarray(eBeamTraj["eTraj"][axis], dtype=float) * 1e3,
+        np.asarray(eBeamTraj["eTraj"][f"{axis}p"], dtype=float) * 1e3,
     ]
 
-    labels = [label_B, f'{axis.lower()} [mm]', f"{axis.lower()}' [mrad]"]
+    labels = [label_B, f"{axis.lower()} [mm]", f"{axis.lower()}' [mrad]"]
 
     for ax, y, color, label in zip(axes, ys, colors, labels):
-        ax.set_facecolor('white')
-        ax.plot(s, y, color=color, linewidth=1.5, label=label)
-        ax.grid(True, which='both', color='gray', linestyle=':', linewidth=0.5)
-        ax.tick_params(direction='in', top=True, right=True)
-        for spine in ['top', 'right', 'bottom', 'left']:
+        ax.set_facecolor("white")
+        ax.plot(s_traj_mm, y, color=color, linewidth=1.5, label=label)
+        ax.grid(True, which="both", color="gray", linestyle=":", linewidth=0.5)
+        ax.tick_params(direction="in", top=True, right=True)
+        for spine in ["top", "right", "bottom", "left"]:
             ax.spines[spine].set_visible(True)
-            ax.spines[spine].set_color('black')
-        ax.yaxis.label.set_color('black')
-        ax.legend(loc='upper right', frameon=True)
+            ax.spines[spine].set_color("black")
+        ax.yaxis.label.set_color("black")
+        ax.legend(loc="upper right", frameon=True)
 
-    axes[-1].set_xlabel('[mm]', color='black')
+    axes[-1].set_xlabel("s [mm]", color="black")
     plt.tight_layout()
     plt.show()
 
@@ -92,24 +122,41 @@ def plot_chief_rays(
     - Panel 2: Trajectory (x or y) with chief rays overlaid
     - Panel 3: Trajectory angle (x' or y') with chief-ray points
 
+    Parameters
+    ----------
+    result : dict
+        Dictionary returned by trace_chief_rays(), with at least:
+          - "eTraj"     : dict with "Z", "X", "Y", "Xp", "Yp"
+          - "mag_field" : dict with "s", "B" (N, 3) for (Bx, By, Bz)
+          - "chief_rays": pandas.DataFrame with columns
+                ["X", "Y", "Z", "dX", "dY", "id", ...].
+    direction : str, optional
+        "horizontal"/"x" or "vertical"/"y".
+    k : float, optional
+        Global font/marker scaling factor passed to start_plotting().
+    ray_length : float, optional
+        Length of drawn ray segments along z *in meters* (default 1.0).
     """
     start_plotting(k)
 
     if "chief_rays" not in result:
-        raise KeyError("Input dict must contain key 'chief_rays' as returned by trace_chief_rays().")
-    if "magnetic_field" not in result:
-        raise KeyError("Input dict must contain key 'magnetic_field'.")
-    if "trajectory" not in result:
-        raise KeyError("Input dict must contain key 'trajectory' (full trajectory).")
+        raise KeyError(
+            "Input dict must contain key 'chief_rays' as returned by trace_chief_rays()."
+        )
+    if "mag_field" not in result:
+        raise KeyError("Input dict must contain key 'mag_field'.")
+    if "eTraj" not in result:
+        raise KeyError("Input dict must contain key 'eTraj' (full trajectory).")
 
     df = result["chief_rays"]
-    mf = result["magnetic_field"]
-    traj = result["trajectory"]
+    mf = result["mag_field"]
+    traj = result["eTraj"]
 
     required_cols = {"X", "Y", "Z", "dX", "dY", "id"}
     missing = required_cols.difference(df.columns)
     if missing:
-        raise ValueError(f"'chief_rays' DataFrame is missing required columns: {missing}.")
+        raise ValueError(
+            f"'chief_rays' DataFrame is missing required columns: {missing}.")
 
     d = direction.lower()
     if d in ("x", "h", "hor", "horizontal"):
@@ -118,7 +165,6 @@ def plot_chief_rays(
         axis_label = "x"
         B_label = "By [T]"
         title = "Horizontal chief rays on electron trajectory"
-        field_component = "By"
         comp_index = 1
     elif d in ("y", "v", "ver", "vertical"):
         axis = "Y"
@@ -126,8 +172,7 @@ def plot_chief_rays(
         axis_label = "y"
         B_label = "Bx [T]"
         title = "Vertical chief rays on electron trajectory"
-        field_component = "Bx"
-        comp_index = 0
+        comp_index = 0 
     else:
         raise ValueError("Direction must be 'horizontal'/'x' or 'vertical'/'y'.")
 
@@ -157,7 +202,7 @@ def plot_chief_rays(
     B = np.asarray(mf["B"], dtype=float)
 
     if s.ndim != 1:
-        raise ValueError("'magnetic_field['s']' must be 1D.")
+        raise ValueError("'mag_field[\"s\"]' must be 1D.")
 
     if B.ndim == 1:
         if B.size != s.size:
@@ -165,10 +210,10 @@ def plot_chief_rays(
         B_comp = B
     elif B.ndim == 2:
         if B.shape[0] != s.size or B.shape[1] != 3:
-            raise ValueError("'B' must have shape (N, 3) with N == len(s).")
+            raise ValueError("'mag_field[\"B\"]' must have shape (N, 3) with N == len(s).")
         B_comp = B[:, comp_index]
     else:
-        raise ValueError("'B' must be 1D or 2D with shape (N, 3).")
+        raise ValueError("'mag_field[\"B\"]' must be 1D or 2D with shape (N, 3).")
 
     s_mm = s * 1e3
 
@@ -182,12 +227,7 @@ def plot_chief_rays(
     else:
         Rp_at_Zr_mrad = np.full_like(Zr, Rp_full_mrad[0] if Rp_full_mrad.size else 0.0)
 
-    fig, axes = plt.subplots(
-        3, 1,
-        sharex=True,
-        figsize=(8, 8),
-        height_ratios=[1, 1, 1],
-    )
+    fig, axes = plt.subplots(3, 1, sharex=True, figsize=(8, 8), height_ratios=[1, 1, 1])
     fig.suptitle(title, fontsize=16 * k)
     fig.subplots_adjust(hspace=0.3)
 
@@ -204,7 +244,7 @@ def plot_chief_rays(
     ax.plot(s_mm, B_comp, color=colors[0], linewidth=1.5, label=labels[0])
 
     for seg_id in unique_ids:
-        mask = (ids == seg_id)
+        mask = ids == seg_id
         if not np.any(mask):
             continue
         color = id_to_color[seg_id]
@@ -231,7 +271,7 @@ def plot_chief_rays(
     ax.plot(Z_full_mm, R_full_mm, color=colors[1], linewidth=1.5, label=labels[1])
 
     for seg_id in unique_ids:
-        mask = (ids == seg_id)
+        mask = ids == seg_id
         Z0 = Zr[mask]
         R0 = Rr[mask]
         m = dRr[mask]
@@ -242,7 +282,7 @@ def plot_chief_rays(
         color = id_to_color[seg_id]
 
         Z_ray_start = Z0
-        Z_ray_end = Z0 + ray_length
+        Z_ray_end = Z0 + ray_length 
         R_ray_start = R0
         R_ray_end = R0 + m * (Z_ray_end - Z_ray_start)
 
@@ -268,7 +308,7 @@ def plot_chief_rays(
     ax.plot(Z_full_mm, Rp_full_mrad, color=colors[2], linewidth=1.5, label=labels[2])
 
     for seg_id in unique_ids:
-        mask = (ids == seg_id)
+        mask = ids == seg_id
         if not np.any(mask):
             continue
         color = id_to_color[seg_id]
@@ -303,56 +343,82 @@ def plot_magnetic_field(eBeamTraj: dict, direction: str, **kwargs) -> None:
     """
     Plot horizontal or vertical magnetic field from simulation data.
 
-    Args:
-        eBeamTraj: Dictionary containing electron trajectory data.
-        direction: 'horizontal', 'vertical', or 'both'.
-        **kwargs: Optional keyword arguments, e.g., scaling factor `k`.
+    Parameters
+    ----------
+    eBeamTraj : dict
+        Electron trajectory dictionary in the barc4sr format, with:
+          - 'mag_field': {
+                's', 'B'
+            }
+        where 'mag_field'['B'] has shape (N, 3) ordered as (Bx, By, Bz).
+        The 'eTraj' block is not used here.
+    direction : str
+        'horizontal', 'vertical', or 'both'.
+    **kwargs
+        Optional keyword arguments, e.g. scaling factor ``k``.
     """
-    k = kwargs.get('k', 1)
+    k = kwargs.get("k", 1)
     start_plotting(k)
 
-    colors = ['darkred', 'olive', 'steelblue']
-    s = eBeamTraj['eTraj']['Z']*1E3
+    colors = ["darkred", "olive", "steelblue"]
 
-    if direction.lower() in ['x', 'h', 'hor', 'horizontal']:
-        B = eBeamTraj['eTraj']['By']
-        graph_title = 'Vertical magnetic field'
-    elif direction.lower() in ['y', 'v', 'ver', 'vertical']:
-        B = eBeamTraj['eTraj']['Bx']
-        graph_title = 'Horizontal magnetic field'
-    elif direction.lower() in ['b', 'both']:
-        plot_magnetic_field(eBeamTraj, 'horizontal', **kwargs)
-        plot_magnetic_field(eBeamTraj, 'vertical', **kwargs)
+    mf = eBeamTraj.get("mag_field", None)
+    if mf is None:
+        raise KeyError("Input dict must contain key 'mag_field' with {'s', 'B'}.")
+
+    s = np.asarray(mf["s"], dtype=float)
+    B_all = np.asarray(mf["B"], dtype=float)
+    if s.ndim != 1:
+        raise ValueError("'mag_field[\"s\"]' must be 1D.")
+    if B_all.ndim != 2 or B_all.shape[1] != 3 or B_all.shape[0] != s.size:
+        raise ValueError("'mag_field[\"B\"]' must have shape (N, 3) with N == len(s).")
+
+    s_mm = s * 1e3
+
+    d = direction.lower()
+    if d in ["x", "h", "hor", "horizontal"]:
+        B = B_all[:, 1]
+        graph_title = "Vertical magnetic field"
+    elif d in ["y", "v", "ver", "vertical"]:
+        B = B_all[:, 0]
+        graph_title = "Horizontal magnetic field"
+    elif d in ["b", "both"]:
+        plot_magnetic_field(eBeamTraj, "horizontal", **kwargs)
+        plot_magnetic_field(eBeamTraj, "vertical", **kwargs)
         return
     else:
         raise ValueError("Direction must be 'horizontal', 'vertical', or 'both'.")
 
-    fig, axes = plt.subplots(3, 1, sharex=True, figsize=(8, 8), height_ratios=[1, 1, 1])
-    fig.suptitle(graph_title, fontsize=16)
+    fig, axes = plt.subplots(
+        3, 1, sharex=True, figsize=(8, 8), height_ratios=[1, 1, 1]
+    )
+    fig.suptitle(graph_title, fontsize=16 * k)
     fig.subplots_adjust(hspace=0.3)
 
-    frst_field_integral = integrate.cumulative_trapezoid(B, s, initial=0)
-    scnd_field_integral = integrate.cumulative_trapezoid(frst_field_integral, s, initial=0)
+    first_field_integral = integrate.cumulative_trapezoid(B, s, initial=0.0)
+    second_field_integral = integrate.cumulative_trapezoid(
+        first_field_integral, s, initial=0.0
+    )
 
-    ys = [
-        B,
-        frst_field_integral,
-        scnd_field_integral
+    ys = [B, first_field_integral, second_field_integral]
+    labels = [
+        "B [T]",
+        r"$\int B \cdot ds$ [T·m]",
+        r"$\iint B \cdot ds^2$ [T·m$^2$]",
     ]
-    labels = ['B [T]', r'$\int$B$\cdot$d$s$ [T$\cdot$m]', r'$\iint$B$\cdot$d$s$² [T$\cdot$m²]']
 
     for ax, y, color, label in zip(axes, ys, colors, labels):
-        ax.set_facecolor('white')
-        ax.plot(s, y, color=color, linewidth=1.5, label=label)
-        ax.grid(True, which='both', color='gray', linestyle=':', linewidth=0.5)
-        ax.tick_params(direction='in', top=True, right=True)
-        for spine in ['top', 'right', 'bottom', 'left']:
+        ax.set_facecolor("white")
+        ax.plot(s_mm, y, color=color, linewidth=1.5, label=label)
+        ax.grid(True, which="both", color="gray", linestyle=":", linewidth=0.5)
+        ax.tick_params(direction="in", top=True, right=True)
+        for spine in ["top", "right", "bottom", "left"]:
             ax.spines[spine].set_visible(True)
-            ax.spines[spine].set_color('black')
-        ax.yaxis.label.set_color('black')
-        ax.legend(loc='upper right', frameon=True)
+            ax.spines[spine].set_color("black")
+        ax.yaxis.label.set_color("black")
+        ax.legend(loc="upper right", frameon=True)
 
-    axes[-1].set_xlabel('[mm]', color='black')
+    axes[-1].set_xlabel("s [mm]", color="black")
     plt.tight_layout()
     plt.show()
 

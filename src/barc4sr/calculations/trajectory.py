@@ -48,6 +48,6 @@ def electron_trajectory(**kwargs) -> dict:
     if verbose: print('completed')
     if verbose: print_elapsed_time(t0)
     
-    eTrajDict = write_electron_trajectory(file_name, eTraj)
+    eTrajDict = write_electron_trajectory(file_name, eTraj, bl["ElectronEnergy"])
     
     return eTrajDict

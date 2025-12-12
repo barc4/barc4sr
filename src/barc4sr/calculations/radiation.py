@@ -204,7 +204,6 @@ def spectrum():
     raise NotImplementedError('Ohhh ohhh we are half way there! Ohhh ohhh this function is not implemented yet!')
 
 
-
 #***********************************************************************************
 # spectral wavefront calculation - 3D datasets
 #***********************************************************************************
