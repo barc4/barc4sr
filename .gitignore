@@ -177,3 +177,4 @@ docs/build/*
 !docs/build/html/
 *.h5
 *sandbox*
+*DS_store*
