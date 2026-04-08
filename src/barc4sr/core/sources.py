@@ -1247,9 +1247,9 @@ class UndulatorSource(SynchrotronSource):
         if polarization == "LV":
             return amplitude, 0.0, 0.0, 0.0
         if polarization == "L45":
-            return amplitude, amplitude, 0.0, 0.0
-        if polarization == "L135":
             return amplitude, amplitude, 0.0, np.pi
+        if polarization == "L135":
+            return amplitude, amplitude, 0.0, 0.0
         if polarization == "CR":
             return amplitude, amplitude, np.pi / 4.0, -np.pi / 4.0
         if polarization == "CL":
