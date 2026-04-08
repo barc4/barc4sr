@@ -15,6 +15,7 @@ from scipy.constants import physical_constants
 from barc4sr.syned.mapping import write_syned_file
 
 from .electron_beam import ElectronBeam
+from .energy import energy_wavelength
 from .magnetic_structure import MagneticStructure
 
 CHARGE = physical_constants["atomic unit of charge"][0]
@@ -548,7 +549,7 @@ class UndulatorSource(SynchrotronSource):
         energy: float | None = None,
         wavelength: float | None = None,
         polarization: str | None = None,
-        harmonic: int = 1,
+        harmonic: int | None = 1,
         dS: float | None = None,
         B: float | None = None,
         K: float | None = None,
@@ -558,6 +559,9 @@ class UndulatorSource(SynchrotronSource):
         K_vertical: float | None = None,
         phase_horizontal: float | None = None,
         phase_vertical: float | None = None,
+        even_harmonics: bool = False,
+        K_min: float = 0.05,
+        max_harmonic: int = 15,
         verbose: bool = False,
     ) -> None:
         """
@@ -584,8 +588,10 @@ class UndulatorSource(SynchrotronSource):
             Polarization flag. Defaults to ``"LH"`` for resonance-driven and
             constrained scalar field-driven modes. Plane-specific field input
             defaults to ``"custom"``.
-        harmonic : int, optional
-            Reference harmonic used in resonance calculations. Default is 1.
+        harmonic : int | None, optional
+            Reference harmonic used in resonance calculations. If ``None`` in
+            resonance-driven mode, scan candidate harmonics until a valid one is
+            found. Default is 1.
         dS : float | None, optional
             Longitudinal source shift [m]. If omitted, keep the current value.
         B : float | None, optional
@@ -603,6 +609,14 @@ class UndulatorSource(SynchrotronSource):
             imposed by the polarization state. For ``custom`` they are stored as
             provided; if only one field plane is active, missing phases default to
             zero.
+        even_harmonics : bool, optional
+            If True, even harmonics are allowed during the automatic harmonic scan
+            used when ``harmonic is None`` in resonance-driven mode. Default is False.
+        K_min : float, optional
+            Minimum total deflection parameter accepted during the automatic
+            harmonic scan. Default is 0.05.
+        max_harmonic : int, optional
+            Maximum harmonic tested during the automatic scan. Default is 15.
         verbose : bool, optional
             If True, prints a summary of the configured operating point and keeps
             placeholder blocks for later phase-space / spectral / power additions.
@@ -613,7 +627,6 @@ class UndulatorSource(SynchrotronSource):
             If the configuration is ambiguous, incomplete, or inconsistent with
             the selected driving mode.
         """
-        harmonic_val = self._validate_harmonic(harmonic)
         pol_input = self._normalize_polarization(polarization)
 
         has_energy = energy is not None
@@ -645,6 +658,8 @@ class UndulatorSource(SynchrotronSource):
         if dS is not None:
             self.dS = float(dS)
 
+        resolved_harmonic: int
+
         if has_energy or has_wavelength:
             polarization_val = "LH" if pol_input is None else pol_input
             if polarization_val == "CUSTOM":
@@ -652,17 +667,28 @@ class UndulatorSource(SynchrotronSource):
                     "polarization='custom' is not valid in resonance-driven mode."
                 )
             target_wavelength = (
-                self._energy_to_wavelength(float(energy))
+                energy_wavelength(float(energy), "eV")
                 if has_energy
                 else float(wavelength)
             )
-            Bh, Bv, ph, pv = self._fields_from_resonance(
-                wavelength=target_wavelength,
-                harmonic=harmonic_val,
-                polarization=polarization_val,
-            )
+            if harmonic is None:
+                resolved_harmonic, Bh, Bv, ph, pv = self._scan_resonant_harmonic(
+                    wavelength=target_wavelength,
+                    polarization=polarization_val,
+                    even_harmonics=even_harmonics,
+                    K_min=float(K_min),
+                    max_harmonic=int(max_harmonic),
+                )
+            else:
+                resolved_harmonic = self._validate_harmonic(harmonic)
+                Bh, Bv, ph, pv = self._fields_from_resonance(
+                    wavelength=target_wavelength,
+                    harmonic=resolved_harmonic,
+                    polarization=polarization_val,
+                )
 
         elif has_scalar_B or has_scalar_K:
+            resolved_harmonic = 1 if harmonic is None else self._validate_harmonic(harmonic)
             polarization_val = "LH" if pol_input is None else pol_input
             if polarization_val == "CUSTOM":
                 raise ValueError(
@@ -680,6 +706,7 @@ class UndulatorSource(SynchrotronSource):
                 )
 
         else:
+            resolved_harmonic = 1 if harmonic is None else self._validate_harmonic(harmonic)
             polarization_val = "CUSTOM" if pol_input is None else pol_input
             if polarization_val != "CUSTOM":
                 raise ValueError(
@@ -698,11 +725,11 @@ class UndulatorSource(SynchrotronSource):
         self.B_vertical = Bv
         self.phase_horizontal = ph
         self.phase_vertical = pv
-        self.harmonic = harmonic_val
+        self.harmonic = resolved_harmonic
         self.polarization = polarization_val
 
         if verbose:
-            self._verbose_configuration(energy=energy, wavelength=wavelength)
+            self._verbose_configuration()
 
     @property
     def length(self) -> float:
@@ -755,7 +782,7 @@ class UndulatorSource(SynchrotronSource):
         harmonic : int | None, optional
             Harmonic index. If omitted, use the currently stored ``self.harmonic``.
         """
-        return self._wavelength_to_energy(self.resonant_wavelength(harmonic=harmonic))
+        return energy_wavelength(self.resonant_wavelength(harmonic=harmonic), "m")
 
     def power_through_slit(self, *args, **kwargs):
         """
@@ -765,33 +792,20 @@ class UndulatorSource(SynchrotronSource):
             "UndulatorSource.power_through_slit() has not been ported yet."
         )
 
-    def _verbose_configuration(
-        self,
-        *,
-        energy: float | None,
-        wavelength: float | None,
-    ) -> None:
+    def _verbose_configuration(self) -> None:
         """
-        Internal helper to print a summary of the configured undulator state.
+        Print the configured undulator operating point.
         """
         print('\n>>>>>>>>>>> undulator <<<<<<<<<<<\n')
         print("> Operating point:")
         print(f"\t>> polarization      : {self.polarization}")
         print(f"\t>> harmonic          : {self.harmonic}")
         print(f"\t>> dS                : {self.dS:.6f} m")
-        print(f"\t>> Bh / Bv           : {self.B_horizontal:.6f} T / {self.B_vertical:.6f} T")
-        print(f"\t>> ph / pv           : {self.phase_horizontal:.6f} rad / {self.phase_vertical:.6f} rad")
-        print(f"\t>> Kh / Kv           : {self.K_horizontal:.6f} / {self.K_vertical:.6f}")
-        print(f"\t>> lambda_res        : {self.resonant_wavelength():.6e} m")
-        print(f"\t>> E_res             : {self.resonant_energy():.6f} eV")
-        if energy is not None:
-            print(f"\t>> target energy     : {float(energy):.6f} eV")
-        if wavelength is not None:
-            print(f"\t>> target wavelength : {float(wavelength):.6e} m")
-
-        print('\n>>>>>>>>>>> beam phase-space characteristics <<<<<<<<<<<')
-        print('\n>>>>>>>>>>> beam spectral characteristics <<<<<<<<<<<')
-        print('\n>>>>>>>>>>> power characteristics <<<<<<<<<<<')
+        print(f"\t>> (Bh, Bv)          : ({self.B_horizontal:.6f} T , {self.B_vertical:.6f} T)")
+        print(f"\t>> (ph, pv)          : ({self.phase_horizontal:.6f} rad , {self.phase_vertical:.6f} rad)")
+        print(f"\t>> (Kh, Kv)          : ({self.K_horizontal:.6f} , {self.K_vertical:.6f})")
+        print(f"\t>> wavelength (res.) : {self.resonant_wavelength():.3e} m")
+        print(f"\t>> energy (res.)     : {self.resonant_energy():.3f} eV")
 
     def _normalize_polarization(self, polarization: str | None) -> str | None:
         """
@@ -801,19 +815,22 @@ class UndulatorSource(SynchrotronSource):
             return None
         pol = polarization.strip().upper()
         if pol not in self._ALL_POLARIZATIONS:
-            allowed = ', '.join(sorted(self._ALL_POLARIZATIONS))
             raise ValueError(
-                f"Invalid polarization '{polarization}'. Allowed values: {allowed}."
+                f"Invalid polarization '{polarization}'. Use one of "
+                f"{sorted(self._ALL_POLARIZATIONS)}."
             )
         return pol
 
     def _validate_harmonic(self, harmonic: int) -> int:
         """
-        Validate the reference harmonic.
+        Validate the harmonic index.
         """
-        n = int(harmonic)
+        try:
+            n = int(harmonic)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("harmonic must be a positive integer.") from exc
         if n < 1:
-            raise ValueError("harmonic must be a strictly positive integer.")
+            raise ValueError("harmonic must be >= 1.")
         return n
 
     def _fields_from_scalar_B(
@@ -823,11 +840,11 @@ class UndulatorSource(SynchrotronSource):
         polarization: str,
     ) -> tuple[float, float, float, float]:
         """
-        Build a named polarization state from a scalar field amplitude.
+        Build a named polarization state from a scalar magnetic-field amplitude.
         """
         if B < 0:
-            raise ValueError("Scalar B must be non-negative.")
-        return self._named_state_from_scalar(amplitude=B, polarization=polarization)
+            raise ValueError("Scalar B must be >= 0.")
+        return self._named_state_from_scalar(amplitude=float(B), polarization=polarization)
 
     def _fields_from_scalar_K(
         self,
@@ -839,11 +856,44 @@ class UndulatorSource(SynchrotronSource):
         Build a named polarization state from a scalar deflection parameter.
         """
         if K < 0:
-            raise ValueError("Scalar K must be non-negative.")
+            raise ValueError("Scalar K must be >= 0.")
         return self._named_state_from_scalar(
-            amplitude=self._K_to_B(K),
+            amplitude=self._K_to_B(float(K)),
             polarization=polarization,
         )
+
+    def _fields_from_custom_inputs(
+        self,
+        *,
+        B_horizontal: float | None,
+        B_vertical: float | None,
+        K_horizontal: float | None,
+        K_vertical: float | None,
+        phase_horizontal: float | None,
+        phase_vertical: float | None,
+    ) -> tuple[float, float, float, float]:
+        """
+        Build a custom two-plane state from explicit fields or K values.
+        """
+        if B_horizontal is not None or B_vertical is not None:
+            Bh = 0.0 if B_horizontal is None else float(B_horizontal)
+            Bv = 0.0 if B_vertical is None else float(B_vertical)
+        else:
+            Kh = 0.0 if K_horizontal is None else float(K_horizontal)
+            Kv = 0.0 if K_vertical is None else float(K_vertical)
+            if Kh < 0 or Kv < 0:
+                raise ValueError("Plane-specific K values must be >= 0.")
+            Bh = self._K_to_B(Kh)
+            Bv = self._K_to_B(Kv)
+
+        if Bh < 0 or Bv < 0:
+            raise ValueError("Plane-specific B values must be >= 0.")
+        if Bh == 0.0 and Bv == 0.0:
+            raise ValueError("At least one field plane must be non-zero.")
+
+        ph = 0.0 if phase_horizontal is None else float(phase_horizontal)
+        pv = 0.0 if phase_vertical is None else float(phase_vertical)
+        return Bh, Bv, ph, pv
 
     def _fields_from_resonance(
         self,
@@ -877,42 +927,45 @@ class UndulatorSource(SynchrotronSource):
             polarization=polarization,
         )
 
-    def _fields_from_custom_inputs(
+    def _scan_resonant_harmonic(
         self,
         *,
-        B_horizontal: float | None,
-        B_vertical: float | None,
-        K_horizontal: float | None,
-        K_vertical: float | None,
-        phase_horizontal: float | None,
-        phase_vertical: float | None,
-    ) -> tuple[float, float, float, float]:
+        wavelength: float,
+        polarization: str,
+        even_harmonics: bool,
+        K_min: float,
+        max_harmonic: int,
+    ) -> tuple[int, float, float, float, float]:
         """
-        Build a custom state from explicit plane-specific fields or K values.
+        Scan harmonics in resonance-driven mode until a valid operating point is found.
         """
-        if B_horizontal is not None or B_vertical is not None:
-            Bh = 0.0 if B_horizontal is None else float(B_horizontal)
-            Bv = 0.0 if B_vertical is None else float(B_vertical)
-        else:
-            Kh = 0.0 if K_horizontal is None else float(K_horizontal)
-            Kv = 0.0 if K_vertical is None else float(K_vertical)
-            Bh = self._K_to_B(Kh)
-            Bv = self._K_to_B(Kv)
+        if K_min < 0:
+            raise ValueError("K_min must be >= 0.")
+        if max_harmonic < 1:
+            raise ValueError("max_harmonic must be >= 1.")
 
-        if Bh < 0 or Bv < 0:
-            raise ValueError("Plane-specific B/K amplitudes must be non-negative.")
-        if Bh == 0.0 and Bv == 0.0:
-            raise ValueError("At least one magnetic-field plane must be non-zero.")
-
-        if Bh != 0.0 and Bv != 0.0:
-            if phase_horizontal is None or phase_vertical is None:
-                raise ValueError(
-                    "For polarization='custom' with both field planes active, "
-                    "provide both phase_horizontal and phase_vertical."
+        for n in range(1, max_harmonic + 1):
+            if not even_harmonics and n % 2 == 0:
+                continue
+            try:
+                Bh, Bv, ph, pv = self._fields_from_resonance(
+                    wavelength=wavelength,
+                    harmonic=n,
+                    polarization=polarization,
                 )
-        ph = 0.0 if phase_horizontal is None else float(phase_horizontal)
-        pv = 0.0 if phase_vertical is None else float(phase_vertical)
-        return Bh, Bv, ph, pv
+            except ValueError:
+                continue
+
+            K_total = np.hypot(self._B_to_K(Bh), self._B_to_K(Bv))
+            if K_total < K_min:
+                continue
+
+            return n, Bh, Bv, ph, pv
+
+        raise ValueError(
+            "No valid harmonic found for the requested wavelength/energy and polarization "
+            f"within 1..{max_harmonic}."
+        )
 
     def _named_state_from_scalar(
         self,
@@ -921,8 +974,11 @@ class UndulatorSource(SynchrotronSource):
         polarization: str,
     ) -> tuple[float, float, float, float]:
         """
-        Return the canonical field state for a named polarization.
+        Build one of the constrained named polarization states from a scalar amplitude.
         """
+        if amplitude < 0:
+            raise ValueError("Amplitude must be >= 0.")
+
         if polarization == "LH":
             return 0.0, amplitude, 0.0, 0.0
         if polarization == "LV":
@@ -935,35 +991,22 @@ class UndulatorSource(SynchrotronSource):
             return amplitude, amplitude, np.pi / 4.0, -np.pi / 4.0
         if polarization == "CL":
             return amplitude, amplitude, -np.pi / 4.0, np.pi / 4.0
-        raise ValueError(f"Unsupported named polarization '{polarization}'.")
+
+        raise ValueError(
+            f"Named scalar state requires one of {sorted(self._NAMED_POLARIZATIONS)}."
+        )
 
     def _B_to_K(self, B: float) -> float:
         """
         Convert peak magnetic field [T] to deflection parameter.
         """
-        return CHARGE * B * self.period_length / (2.0 * np.pi * MASS * LIGHT)
+        return CHARGE * float(B) * self.period_length / (2.0 * np.pi * MASS * LIGHT)
 
     def _K_to_B(self, K: float) -> float:
         """
         Convert deflection parameter to peak magnetic field [T].
         """
-        return K * (2.0 * np.pi * MASS * LIGHT) / (self.period_length * CHARGE)
-
-    def _wavelength_to_energy(self, wavelength: float) -> float:
-        """
-        Convert wavelength [m] to photon energy [eV].
-        """
-        if wavelength <= 0:
-            raise ValueError("wavelength must be strictly positive.")
-        return PLANCK * LIGHT / (CHARGE * wavelength)
-
-    def _energy_to_wavelength(self, energy: float) -> float:
-        """
-        Convert photon energy [eV] to wavelength [m].
-        """
-        if energy <= 0:
-            raise ValueError("energy must be strictly positive.")
-        return PLANCK * LIGHT / (CHARGE * energy)
+        return float(K) * (2.0 * np.pi * MASS * LIGHT) / (self.period_length * CHARGE)
     
 # ------------------------------------------------------------------
 # Wiggler
