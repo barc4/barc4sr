@@ -143,7 +143,7 @@ def barc4sr_dictionary(light_source: object, observation_point: float,
     beamline['ElectronBeamDivergenceH'] = np.sqrt(light_source.ElectronBeam.moment_xpxp)
     beamline['ElectronBeamDivergenceV'] = np.sqrt(light_source.ElectronBeam.moment_ypyp)
     # magnetic structure
-    beamline['MagFieldCenter'] = light_source.MagneticStructure.center
+    beamline['MagFieldCenter'] = -light_source.dS
     # undulator        
     if light_source.MagneticStructure.CLASS_NAME.startswith("U"):
         beamline['Class'] = 'u'

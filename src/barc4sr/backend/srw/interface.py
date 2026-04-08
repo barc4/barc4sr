@@ -56,8 +56,7 @@ def set_light_source(bl: dict,
     """    
 
     if verbose: print('> Generating the electron beam ... ', end='')
-    eBeam = set_electron_beam(bl,
-                              ebeam_initial_condition=ebeam_initial_condition)
+    eBeam = set_electron_beam(bl, ebeam_initial_condition=ebeam_initial_condition)
     if verbose: print('completed')
 
     if verbose: print('> Generating the magnetic structure ... ', end='')
@@ -73,8 +72,7 @@ def set_light_source(bl: dict,
 
     return eBeam, magFldCnt, eTraj
 
-def set_electron_beam(bl: dict, 
-                      ebeam_initial_condition: list = 6*[0]) -> srwlib.SRWLPartBeam:
+def set_electron_beam(bl: dict, ebeam_initial_condition: list = 6*[0]) -> srwlib.SRWLPartBeam:
     """
     Set up the electron beam parameters.
 
@@ -187,10 +185,13 @@ def set_magnetic_structure(bl: dict) -> srwlib.SRWLMagFldC:
         range_z = field_axis[-1]-field_axis[0]
         magFldCnt = srwlib.SRWLMagFldC(_arMagFld=[srwlib.SRWLMagFld3D(
                                         arBx, arBy, arBz,
-                                        1, 1, len(field_axis), _rz=range_z)],
+                                        # 1, 1, len(field_axis), _rz=range_z, _arZ=field_axis)],    #RC260408 - fix
+                                        1, 1, len(field_axis), _arZ=field_axis)],
                                         _arXc=srwlib.array('d', [0.0]),
                                         _arYc=srwlib.array('d', [0.0]),
-                                        _arZc=srwlib.array('d', [bl['MagFieldCenter']]))
+                                        _arZc=srwlib.array('d', [0.0]),
+                                        # _arZc=srwlib.array('d', [bl['MagFieldCenter']])).         #RC260408 - fix
+                                        )
 
     return magFldCnt
 

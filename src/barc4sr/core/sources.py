@@ -40,6 +40,7 @@ class SynchrotronSource(object):
         """
         self.ElectronBeam = electron_beam
         self.MagneticStructure = magnetic_structure
+        self.dS = 0
 
     def __getattr__(self, name: str):
         """
@@ -115,18 +116,28 @@ class ArbitraryMagnetSource(SynchrotronSource):
             )
         self._original_magnetic_field = None
 
-    def configure(self, *, si=-1e23, sf=1e23, dS=None, reset=False, verbose=False) -> None:
+    def configure(
+        self,
+        *,
+        si: float = -1e23,
+        sf: float = 1e23,
+        dS: float = None,
+        reset: bool = False,
+        verbose: bool = False,
+    ) -> None:
         """
         Configure an arbitrary magnetic source.
 
-        Trim and optionally recenter the arbitrary magnetic field.      
+        Trim and optionally shift the arbitrary magnetic field.
 
         Parameters
         ----------
-        - si, sf (float): lower and upper trimming bounds [m]. 
-        - dS (float): shift applied to the magnetic-field grid [m].
+        - si, sf (float): lower and upper trimming bounds [m].
+        - dS (float): absolute longitudinal shift [m] applied to the magnetic-field
+          grid so that the chosen emission reference is placed at ``s = 0`` for the
+          radiation calculation. If ``None``, the current source shift is preserved.
         - reset (bool): if True, restore the original untrimmed field before
-            applying dS and trimming.
+          applying ``dS`` and trimming.
         - verbose (bool): if True, prints to the prompt
 
         Raises
@@ -135,39 +146,42 @@ class ArbitraryMagnetSource(SynchrotronSource):
             If trimming removes all samples, or if the magnetic field
             dictionary is missing mandatory keys.
         """
-
         self._ensure_original_field()
 
         if reset:
             self.reset_field()
 
+        print(dS)
+
         if dS is not None:
             self.recenter(dS=dS, verbose=False)
+
         self.trim(si=si, sf=sf, verbose=False)
 
         if verbose:
             self._verbose()
 
-    def recenter(self, *, dS=None, verbose=False) -> None:
+    def recenter(self, *, dS: float = None, verbose: bool = False) -> None:
         """
-        Recenter the arbitrary magnetic field.
+        Shift the arbitrary magnetic field grid.
 
-        The recentering is performed on the current magnetic field stored in
-        MagneticStructure.magnetic_field and does not crop any data.
+        The shift is always applied from the cached original field, not from the
+        current shifted field. Therefore repeated calls are not cumulative.
 
         Parameters
         ----------
-        - dS (float): shift applied to the magnetic-field grid [m]. If None, the midpoint
-            of the current s-interval is used.
+        - dS (float): absolute longitudinal shift [m] applied to the original
+        magnetic-field grid. This defines the position in the original field
+        that becomes s = 0 in the shifted field. If ``None``, use the midpoint
+        of the original ``s`` interval.
         - verbose (bool): if True, prints to the prompt
         """
         self._ensure_original_field()
 
-        mf = self.MagneticStructure.magnetic_field
+        mf = self._original_magnetic_field
         if mf is None:
             raise ValueError(
-                "magnetic_field dictionary is not set in MagneticStructure "
-                "(magnet_type='arbitrary' expected)."
+                "Original magnetic field dictionary is not available."
             )
 
         try:
@@ -181,35 +195,34 @@ class ArbitraryMagnetSource(SynchrotronSource):
             raise ValueError("'s' must be a 1D array.")
 
         mid = 0.5 * (s[0] + s[-1])
-        center_val = mid if dS is None else float(dS)
-        delta = center_val - mid
+        dS_val = mid if dS is None else float(dS)
 
         mf_shift = {}
         for k, v in mf.items():
             if k == "s":
-                mf_shift["s"] = s + delta
+                mf_shift["s"] = s - dS_val
             else:
-                mf_shift[k] = v
+                mf_shift[k] = deepcopy(v)
 
         self.MagneticStructure.magnetic_field = mf_shift
-        self.MagneticStructure.center = center_val
+        self.dS = dS_val
 
         if verbose:
             self._verbose()
 
-    def trim(self, *, si=-1e23, sf=1e23, verbose=False) -> None:
+    def trim(self, *, si: float = -1e23, sf: float = 1e23, verbose: bool = False) -> None:
         """
         Trim the arbitrary magnetic field.
 
         The trimming is performed on the current magnetic field stored in
-        MagneticStructure.magnetic_field. If the field has been recentered
-        (via recenter or configure), the trimming bounds si and sf are
-        interpreted in that recentered coordinate system.
+        ``MagneticStructure.magnetic_field``. If the field has been shifted
+        (via ``recenter`` or ``configure``), the trimming bounds ``si`` and ``sf``
+        are interpreted in that shifted coordinate system.
 
         Parameters
         ----------
-        - si, sf (float): lower and upper trimming bounds [m] in the
-            current coordinate system (usually recentered).
+        - si, sf (float): lower and upper trimming bounds [m] in the current
+          coordinate system.
         - verbose (bool): if True, prints to the prompt
 
         Raises
@@ -252,21 +265,18 @@ class ArbitraryMagnetSource(SynchrotronSource):
                 f"Trimming interval [{si}, {sf}] produced an empty dataset."
             )
 
-        s_trim = s[mask]
-
         mf_trim = {}
         for k, v in mf.items():
             if k == "s":
-                mf_trim["s"] = s_trim
+                mf_trim["s"] = s[mask]
                 continue
             arr = np.asarray(v)
             if arr.shape[:1] == (s.size,):
                 mf_trim[k] = arr[mask, ...]
             else:
-                mf_trim[k] = v
+                mf_trim[k] = deepcopy(v)
 
         self.MagneticStructure.magnetic_field = mf_trim
-        self.MagneticStructure.center = (mf_trim["s"][-1]+mf_trim["s"][0])/2
 
         if verbose:
             self._verbose()
@@ -282,13 +292,13 @@ class ArbitraryMagnetSource(SynchrotronSource):
             )
 
         self.MagneticStructure.magnetic_field = deepcopy(self._original_magnetic_field)
-        self.MagneticStructure.center = 0.0
+        self.dS = 0.0
 
     def _ensure_original_field(self) -> None:
         """
         Internal helper to cache the original magnetic field.
 
-        Makes a deepcopy of MagneticStructure.magnetic_field on first use.
+        Makes a deepcopy of ``MagneticStructure.magnetic_field`` on first use.
         """
         if self._original_magnetic_field is None:
             if self.MagneticStructure.magnetic_field is None:
@@ -301,10 +311,10 @@ class ArbitraryMagnetSource(SynchrotronSource):
     def _verbose(self) -> None:
         """
         Internal helper print info on current magnetic field.
-        """    
+        """
         s_out = self.MagneticStructure.magnetic_field["s"]
         print('\n>>>>>>>>>>> User-defined arbitrary magnetic field <<<<<<<<<<<\n')
-        print(f"\t>> Field (re)centered at s = {self.MagneticStructure.center:.6f} m")
+        print(f"\t>> Field shifted by dS = {self.dS:.6f} m")
         print(f"\t>> Span: [{s_out[0]:.6f}, {s_out[-1]:.6f}] m")
         if s_out.size > 1:
             print(f"\t>> Step size: {s_out[1] - s_out[0]:.6g} m; N = {s_out.size}")
@@ -317,7 +327,7 @@ class ArbitraryMagnetSource(SynchrotronSource):
 
 class BendingMagnetSource(SynchrotronSource):
     """
-    SR bending magnet source
+    SR bending magnet source.
     """
 
     def __init__(self, **kwargs) -> None:
@@ -337,35 +347,40 @@ class BendingMagnetSource(SynchrotronSource):
                 "magnet_type='bending_magnet'."
             )
 
-    def configure(self,
+        self.extraction_angle = None
+
+    def configure(
+        self,
         *,
-        center: float = None,
+        dS: float = None,
         extraction_angle: float = None,
         verbose: bool = False,
     ) -> None:
         """
         Configure bending magnet source.
 
-        From B and the electron beam energy, the radius and critical energy can be computed
-        on the fly and optionally printed.
+        From B and the electron beam energy, the radius and critical energy can be
+        computed on the fly and optionally printed.
 
-        The extraction geometry is defined by either the center position [m] of the magnetic
-        field or the extraction angle [rad] taken from the preceeding straight section. 
+        The extraction geometry is defined by either the longitudinal source shift
+        ``dS`` [m] or the extraction angle [rad] taken from the preceding straight
+        section.
 
         Parameters
         ----------
-        - center (float): center of the magnetic field [m]. The emission direction (optical
-            axis) is taken from the tangent to the trajectory at this position. 
-        - extraction_angle (float): extraction angle [rad] taken from the previous straight
-            section. 0 [rad] is the magnet entrance and L/R [rad] is the magnet exit. If 
-            provided, the center is derived from it and stored in MagneticStructure.center.
+        - dS (float): longitudinal shift [m] used to place the chosen emission point
+          at ``s = 0`` for the radiation calculation. ``dS = 0`` corresponds to
+          emission from the middle of the magnet.
+        - extraction_angle (float): extraction angle [rad] taken from the previous
+          straight section. ``0`` [rad] is the magnet entrance and ``L / R`` [rad]
+          is the magnet exit.
         - verbose (bool): if True, prints to the prompt
 
         Raises
         ------
         ValueError
-            If B is not set, or if both center and extraction_angle are
-            provided at the same time.
+            If B is not set, or if both ``dS`` and ``extraction_angle`` are provided
+            at the same time.
         """
         _ = self.B
 
@@ -376,21 +391,24 @@ class BendingMagnetSource(SynchrotronSource):
             print(f"\t>> R = {self.radius:.6f} m")
             print(f"\t>> critical energy = {self.critical_energy:.3f} eV")
 
-        if center is not None and extraction_angle is not None:
-            raise ValueError("Provide only one of 'center' or 'extraction_angle', not both.")
+        if dS is not None and extraction_angle is not None:
+            raise ValueError(
+                "Provide only one of 'dS' or 'extraction_angle', not both."
+            )
 
-        if center is None and extraction_angle is None:
-            if self.MagneticStructure.center is not None:
-                center = self.MagneticStructure.center
-            elif self.MagneticStructure.extraction_angle is not None:
-                extraction_angle = self.MagneticStructure.extraction_angle
+        if dS is None and extraction_angle is None:
+            if self.extraction_angle is not None:
+                extraction_angle = self.extraction_angle
             else:
-                center = 0.0
+                dS = self.dS
 
-        self._set_geometry(center=center, extraction_angle=extraction_angle, verbose=verbose)
+        self._set_geometry(dS=dS, extraction_angle=extraction_angle, verbose=verbose)
 
-    def _set_geometry(self, *,
-        center: float, extraction_angle: float,
+    def _set_geometry(
+        self,
+        *,
+        dS: float = None,
+        extraction_angle: float = None,
         verbose: bool = False,
     ) -> None:
         """
@@ -398,21 +416,21 @@ class BendingMagnetSource(SynchrotronSource):
 
         Parameters
         ----------
-        - center (float): center of the magnetic field [m]. The emission direction (optical
-            axis) is taken from the tangent to the trajectory at this position. 
-        - extraction_angle (float): extraction angle [rad] taken from the previous straight
-            section. 0 [rad] is the magnet entrance and L/R [rad] is the magnet exit. If 
-            provided, the center is derived from it and stored in MagneticStructure.center.
+        - dS (float): longitudinal shift [m] used to place the chosen emission point
+          at ``s = 0`` for the radiation calculation.
+        - extraction_angle (float): extraction angle [rad] taken from the previous
+          straight section. ``0`` [rad] is the magnet entrance and ``L / R`` [rad]
+          is the magnet exit.
         - verbose (bool): if True, prints to the prompt
 
         Raises
         ------
         ValueError
-            If both center and extraction_angle are None, or if the
-            resulting angle is out of range.
+            If both ``dS`` and ``extraction_angle`` are None, or if the resulting
+            angle is out of range.
         """
-        if center is None and extraction_angle is None:
-            raise ValueError("Provide 'center' (m) or 'extraction_angle' (rad).")
+        if dS is None and extraction_angle is None:
+            raise ValueError("Provide 'dS' (m) or 'extraction_angle' (rad).")
 
         L = self.MagneticStructure.field_length
         if L is None:
@@ -424,28 +442,28 @@ class BendingMagnetSource(SynchrotronSource):
         full_arc = L / R
 
         if extraction_angle is None:
-            center_val = float(center)
-            extraction_angle = half_arc - center_val / R
+            dS_val = float(dS)
+            extraction_angle = half_arc - dS_val / R
         else:
             extraction_angle = float(extraction_angle)
-            center_val = (half_arc - extraction_angle) * R
+            dS_val = (half_arc - extraction_angle) * R
 
         if not (0.0 <= extraction_angle <= full_arc):
             raise ValueError(
                 f"extraction_angle={extraction_angle:.6g} rad out of range [0, {full_arc:.6g}]"
             )
 
-        magnetic_field_center = 0.5 * L - center_val
+        distance_from_entrance = 0.5 * L - dS_val
 
-        self.MagneticStructure.center = center_val
-        self.MagneticStructure.extraction_angle = extraction_angle
+        self.dS = dS_val
+        self.extraction_angle = extraction_angle
 
         if verbose:
             print("> Extraction geometry:")
-            print(f"\t>> dist. from BM center    : {center_val:.6f} m")
-            print(f"\t>> dist. from BM entrance  : {magnetic_field_center:.6f} m")
-            print(f"\t>> extraction angle        : {extraction_angle*1e3:.3f} mrad")
-            print(f"\t>> BM arc                  : {2.0*half_arc*1e3:.3f} mrad "
+            print(f"\t>> dS                     : {dS_val:.6f} m")
+            print(f"\t>> dist. from BM entrance : {distance_from_entrance:.6f} m")
+            print(f"\t>> extraction angle       : {extraction_angle * 1e3:.3f} mrad")
+            print(f"\t>> BM arc                 : {2.0 * half_arc * 1e3:.3f} mrad "
                   f"(L={L:.3f} m, R={R:.3f} m)")
 
     @property
@@ -464,34 +482,6 @@ class BendingMagnetSource(SynchrotronSource):
         Set magnetic field amplitude [T].
         """
         self.MagneticStructure.B = value
-
-    @property
-    def center(self) -> float:
-        """
-        Center of the magnetic field [m].
-        """
-        return self.MagneticStructure.center
-
-    @center.setter
-    def center(self, value: float) -> None:
-        """
-        Set center of the magnetic field [m].
-        """
-        self.MagneticStructure.center = value
-
-    @property
-    def extraction_angle(self) -> float:
-        """
-        Extraction angle [rad] taken from the previous straight section.
-        """
-        return self.MagneticStructure.extraction_angle
-
-    @extraction_angle.setter
-    def extraction_angle(self, value: float) -> None:
-        """
-        Set extraction angle [rad] taken from the previous straight section.
-        """
-        self.MagneticStructure.extraction_angle = value
 
     @property
     def radius(self) -> float:
