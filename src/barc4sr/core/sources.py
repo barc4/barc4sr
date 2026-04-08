@@ -11,6 +11,7 @@ from copy import deepcopy
 
 import numpy as np
 from scipy.constants import physical_constants
+from scipy.special import erf
 
 from barc4sr.syned.mapping import write_syned_file
 
@@ -542,6 +543,7 @@ class UndulatorSource(SynchrotronSource):
         self.phase_vertical = 0.0
         self.harmonic = 1
         self.polarization = "LH"
+        self._characteristics: dict | None = None
 
     def configure(
         self,
@@ -618,8 +620,7 @@ class UndulatorSource(SynchrotronSource):
         max_harmonic : int, optional
             Maximum harmonic tested during the automatic scan. Default is 15.
         verbose : bool, optional
-            If True, prints a summary of the configured operating point and keeps
-            placeholder blocks for later phase-space / spectral / power additions.
+            If True, prints a summary of the configured operating point.
 
         Raises
         ------
@@ -636,7 +637,11 @@ class UndulatorSource(SynchrotronSource):
         has_plane_B = B_horizontal is not None or B_vertical is not None
         has_plane_K = K_horizontal is not None or K_vertical is not None
 
-        n_modes = sum((has_energy or has_wavelength, has_scalar_B or has_scalar_K, has_plane_B or has_plane_K))
+        n_modes = sum((
+            has_energy or has_wavelength,
+            has_scalar_B or has_scalar_K,
+            has_plane_B or has_plane_K,
+        ))
         if n_modes != 1:
             raise ValueError(
                 "Provide exactly one driving mode: resonance-driven "
@@ -727,9 +732,56 @@ class UndulatorSource(SynchrotronSource):
         self.phase_vertical = pv
         self.harmonic = resolved_harmonic
         self.polarization = polarization_val
+        self._characteristics = None
 
         if verbose:
             self._verbose_configuration()
+
+    def characteristics(
+        self,
+        *,
+        energy_spread: bool = False,
+        verbose: bool = False,
+    ) -> dict:
+        """
+        Compute analytical undulator beam characteristics.
+
+        This first implementation returns only the beam block. The undulator
+        must already be configured so that the resonant wavelength can be
+        derived from the current magnetic state.
+
+        Parameters
+        ----------
+        energy_spread : bool, optional
+            If True, include energy-spread effects using the Tanaka/Kitamura
+            formulation. If False, use Gaussian convolution. Default is False.
+        verbose : bool, optional
+            If True, print the computed beam characteristics.
+
+        Returns
+        -------
+        dict
+            Structured characteristics dictionary with ``meta`` and ``beam`` blocks.
+
+        Raises
+        ------
+        ValueError
+            If the undulator has not been configured.
+        """
+        self._ensure_configured_for_characteristics()
+
+        meta = self._characteristics_meta()
+        beam = self._characteristics_beam(energy_spread=energy_spread)
+
+        self._characteristics = {
+            "meta": meta,
+            "beam": beam,
+        }
+
+        if verbose:
+            self._verbose_characteristics()
+
+        return self._characteristics
 
     @property
     def length(self) -> float:
@@ -767,6 +819,11 @@ class UndulatorSource(SynchrotronSource):
         ----------
         harmonic : int | None, optional
             Harmonic index. If omitted, use the currently stored ``self.harmonic``.
+
+        Returns
+        -------
+        float
+            Resonant wavelength [m].
         """
         n = self.harmonic if harmonic is None else self._validate_harmonic(harmonic)
         gamma = self.gamma()
@@ -796,7 +853,7 @@ class UndulatorSource(SynchrotronSource):
         """
         Print the configured undulator operating point.
         """
-        print('\n>>>>>>>>>>> undulator <<<<<<<<<<<\n')
+        print("\n>>>>>>>>>>> undulator <<<<<<<<<<<\n")
         print("> Operating point:")
         print(f"\t>> polarization      : {self.polarization}")
         print(f"\t>> harmonic          : {self.harmonic}")
@@ -807,6 +864,194 @@ class UndulatorSource(SynchrotronSource):
         print(f"\t>> wavelength (res.) : {self.resonant_wavelength():.3e} m")
         print(f"\t>> energy (res.)     : {self.resonant_energy():.3f} eV")
 
+    def _verbose_characteristics(self) -> None:
+        """
+        Print the last computed analytical undulator characteristics.
+        """
+        if self._characteristics is None:
+            raise ValueError("No undulator characteristics have been computed yet.")
+
+        beam = self._characteristics["beam"]
+        electron = beam["electron"]
+        filament = beam["filament"]
+        ring = beam["ring"]
+        waist = beam["waist"]
+        photon = beam["photon"]
+
+        print('\n>>>>>>>>>>> beam phase-space characteristics <<<<<<<<<<<')
+        print('electron beam:')
+        print(f"\t>> x/xp = {electron['sigma_x'] * 1e6:0.2f} um vs. {electron['sigma_xp'] * 1e6:0.2f} urad")
+        print(f"\t>> y/yp = {electron['sigma_y'] * 1e6:0.2f} um vs. {electron['sigma_yp'] * 1e6:0.2f} urad")
+        print('filament photon beam:')
+        print(f"\t>> u/up = {filament['sigma_u'] * 1e6:0.2f} um vs. {filament['sigma_up'] * 1e6:0.2f} urad")
+        print('first radiation ring:')
+        print(f"\t>> {ring['first_ring'] * 1e6:.2f} urad")
+        print('photon beam waist position:')
+        print(f"\t>> hor. x ver. waist position = {waist['waist_x']:0.3f} m vs. {waist['waist_y']:0.3f} m")
+        print('convolved photon beam:')
+        print(f"\t>> x/xp = {photon['sigma_x'] * 1e6:0.2f} um vs. {photon['sigma_xp'] * 1e6:0.2f} urad")
+        print(f"\t>> y/yp = {photon['sigma_y'] * 1e6:0.2f} um vs. {photon['sigma_yp'] * 1e6:0.2f} urad")
+
+    def _ensure_configured_for_characteristics(self) -> None:
+        """
+        Validate that the undulator operating point is defined.
+        """
+        if self.harmonic is None or self.polarization is None:
+            raise ValueError(
+                "UndulatorSource must be configured before calling characteristics()."
+            )
+        if self.B_horizontal == 0.0 and self.B_vertical == 0.0:
+            raise ValueError(
+                "UndulatorSource must be configured before calling characteristics()."
+            )
+
+    def _characteristics_meta(self) -> dict:
+        """
+        Build the characteristics metadata block.
+        """
+        return {
+            "harmonic": self.harmonic,
+            "polarization": self.polarization,
+            "wavelength": self.resonant_wavelength(),
+            "energy": self.resonant_energy(),
+            "dS": self.dS,
+        }
+
+    def _characteristics_beam(self, *, energy_spread: bool) -> dict:
+        """
+        Build the beam characteristics block.
+        """
+        return {
+            "electron": self._characteristics_electron_beam(),
+            "filament": self._characteristics_filament_beam(),
+            "ring": self._characteristics_first_ring(),
+            "waist": self._characteristics_waist(),
+            "photon": self._characteristics_photon_beam(energy_spread=energy_spread),
+        }
+
+    def _characteristics_electron_beam(self) -> dict:
+        """
+        Build the electron-beam characteristics block.
+        """
+        return {
+            "sigma_x": self.e_x,
+            "sigma_y": self.e_y,
+            "sigma_xp": self.e_xp,
+            "sigma_yp": self.e_yp,
+        }
+
+    def _characteristics_filament_beam(self) -> dict:
+        """
+        Build the zero-emittance filament photon-beam block using Elleaume.
+        """
+        wavelength = self.resonant_wavelength()
+        length = self.length
+        sigma_u = 2.74 * np.sqrt(wavelength * length) / (4.0 * np.pi)
+        sigma_up = 0.69 * np.sqrt(wavelength / length)
+
+        return {
+            "sigma_u": sigma_u,
+            "sigma_up": sigma_up,
+            "model": "elleaume",
+        }
+
+    def _characteristics_first_ring(self) -> dict:
+        """
+        Build the first-radiation-ring block.
+        """
+        first_ring = (1.0 / self.gamma()) * np.sqrt(
+            (1.0 / self.harmonic) * (1.0 + 0.5 * self.K_total**2)
+        )
+        return {
+            "first_ring": first_ring,
+        }
+
+    def _characteristics_waist(self) -> dict:
+        """
+        Build the photon-beam waist block.
+
+        Waist transport is not reintroduced yet. Placeholder values are returned.
+        """
+        return {
+            "waist_x": 0.0,
+            "waist_y": 0.0,
+            "model": "placeholder",
+        }
+
+    def _characteristics_photon_beam(self, *, energy_spread: bool) -> dict:
+        """
+        Build the convolved photon-beam block.
+        """
+        filament = self._characteristics_filament_beam()
+        sigma_u = filament["sigma_u"]
+        sigma_up = filament["sigma_up"]
+
+        if energy_spread:
+            sigma_x, sigma_y, sigma_xp, sigma_yp = self._photon_beam_tanaka_kitamura(
+                sigma_u=sigma_u,
+                sigma_up=sigma_up,
+            )
+            model = "tanaka_kitamura"
+        else:
+            sigma_x, sigma_y, sigma_xp, sigma_yp = self._photon_beam_gaussian_convolution(
+                sigma_u=sigma_u,
+                sigma_up=sigma_up,
+            )
+            model = "gaussian_convolution"
+
+        return {
+            "sigma_x": sigma_x,
+            "sigma_y": sigma_y,
+            "sigma_xp": sigma_xp,
+            "sigma_yp": sigma_yp,
+            "model": model,
+        }
+
+    def _photon_beam_gaussian_convolution(
+        self,
+        *,
+        sigma_u: float,
+        sigma_up: float,
+    ) -> tuple[float, float, float, float]:
+        """
+        Compute photon-beam emittance using Gaussian convolution.
+        """
+        sigma_x = np.sqrt(sigma_u**2 + self.e_x**2)
+        sigma_y = np.sqrt(sigma_u**2 + self.e_y**2)
+        sigma_xp = np.sqrt(sigma_up**2 + self.e_xp**2)
+        sigma_yp = np.sqrt(sigma_up**2 + self.e_yp**2)
+        return sigma_x, sigma_y, sigma_xp, sigma_yp
+
+    def _photon_beam_tanaka_kitamura(
+        self,
+        *,
+        sigma_u: float,
+        sigma_up: float,
+    ) -> tuple[float, float, float, float]:
+        """
+        Compute photon-beam emittance including energy-spread effects.
+        """
+        def _qa(es: float) -> float:
+            if es <= 0:
+                es = 1e-10
+            numerator = 2.0 * es**2
+            denominator = (
+                -1.0
+                + np.exp(-2.0 * es**2)
+                + np.sqrt(2.0 * np.pi) * es * erf(np.sqrt(2.0) * es)
+            )
+            return np.sqrt(numerator / denominator)
+
+        def _qs(es: float) -> float:
+            qs = 2.0 * (_qa(es / 4.0)) ** (2.0 / 3.0)
+            return max(qs, 2.0)
+
+        sigma_x = np.sqrt(sigma_u**2 * _qs(self.energy_spread) + self.e_x**2)
+        sigma_y = np.sqrt(sigma_u**2 * _qs(self.energy_spread) + self.e_y**2)
+        sigma_xp = np.sqrt(sigma_up**2 * _qa(self.energy_spread) + self.e_xp**2)
+        sigma_yp = np.sqrt(sigma_up**2 * _qa(self.energy_spread) + self.e_yp**2)
+        return sigma_x, sigma_y, sigma_xp, sigma_yp
+
     def _normalize_polarization(self, polarization: str | None) -> str | None:
         """
         Normalize the polarization flag.
@@ -816,8 +1061,7 @@ class UndulatorSource(SynchrotronSource):
         pol = polarization.strip().upper()
         if pol not in self._ALL_POLARIZATIONS:
             raise ValueError(
-                f"Invalid polarization '{polarization}'. Use one of "
-                f"{sorted(self._ALL_POLARIZATIONS)}."
+                f"Invalid polarization '{polarization}'. Use one of {sorted(self._ALL_POLARIZATIONS)}."
             )
         return pol
 
