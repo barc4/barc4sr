@@ -150,13 +150,13 @@ def barc4sr_dictionary(light_source: object, observation_point: float,
         beamline['NPeriods'] = light_source.MagneticStructure.number_of_periods
         beamline['PeriodID'] = light_source.MagneticStructure.period_length
 
-        beamline['Kh'] = light_source.MagneticStructure.K_horizontal
-        beamline['MagFieldPhaseH'] = light_source.MagneticStructure.B_horizontal_phase
-        beamline['MagFieldSymmetryH'] = light_source.MagneticStructure.B_horizontal_symmetry
+        beamline['Kh'] = light_source.K_horizontal
+        beamline['MagFieldPhaseH'] = light_source.phase_horizontal
+        beamline['MagFieldSymmetryH'] = light_source.symmetry_horizontal
 
-        beamline['Kv'] = light_source.MagneticStructure.K_vertical
-        beamline['MagFieldPhaseV'] = light_source.MagneticStructure.B_vertical_phase
-        beamline['MagFieldSymmetryV'] = light_source.MagneticStructure.B_vertical_symmetry
+        beamline['Kv'] = light_source.K_vertical
+        beamline['MagFieldPhaseV'] = light_source.phase_vertical
+        beamline['MagFieldSymmetryV'] = light_source.symmetry_vertical
     # bending magnet        
     if light_source.MagneticStructure.CLASS_NAME.startswith("B"):
         beamline['Class'] = 'bm'

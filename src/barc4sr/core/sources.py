@@ -511,10 +511,6 @@ class BendingMagnetSource(SynchrotronSource):
 class UndulatorSource(SynchrotronSource):
     """
     SR undulator source.
-
-    The magnetic-structure container stores only immutable structural parameters.
-    The undulator operating point is therefore stored in this source instance via
-    the peak magnetic fields and their phase offsets.
     """
 
     _NAMED_POLARIZATIONS = {"LH", "LV", "L45", "L135", "CR", "CL"}
@@ -541,6 +537,8 @@ class UndulatorSource(SynchrotronSource):
         self.B_vertical = 0.0
         self.phase_horizontal = 0.0
         self.phase_vertical = 0.0
+        self.symmetry_horizontal = -1
+        self.symmetry_vertical = -1
         self.harmonic = 1
         self.polarization = "LH"
         self._characteristics: dict | None = None
@@ -561,6 +559,8 @@ class UndulatorSource(SynchrotronSource):
         K_vertical: float | None = None,
         phase_horizontal: float | None = None,
         phase_vertical: float | None = None,
+        symmetry_horizontal: int | None = None,
+        symmetry_vertical: int | None = None,
         even_harmonics: bool = False,
         K_min: float = 0.05,
         max_harmonic: int = 15,
@@ -730,6 +730,16 @@ class UndulatorSource(SynchrotronSource):
         self.B_vertical = Bv
         self.phase_horizontal = ph
         self.phase_vertical = pv
+        if symmetry_horizontal is not None:
+            self.symmetry_horizontal = self._validate_symmetry(
+                symmetry_horizontal,
+                label="symmetry_horizontal",
+            )
+        if symmetry_vertical is not None:
+            self.symmetry_vertical = self._validate_symmetry(
+                symmetry_vertical,
+                label="symmetry_vertical",
+            )
         self.harmonic = resolved_harmonic
         self.polarization = polarization_val
         self._characteristics = None
@@ -860,6 +870,7 @@ class UndulatorSource(SynchrotronSource):
         print(f"\t>> dS                : {self.dS:.6f} m")
         print(f"\t>> (Bh, Bv)          : ({self.B_horizontal:.6f} T , {self.B_vertical:.6f} T)")
         print(f"\t>> (ph, pv)          : ({self.phase_horizontal:.6f} rad , {self.phase_vertical:.6f} rad)")
+        print(f"\t>> (sh, sv)          : ({self.symmetry_horizontal:d} , {self.symmetry_vertical:d})")
         print(f"\t>> (Kh, Kv)          : ({self.K_horizontal:.6f} , {self.K_vertical:.6f})")
         print(f"\t>> wavelength (res.) : {self.resonant_wavelength():.3e} m")
         print(f"\t>> energy (res.)     : {self.resonant_energy():.3f} eV")
@@ -1076,12 +1087,24 @@ class UndulatorSource(SynchrotronSource):
         if n < 1:
             raise ValueError("harmonic must be >= 1.")
         return n
+    
+    def _validate_symmetry(self, symmetry: int, *, label: str) -> int:
+        """
+        Validate the field-parity symmetry flag:
+            - 1  -> symmetric     (B ~ cos(2*pi*n*z/period + phase))
+            - -1 -> antisymmetric (B ~ sin(2*pi*n*z/period + phase))
+        """
+        try:
+            value = int(symmetry)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} must be either -1 or 1.") from exc
 
-    def _fields_from_scalar_B(
-        self,
-        *,
-        B: float,
-        polarization: str,
+        if value not in (-1, 1):
+            raise ValueError(f"{label} must be either -1 or 1.")
+
+        return value
+
+    def _fields_from_scalar_B(self, *, B: float, polarization: str,
     ) -> tuple[float, float, float, float]:
         """
         Build a named polarization state from a scalar magnetic-field amplitude.
@@ -1090,11 +1113,7 @@ class UndulatorSource(SynchrotronSource):
             raise ValueError("Scalar B must be >= 0.")
         return self._named_state_from_scalar(amplitude=float(B), polarization=polarization)
 
-    def _fields_from_scalar_K(
-        self,
-        *,
-        K: float,
-        polarization: str,
+    def _fields_from_scalar_K(self, *, K: float, polarization: str,
     ) -> tuple[float, float, float, float]:
         """
         Build a named polarization state from a scalar deflection parameter.
