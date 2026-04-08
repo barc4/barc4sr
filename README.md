@@ -15,10 +15,11 @@ It provides:
 
 ### Core modelling
 - **ElectronBeam**: canonical storage of second-order moments  
-- **MagneticStructure**: bending magnets, arbitrary fields; undulators/ wigglers planned  
-- **SynchrotronSource** hierarchy:
-  - `BendingMagnetSource`
+- **MagneticStructure**: bending magnets, arbitrary fields; undulators/ wigglers
+- **SynchrotronSource** available:
   - `ArbitraryMagnetSource`
+  - `BendingMagnetSource`
+  - `UndulatorSource`
 
 ### Magnetic-field generation
 - `bm_magnetic_field()` – soft-edge bending magnet model  
