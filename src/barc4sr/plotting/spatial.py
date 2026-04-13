@@ -71,15 +71,15 @@ def plot_wavefront(
                 - 'igor' : black → navy → darkred → red → orange → yellow
             Default is 'jet'.
         xmin : float, optional
-            Minimum x-axis limit in the displayed axis unit:
-                - mm or µm if observation_plane is None
-                - mrad or µrad if observation_plane is not None
+            Minimum x-axis limit in base units:
+                - meters if observation_plane is None
+                - radians if observation_plane is not None
         xmax : float, optional
-            Maximum x-axis limit in the displayed axis unit.
+            Maximum x-axis limit in base units.
         ymin : float, optional
-            Minimum y-axis limit in the displayed axis unit.
+            Minimum y-axis limit in base units.
         ymax : float, optional
-            Maximum y-axis limit in the displayed axis unit.
+            Maximum y-axis limit in base units.
         threshold : float | None, optional
             Relative intensity threshold used to mask low-signal regions in the phase.
     """
@@ -87,7 +87,7 @@ def plot_wavefront(
     vmin = kwargs.get("vmin", None)
     vmax = kwargs.get("vmax", None)
     unwrap = kwargs.get("unwrap", True)
-    threshold= kwargs.get("threshold", None)
+    threshold = kwargs.get("threshold", None)
     cmap_name = kwargs.get("cmap", "jet")
     xmin = kwargs.get("xmin", None)
     xmax = kwargs.get("xmax", None)
@@ -106,29 +106,17 @@ def plot_wavefront(
     x_m = wfr["axis"]["x"]
     y_m = wfr["axis"]["y"]
 
-    x_mm = x_m * 1e3
-    y_mm = y_m * 1e3
-
-    dx_mm = x_m[1] - x_m[0]
-    dy_mm = y_m[1] - y_m[0]
+    dx_m = x_m[1] - x_m[0]
+    dy_m = y_m[1] - y_m[0]
 
     if observation_plane is not None:
-        x_rad = 2 * np.arctan(x_m / 2 / observation_plane)
-        y_rad = 2 * np.arctan(y_m / 2 / observation_plane)
+        x_rad = 2 * np.arctan(x_m / (2 * observation_plane))
+        y_rad = 2 * np.arctan(y_m / (2 * observation_plane))
 
-        if xmin is not None or xmax is not None:
-            x_range_min_rad = xmin if xmin is not None else x_rad.min()
-            x_range_max_rad = xmax if xmax is not None else x_rad.max()
-        else:
-            x_range_min_rad = x_rad.min()
-            x_range_max_rad = x_rad.max()
-
-        if ymin is not None or ymax is not None:
-            y_range_min_rad = ymin if ymin is not None else y_rad.min()
-            y_range_max_rad = ymax if ymax is not None else y_rad.max()
-        else:
-            y_range_min_rad = y_rad.min()
-            y_range_max_rad = y_rad.max()
+        x_range_min_rad = xmin if xmin is not None else x_rad.min()
+        x_range_max_rad = xmax if xmax is not None else x_rad.max()
+        y_range_min_rad = ymin if ymin is not None else y_rad.min()
+        y_range_max_rad = ymax if ymax is not None else y_rad.max()
 
         range_x_rad = x_range_max_rad - x_range_min_rad
         range_y_rad = y_range_max_rad - y_range_min_rad
@@ -144,28 +132,24 @@ def plot_wavefront(
         x = x_rad * axis_factor
         y = y_rad * axis_factor
 
+        x_lim_display = [
+            x_range_min_rad * axis_factor,
+            x_range_max_rad * axis_factor,
+        ]
+        y_lim_display = [
+            y_range_min_rad * axis_factor,
+            y_range_max_rad * axis_factor,
+        ]
+
         dx_mrad_mean = np.mean(np.diff(x_rad * 1e3))
         dy_mrad_mean = np.mean(np.diff(y_rad * 1e3))
 
-        intensity_factor = (dx_mm * 1e3 * dy_mm * 1e3) / (dx_mrad_mean * dy_mrad_mean)
+        intensity_factor = ((dx_m * 1e3) * (dy_m * 1e3)) / (dx_mrad_mean * dy_mrad_mean)
         intensity_unit = r"ph/s/mrad$^2$/0.1%bw"
 
         if xmin is not None or xmax is not None or ymin is not None or ymax is not None:
-            x_lim_display = [
-                xmin if xmin is not None else x.min(),
-                xmax if xmax is not None else x.max(),
-            ]
-            y_lim_display = [
-                ymin if ymin is not None else y.min(),
-                ymax if ymax is not None else y.max(),
-            ]
-
-            x_lim_rad = [xl / axis_factor for xl in x_lim_display]
-            y_lim_rad = [yl / axis_factor for yl in y_lim_display]
-
-            x_lim_m = [2 * observation_plane * np.tan(xl / 2) for xl in x_lim_rad]
-            y_lim_m = [2 * observation_plane * np.tan(yl / 2) for yl in y_lim_rad]
-
+            x_lim_m = [2 * observation_plane * np.tan(val / 2) for val in (x_range_min_rad, x_range_max_rad)]
+            y_lim_m = [2 * observation_plane * np.tan(val / 2) for val in (y_range_min_rad, y_range_max_rad)]
             hor_slit = tuple(x_lim_m)
             ver_slit = tuple(y_lim_m)
         else:
@@ -173,19 +157,10 @@ def plot_wavefront(
             ver_slit = None
 
     else:
-        if xmin is not None or xmax is not None:
-            x_range_min_m = xmin * 1e-3 if xmin is not None else x_m.min()
-            x_range_max_m = xmax * 1e-3 if xmax is not None else x_m.max()
-        else:
-            x_range_min_m = x_m.min()
-            x_range_max_m = x_m.max()
-
-        if ymin is not None or ymax is not None:
-            y_range_min_m = ymin * 1e-3 if ymin is not None else y_m.min()
-            y_range_max_m = ymax * 1e-3 if ymax is not None else y_m.max()
-        else:
-            y_range_min_m = y_m.min()
-            y_range_max_m = y_m.max()
+        x_range_min_m = xmin if xmin is not None else x_m.min()
+        x_range_max_m = xmax if xmax is not None else x_m.max()
+        y_range_min_m = ymin if ymin is not None else y_m.min()
+        y_range_max_m = ymax if ymax is not None else y_m.max()
 
         range_x_m = x_range_max_m - x_range_min_m
         range_y_m = y_range_max_m - y_range_min_m
@@ -201,40 +176,31 @@ def plot_wavefront(
         x = x_m * axis_factor
         y = y_m * axis_factor
 
+        x_lim_display = [
+            x_range_min_m * axis_factor,
+            x_range_max_m * axis_factor,
+        ]
+        y_lim_display = [
+            y_range_min_m * axis_factor,
+            y_range_max_m * axis_factor,
+        ]
+
         intensity_factor = 1.0
         intensity_unit = r"ph/s/mm$^2$/0.1%bw"
 
         if xmin is not None or xmax is not None or ymin is not None or ymax is not None:
-            x_lim_display = [
-                xmin if xmin is not None else x.min(),
-                xmax if xmax is not None else x.max(),
-            ]
-            y_lim_display = [
-                ymin if ymin is not None else y.min(),
-                ymax if ymax is not None else y.max(),
-            ]
-
-            hor_slit = tuple([xl / axis_factor for xl in x_lim_display])
-            ver_slit = tuple([yl / axis_factor for yl in y_lim_display])
+            hor_slit = (x_range_min_m, x_range_max_m)
+            ver_slit = (y_range_min_m, y_range_max_m)
         else:
             hor_slit = None
             ver_slit = None
 
     X, Y = np.meshgrid(x, y)
 
-    if xmin is not None or xmax is not None:
-        x_range_min = xmin if xmin is not None else x.min()
-        x_range_max = xmax if xmax is not None else x.max()
-    else:
-        x_range_min = x.min()
-        x_range_max = x.max()
-
-    if ymin is not None or ymax is not None:
-        y_range_min = ymin if ymin is not None else y.min()
-        y_range_max = ymax if ymax is not None else y.max()
-    else:
-        y_range_min = y.min()
-        y_range_max = y.max()
+    x_range_min = x_lim_display[0]
+    x_range_max = x_lim_display[1]
+    y_range_min = y_lim_display[0]
+    y_range_max = y_lim_display[1]
 
     fctr = (x_range_max - x_range_min) / (y_range_max - y_range_min)
 
@@ -246,7 +212,7 @@ def plot_wavefront(
             flux_dict = integrate_wavefront_window(wfr, hor_slit, ver_slit)
             flux = flux_dict[pol]
         else:
-            flux = np.sum(data * dx_mm * 1e3 * dy_mm * 1e3)
+            flux = np.sum(data * (dx_m * 1e3) * (dy_m * 1e3))
 
         data_converted = data * intensity_factor
 
@@ -267,9 +233,11 @@ def plot_wavefront(
             norm = None
             vmin_lin = vmin
             vmax_lin = vmax
+
         if threshold is not None:
             mask = data_masked >= threshold * data_masked.max()
             data_masked[~mask] = threshold * data_masked.max()
+
         fig = plt.figure(figsize=(4.2 * fctr, 4))
         fig.suptitle(
             f"({pol}) | flux: {flux:.2e} ph/s/0.1%bw",
@@ -294,13 +262,13 @@ def plot_wavefront(
         ax.set_ylabel(f"y [{unit_label}]")
 
         if xmin is not None:
-            ax.set_xlim(left=xmin)
+            ax.set_xlim(left=x_lim_display[0])
         if xmax is not None:
-            ax.set_xlim(right=xmax)
+            ax.set_xlim(right=x_lim_display[1])
         if ymin is not None:
-            ax.set_ylim(bottom=ymin)
+            ax.set_ylim(bottom=y_lim_display[0])
         if ymax is not None:
-            ax.set_ylim(top=ymax)
+            ax.set_ylim(top=y_lim_display[1])
 
         ax.grid(True, linestyle=":", linewidth=0.5)
 
@@ -332,9 +300,9 @@ def plot_wavefront(
             ax1.tick_params(direction="in", top=True, right=True)
 
             if xmin is not None:
-                ax1.set_xlim(left=xmin)
+                ax1.set_xlim(left=x_lim_display[0])
             if xmax is not None:
-                ax1.set_xlim(right=xmax)
+                ax1.set_xlim(right=x_lim_display[1])
 
             ax2.set_title("Ver. cut (x=0)")
             ax2.set_xlabel(f"y [{unit_label}]")
@@ -342,9 +310,9 @@ def plot_wavefront(
             ax2.tick_params(direction="in", top=True, right=True)
 
             if ymin is not None:
-                ax2.set_xlim(left=ymin)
+                ax2.set_xlim(left=y_lim_display[0])
             if ymax is not None:
-                ax2.set_xlim(right=ymax)
+                ax2.set_xlim(right=y_lim_display[1])
 
             plt.tight_layout(rect=[0, 0, 1, 0.95])
             plt.show()
@@ -359,7 +327,6 @@ def plot_wavefront(
                 cmapref = "coolwarm"
 
             if threshold is not None:
-                # mask = data_masked >= threshold * data_masked.max()
                 phase[~mask] = np.nan
 
             Rx = wfr.get("Rx", None)
@@ -387,13 +354,13 @@ def plot_wavefront(
             ax.set_ylabel(f"y [{unit_label}]")
 
             if xmin is not None:
-                ax.set_xlim(left=xmin)
+                ax.set_xlim(left=x_lim_display[0])
             if xmax is not None:
-                ax.set_xlim(right=xmax)
+                ax.set_xlim(right=x_lim_display[1])
             if ymin is not None:
-                ax.set_ylim(bottom=ymin)
+                ax.set_ylim(bottom=y_lim_display[0])
             if ymax is not None:
-                ax.set_ylim(top=ymax)
+                ax.set_ylim(top=y_lim_display[1])
 
             ax.grid(True, linestyle=":", linewidth=0.5)
             cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
@@ -412,9 +379,9 @@ def plot_wavefront(
                 ax1.tick_params(direction="in", top=True, right=True)
 
                 if xmin is not None:
-                    ax1.set_xlim(left=xmin)
+                    ax1.set_xlim(left=x_lim_display[0])
                 if xmax is not None:
-                    ax1.set_xlim(right=xmax)
+                    ax1.set_xlim(right=x_lim_display[1])
 
                 ax2.plot(y, phase[:, ix0], color="darkred", lw=1.5)
                 ax2.set_title("Ver. cut (x=0)")
@@ -423,12 +390,13 @@ def plot_wavefront(
                 ax2.tick_params(direction="in", top=True, right=True)
 
                 if ymin is not None:
-                    ax2.set_xlim(left=ymin)
+                    ax2.set_xlim(left=y_lim_display[0])
                 if ymax is not None:
-                    ax2.set_xlim(right=ymax)
+                    ax2.set_xlim(right=y_lim_display[1])
 
                 plt.tight_layout(rect=[0, 0, 1, 0.95])
                 plt.show()
+
 
 def plot_complex_wavefront(
     wfr: dict,
