@@ -30,6 +30,8 @@ if USE_SRWLIB is False:
 
 CHARGE = physical_constants["atomic unit of charge"][0]
 
+_BARCVERSION = '20260413'
+
 # ---------------------------------------------------------------------------
 # electron trajectory
 # ---------------------------------------------------------------------------
@@ -109,7 +111,7 @@ def write_electron_trajectory(file_name:str, eTraj: srwlib.SRWLPrtTrj, energy: f
     if file_name is not None:
         with h5.File(f"{file_name}_eTraj.h5", "w") as f:
             f.attrs["barc4sr_calc"] = "electron_trajectory"
-            f.attrs["barc4sr_version"] = "1.0"
+            f.attrs["barc4sr_version"] = _BARCVERSION
 
             g_t = f.create_group("eTraj")
             for key, arr in eTraj_dict["eTraj"].items():
@@ -298,6 +300,7 @@ def write_wavefront(
     selected_polarisations: list,
     number_macro_electrons: int,
     propagation_distance: float | None = None,
+    threshold: float | None = None
 ) -> dict:
     """
     Write wavefront data (intensity, phase, and wavefront object) to an HDF5
@@ -318,7 +321,8 @@ def write_wavefront(
     propagation_distance : float or None, optional
         Propagation distance used for curvature estimation. If None,
         Rx and Ry are taken from the wavefront object itself.
-
+    threshold : float | None, optional
+        Relative intensity threshold used to mask low-signal regions in the phase.
     Returns
     -------
     dict
@@ -365,18 +369,23 @@ def write_wavefront(
     wfrDict["energy"] = wfr.mesh.eStart
     wfrDict["intensity"] = {}
     wfrDict["phase"] = {}
+    wfrDict["meta"] = {"threshold": threshold}
     wfrDict["Rx"], wfrDict["Ry"] = Rx, Ry
 
     _inIntType = int(number_macro_electrons)
     _inDepType = 3
-
-    quadratic_phase_term = srwlib.SRWLOptL(_Fx=Rx, _Fy=Ry)
-    pp_spherical_wave =  [0, 0, 1.0, 1, 0, 1., 1., 1., 1., 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    OE = [quadratic_phase_term]
-    PP = [pp_spherical_wave]
     
-    optBL = srwlib.SRWLOptC(OE, PP)
-    srwlib.srwl.PropagElecField(wfr_qpt, optBL)
+    if np.abs(Rx) <1e-3 or np.abs(Ry)<1e-3:
+        wfrDict["meta"].update({"residual_phase": False})
+    else:
+        wfrDict["meta"].update({"residual_phase": True})
+
+        quadratic_phase_term = srwlib.SRWLOptL(_Fx=Rx, _Fy=Ry)
+        pp_spherical_wave =  [0, 0, 1.0, 1, 0, 1., 1., 1., 1., 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        OE = [quadratic_phase_term]
+        PP = [pp_spherical_wave]
+        optBL = srwlib.SRWLOptC(OE, PP)
+        srwlib.srwl.PropagElecField(wfr_qpt, optBL)
 
     for polarisation, index in zip(selected_polarisations, selected_indices):
         _inPol = index
@@ -391,12 +400,15 @@ def write_wavefront(
         srwlib.srwl.CalcIntFromElecField(arPh, wfr_qpt, _inPol, 4, _inDepType, 
                                          wfr_qpt.mesh.eStart, 0, 0)
         phase = np.asarray(arPh, dtype="float64").reshape((wfr_qpt.mesh.ny, wfr_qpt.mesh.nx))
+        if threshold is not None:
+            mask = intensity >= threshold * intensity.max()
+            phase[~mask] = np.nan
         wfrDict["phase"][polarisation] = phase
 
     if file_name is not None:
         with h5.File(f"{file_name}_wfr.h5", "w") as f:
             f.attrs["barc4sr_calc"] = "wavefront"
-            f.attrs["barc4sr_version"] = "1.0"
+            f.attrs["barc4sr_version"] = _BARCVERSION
 
             g_axis = f.create_group("axis")
             g_axis.create_dataset("x", data=wfrDict["axis"]["x"])
@@ -408,6 +420,8 @@ def write_wavefront(
             g_meta.attrs["Ry"] = float(Ry)
             g_meta.attrs["n_macro_electrons"] = int(number_macro_electrons)
             g_meta.attrs["polarisations"] = ",".join(selected_polarisations)
+            g_meta.attrs["threshold"] = np.nan if threshold is None else float(threshold)
+            g_meta.attrs["residual_phase"] = bool(wfrDict["meta"]["residual_phase"])
 
             g_int = f.create_group("intensity")
             for pol, img in wfrDict["intensity"].items():
@@ -468,6 +482,11 @@ def read_wavefront(file_name: str) -> dict:
         g_phase = f["phase"]
         phase = {pol: g_phase[pol][()] for pol in g_phase.keys()}
 
+        meta = {}
+        if "meta" in f:
+            g_meta = f["meta"]
+            meta = dict(g_meta.attrs)
+
         wfr = None
         if "wfr" in f:
             wfr = pickle.loads(f["wfr"][()].tobytes())
@@ -484,6 +503,7 @@ def read_wavefront(file_name: str) -> dict:
         "Ry": Ry,
         "intensity": intensity,
         "phase": phase,
+        "meta": meta,
     }
 
 # ---------------------------------------------------------------------------
@@ -560,7 +580,7 @@ def write_power_density(
     if file_name is not None:
         with h5.File(f"{file_name}_power_density.h5", "w") as f:
             f.attrs["barc4sr_calc"] = "power_density"
-            f.attrs["barc4sr_version"] = "1.0"
+            f.attrs["barc4sr_version"] = _BARCVERSION
 
             f_axis = f.create_group("axis")
             f_axis.create_dataset("x", data=pwrDict["axis"]["x"])
@@ -692,7 +712,7 @@ def write_spectrum(file_name: str, spectrum: dict) -> dict:
     if file_name is not None:
         with h5.File(f"{file_name}_spectrum.h5", "w") as f:
             f.attrs["barc4sr_calc"] = "spectrum"
-            f.attrs["barc4sr_version"] = "1.0"
+            f.attrs["barc4sr_version"] = _BARCVERSION
 
             spec_group = f.create_group("spectrum")
 
@@ -823,7 +843,7 @@ def write_cmd(file_name: str, cmd: dict) -> dict:
     if file_name is not None:
         with h5.File(f"{file_name}_cmd.h5", "w") as f:
             f.attrs["barc4sr_calc"] = "cmd"
-            f.attrs["barc4sr_version"] = "1.0"
+            f.attrs["barc4sr_version"] = _BARCVERSION
 
             f.attrs["energy"] = float(cmdDict["energy"])
 
