@@ -318,6 +318,7 @@ def plot_wavefront(
             plt.show()
 
         if show_phase:
+
             phase = wfr["phase"][pol].copy()
             if unwrap:
                 phase = unwrap_phase(phase)
@@ -328,6 +329,22 @@ def plot_wavefront(
 
             if threshold is not None:
                 phase[~mask] = np.nan
+
+            if unwrap:
+                phase -= np.nanpercentile(phase, 0.5)
+
+            vmin = np.nanpercentile(phase, 0.5)
+            vmax = np.nanpercentile(phase, 99.5)
+
+            if vmax > 0:
+                vmax *= 1.0005
+            else:
+                vmax *= 0.9995
+
+            if vmin > 0:
+                vmin *= 0.9995
+            else:
+                vmin *= 1.0005
 
             Rx = wfr.get("Rx", None)
             Ry = wfr.get("Ry", None)
@@ -348,7 +365,7 @@ def plot_wavefront(
                 )
 
             ax = fig.add_subplot(111)
-            im = ax.pcolormesh(X, Y, phase, shading="auto", cmap=cmapref)
+            im = ax.pcolormesh(X, Y, phase, shading="auto", cmap=cmapref, vmin=vmin, vmax=vmax)
             ax.set_aspect("equal")
             ax.set_xlabel(f"x [{unit_label}]")
             ax.set_ylabel(f"y [{unit_label}]")
@@ -383,6 +400,8 @@ def plot_wavefront(
                 if xmax is not None:
                     ax1.set_xlim(right=x_lim_display[1])
 
+                ax1.set_ylim(vmin, vmax)
+
                 ax2.plot(y, phase[:, ix0], color="darkred", lw=1.5)
                 ax2.set_title("Ver. cut (x=0)")
                 ax2.set_xlabel(f"y [{unit_label}]")
@@ -393,6 +412,8 @@ def plot_wavefront(
                     ax2.set_xlim(left=y_lim_display[0])
                 if ymax is not None:
                     ax2.set_xlim(right=y_lim_display[1])
+
+                ax2.set_ylim(vmin, vmax)
 
                 plt.tight_layout(rect=[0, 0, 1, 0.95])
                 plt.show()

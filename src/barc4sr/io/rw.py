@@ -16,6 +16,7 @@ import h5py as h5
 import numpy as np
 import scipy.integrate as integrate
 from scipy.constants import physical_constants
+from skimage.restoration import unwrap_phase
 
 from barc4sr.core.energy import get_gamma
 
@@ -300,7 +301,8 @@ def write_wavefront(
     selected_polarisations: list,
     number_macro_electrons: int,
     propagation_distance: float | None = None,
-    threshold: float | None = None
+    unwrap: bool = True,
+    threshold: float | None = None,
 ) -> dict:
     """
     Write wavefront data (intensity, phase, and wavefront object) to an HDF5
@@ -321,6 +323,8 @@ def write_wavefront(
     propagation_distance : float or None, optional
         Propagation distance used for curvature estimation. If None,
         Rx and Ry are taken from the wavefront object itself.
+    unwrap : bool, optional
+        Whether to unwrap the phase.
     threshold : float | None, optional
         Relative intensity threshold used to mask low-signal regions in the phase.
     Returns
@@ -369,7 +373,7 @@ def write_wavefront(
     wfrDict["energy"] = wfr.mesh.eStart
     wfrDict["intensity"] = {}
     wfrDict["phase"] = {}
-    wfrDict["meta"] = {"threshold": threshold}
+    wfrDict["meta"] = {"threshold": threshold, "unwrap": unwrap}
     wfrDict["Rx"], wfrDict["Ry"] = Rx, Ry
 
     _inIntType = int(number_macro_electrons)
@@ -402,7 +406,7 @@ def write_wavefront(
         phase = np.asarray(arPh, dtype="float64").reshape((wfr_qpt.mesh.ny, wfr_qpt.mesh.nx))
         if threshold is not None:
             mask = intensity >= threshold * intensity.max()
-            phase[~mask] = np.nan
+            phase[~mask] = np.nan       
         wfrDict["phase"][polarisation] = phase
 
     if file_name is not None:
@@ -422,6 +426,7 @@ def write_wavefront(
             g_meta.attrs["polarisations"] = ",".join(selected_polarisations)
             g_meta.attrs["threshold"] = np.nan if threshold is None else float(threshold)
             g_meta.attrs["residual_phase"] = bool(wfrDict["meta"]["residual_phase"])
+            g_meta.attrs["unwrap"] = bool(wfrDict["meta"]["unwrap"])
 
             g_int = f.create_group("intensity")
             for pol, img in wfrDict["intensity"].items():
