@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: CECILL-2.1
-# Copyright (c) 2025 Synchrotron SOLEIL
+# Copyright (c) 2026 ESRF - the European Synchrotron
 
 """
 Public API for barc4sr
@@ -26,31 +26,37 @@ from .core.magnetic_structure import MagneticStructure
 from .core.sources import (
     ArbitraryMagnetSource,
     BendingMagnetSource,
-    SynchrotronSource,
+    UndulatorSource,
 )
 from .io.rw import (
     read_electron_trajectory,
     read_power_density,
     read_wavefront,
+    read_caustic,
     write_electron_trajectory,
     write_power_density,
     write_wavefront,
+    write_caustic,
 )
 from .processing.power import integrate_power_density_window
 from .processing.wavefront import integrate_wavefront_window
 
 __all__ = [
-    # core
-    "ArbitraryMagnetSource",
-    "BendingMagnetSource",
+    # classes
     "ElectronBeam",
     "MagneticStructure",
-    "SynchrotronSource",
+    "ArbitraryMagnetSource",
+    "BendingMagnetSource",
+    "UndulatorSource",
+
+    # magnetic field generators
     "arb_magnetic_field",
     "bm_magnetic_field",
-    "energy_wavelength",
     "multi_arb_magnetic_field",
     "multi_bm_magnetic_field",
+
+    # helper
+    "energy_wavelength",
 
     # calculations
     "electron_trajectory",

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: CECILL-2.1
-# Copyright (c) 2025 Synchrotron SOLEIL
+# Copyright (c) 2026 ESRF - the European Synchrotron
 
 """
 Unified public plotting API for barc4sr.
@@ -16,6 +16,8 @@ from .trajectory import (
 
 from .spatial import (
     plot_wavefront,
+    plot_complex_wavefront,
+    plot_caustic,
     plot_power_density,
     plot_csd,
 )
@@ -35,6 +37,8 @@ __all__ = [
 
     # spatial
     "plot_wavefront",
+    "plot_complex_wavefront",
+    "plot_caustic",
     "plot_power_density",
     "plot_csd",
 

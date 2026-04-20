@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: CECILL-2.1
-# Copyright (c) 2025 Synchrotron SOLEIL
+# Copyright (c) 2026 ESRF - the European Synchrotron
 
 """
 Read/Write helpers for barc4sr results in HDF5 format.
@@ -16,8 +16,9 @@ import h5py as h5
 import numpy as np
 import scipy.integrate as integrate
 from scipy.constants import physical_constants
+from skimage.restoration import unwrap_phase
 
-from barc4sr.core.energy import get_gamma
+from barc4sr.core.energy import get_gamma, energy_wavelength
 
 try:
     import srwpy.srwlib as srwlib
@@ -29,6 +30,8 @@ if USE_SRWLIB is False:
      raise AttributeError("SRW is not available")
 
 CHARGE = physical_constants["atomic unit of charge"][0]
+
+_BARCVERSION = '20260413'
 
 # ---------------------------------------------------------------------------
 # electron trajectory
@@ -109,7 +112,7 @@ def write_electron_trajectory(file_name:str, eTraj: srwlib.SRWLPrtTrj, energy: f
     if file_name is not None:
         with h5.File(f"{file_name}_eTraj.h5", "w") as f:
             f.attrs["barc4sr_calc"] = "electron_trajectory"
-            f.attrs["barc4sr_version"] = "1.0"
+            f.attrs["barc4sr_version"] = _BARCVERSION
 
             g_t = f.create_group("eTraj")
             for key, arr in eTraj_dict["eTraj"].items():
@@ -293,11 +296,13 @@ def read_electron_trajectory_dat(file_path: str) -> dict:
 # ---------------------------------------------------------------------------
    
 def write_wavefront(
-    file_name: str,
+    file_name: str | None,
     wfr: srwlib.SRWLWfr,
     selected_polarisations: list,
     number_macro_electrons: int,
     propagation_distance: float | None = None,
+    unwrap: bool = True,
+    threshold: float | None = None,
 ) -> dict:
     """
     Write wavefront data (intensity, phase, and wavefront object) to an HDF5
@@ -305,9 +310,9 @@ def write_wavefront(
 
     Parameters
     ----------
-    file_name : str
-        Base file path for saving the wavefront data. The data is stored
-        in a file named ``"<file_name>_undulator_wfr.h5"``.
+    file_name : str | None
+        Base file path for saving the wavefront data. If not None, the data is
+        stored in a file named ``"<file_name>_wfr.h5"``.
     wfr : SRWLWfr
         SRW wavefront object containing the simulated electric field.
     selected_polarisations : list or str
@@ -315,9 +320,13 @@ def write_wavefront(
         strings. Accepted values: 'LH', 'LV', 'L45', 'L135', 'CR', 'CL', 'T'.
     number_macro_electrons : int
         Number of macro electrons used in the simulation.
-    propagation_distance : float or None, optional
+    propagation_distance : float | None, optional
         Propagation distance used for curvature estimation. If None,
         Rx and Ry are taken from the wavefront object itself.
+    unwrap : bool, optional
+        Whether to unwrap the phase.
+    threshold : float | None, optional
+        Relative intensity threshold used to mask low-signal regions in the phase.
 
     Returns
     -------
@@ -329,6 +338,7 @@ def write_wavefront(
             - 'Rx', 'Ry': curvature radii [m].
             - 'intensity': {pol: 2D array}.
             - 'phase': {pol: 2D array}.
+            - 'meta': metadata dictionary.
     """
 
     if isinstance(selected_polarisations, str):
@@ -336,9 +346,26 @@ def write_wavefront(
     elif not isinstance(selected_polarisations, list):
         raise ValueError("Input should be a list of strings or a string.")
 
-    for i, s in enumerate(selected_polarisations):
-        if not s.isupper():
-            selected_polarisations[i] = s.upper()
+    selected_polarisations = [pol.upper() for pol in selected_polarisations]
+
+    all_polarisations = ["LH", "LV", "L45", "L135", "CR", "CL", "T"]
+    pol_map = {pol: i for i, pol in enumerate(all_polarisations)}
+
+    valid_polarisations = [pol for pol in selected_polarisations if pol in pol_map]
+
+    if not valid_polarisations:
+        print(">>>>> No valid polarisation found - defaulting to 'T'")
+        return write_wavefront(
+            file_name,
+            wfr,
+            ["T"],
+            number_macro_electrons,
+            propagation_distance=propagation_distance,
+            unwrap=unwrap,
+            threshold=threshold,
+        )
+
+    selected_indices = [pol_map[pol] for pol in valid_polarisations]
 
     wfr_qpt = deepcopy(wfr)
     wfrDict: dict[str, object] = {"wfr": wfr}
@@ -348,55 +375,61 @@ def write_wavefront(
         "y": np.linspace(wfr.mesh.yStart, wfr.mesh.yFin, wfr.mesh.ny),
     }
 
-    all_polarisations = ["LH", "LV", "L45", "L135", "CR", "CL", "T"]
-    pol_map = {pol: i for i, pol in enumerate(all_polarisations)}
-
-    selected_indices = [pol_map[pol] for pol in selected_polarisations if pol in pol_map]
-
-    if not selected_indices:
-        print(">>>>> No valid polarisation found - defaulting to 'T'")
-        return write_wavefront(file_name, wfr, ["T"], number_macro_electrons)
-
     if propagation_distance is None:
         Rx, Ry = wfr.Rx, wfr.Ry
     else:
         Rx, Ry = propagation_distance, propagation_distance
-
-    wfrDict["energy"] = wfr.mesh.eStart
+    energy = wfr.mesh.eStart
+    wfrDict["energy"] = energy
     wfrDict["intensity"] = {}
     wfrDict["phase"] = {}
+    wfrDict["meta"] = {"threshold": threshold, "unwrap": unwrap}
     wfrDict["Rx"], wfrDict["Ry"] = Rx, Ry
 
     _inIntType = int(number_macro_electrons)
-    _inDepType = 3
 
-    quadratic_phase_term = srwlib.SRWLOptL(_Fx=Rx, _Fy=Ry)
-    pp_spherical_wave =  [0, 0, 1.0, 1, 0, 1., 1., 1., 1., 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    OE = [quadratic_phase_term]
-    PP = [pp_spherical_wave]
-    
-    optBL = srwlib.SRWLOptC(OE, PP)
-    srwlib.srwl.PropagElecField(wfr_qpt, optBL)
+    if np.abs(Rx) < 1e-3 or np.abs(Ry) < 1e-3:
+        wfrDict["meta"].update({"residual_phase": False})
+    else:
+        wfrDict["meta"].update({"residual_phase": True})
 
-    for polarisation, index in zip(selected_polarisations, selected_indices):
+        quadratic_phase_term = srwlib.SRWLOptL(_Fx=Rx, _Fy=Ry)
+        pp_quadratic_phase_term = [
+            0, 0, 1.0, 1, 0, 1., 1., 1., 1.,0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            ]
+        OE = [quadratic_phase_term]
+        PP = [pp_quadratic_phase_term]
+        optBL = srwlib.SRWLOptC(OE, PP)
+        srwlib.srwl.PropagElecField(wfr_qpt, optBL)
+
+    for polarisation, index in zip(valid_polarisations, selected_indices):
         _inPol = index
 
-        arInt = array("f", [0]*wfr_qpt.mesh.nx*wfr_qpt.mesh.ny)
-        srwlib.srwl.CalcIntFromElecField(arInt, wfr_qpt, _inPol, _inIntType, _inDepType,
-                                         wfr_qpt.mesh.eStart, 0, 0)
+        arInt = array("f", [0] * wfr_qpt.mesh.nx * wfr_qpt.mesh.ny)
+        srwlib.srwl.CalcIntFromElecField(arInt, wfr_qpt, _inPol, _inIntType, 3, energy, 0, 0, )
         intensity = np.asarray(arInt, dtype="float64").reshape((wfr_qpt.mesh.ny, wfr_qpt.mesh.nx))
         wfrDict["intensity"][polarisation] = intensity
 
         arPh = array("d", [0] * wfr_qpt.mesh.nx * wfr_qpt.mesh.ny)
-        srwlib.srwl.CalcIntFromElecField(arPh, wfr_qpt, _inPol, 4, _inDepType, 
-                                         wfr_qpt.mesh.eStart, 0, 0)
+        srwlib.srwl.CalcIntFromElecField(arPh, wfr_qpt, _inPol, 4, 3, energy, 0, 0, )
         phase = np.asarray(arPh, dtype="float64").reshape((wfr_qpt.mesh.ny, wfr_qpt.mesh.nx))
+
+        if unwrap:
+            phase = unwrap_phase(phase)
+
+        if threshold is not None:
+            mask = intensity >= threshold * intensity.max()
+            phase[~mask] = np.nan
+
+        if unwrap:
+            phase -= np.nanpercentile(phase, 0.1)
+
         wfrDict["phase"][polarisation] = phase
 
     if file_name is not None:
         with h5.File(f"{file_name}_wfr.h5", "w") as f:
             f.attrs["barc4sr_calc"] = "wavefront"
-            f.attrs["barc4sr_version"] = "1.0"
+            f.attrs["barc4sr_version"] = _BARCVERSION
 
             g_axis = f.create_group("axis")
             g_axis.create_dataset("x", data=wfrDict["axis"]["x"])
@@ -407,7 +440,10 @@ def write_wavefront(
             g_meta.attrs["Rx"] = float(Rx)
             g_meta.attrs["Ry"] = float(Ry)
             g_meta.attrs["n_macro_electrons"] = int(number_macro_electrons)
-            g_meta.attrs["polarisations"] = ",".join(selected_polarisations)
+            g_meta.attrs["polarisations"] = ",".join(valid_polarisations)
+            g_meta.attrs["threshold"] = np.nan if threshold is None else float(threshold)
+            g_meta.attrs["residual_phase"] = bool(wfrDict["meta"]["residual_phase"])
+            g_meta.attrs["unwrap"] = bool(wfrDict["meta"]["unwrap"])
 
             g_int = f.create_group("intensity")
             for pol, img in wfrDict["intensity"].items():
@@ -422,6 +458,7 @@ def write_wavefront(
 
     return wfrDict
 
+
 def read_wavefront(file_name: str) -> dict:
     """
     Read wavefront data from an HDF5 file written by ``write_wavefront``
@@ -431,7 +468,7 @@ def read_wavefront(file_name: str) -> dict:
     ----------
     file_name : str
         Path to the HDF5 file containing wavefront data
-        (``*_undulator_wfr.h5``).
+        (``*_wfr.h5``).
 
     Returns
     -------
@@ -443,6 +480,7 @@ def read_wavefront(file_name: str) -> dict:
             - 'Rx', 'Ry': curvature radii [m] (if stored).
             - 'intensity': {pol: 2D numpy arrays}.
             - 'phase': {pol: 2D numpy arrays}.
+            - 'meta': metadata dictionary.
     """
     if not (file_name.endswith("h5") or file_name.endswith("hdf5")):
         raise ValueError("Only HDF5 format supported for this function.")
@@ -468,13 +506,27 @@ def read_wavefront(file_name: str) -> dict:
         g_phase = f["phase"]
         phase = {pol: g_phase[pol][()] for pol in g_phase.keys()}
 
+        meta = {}
+        if "meta" in f:
+            g_meta = f["meta"]
+            meta = dict(g_meta.attrs)
+
         wfr = None
         if "wfr" in f:
             wfr = pickle.loads(f["wfr"][()].tobytes())
 
-    Rx = getattr(wfr, "Rx", None) if wfr is not None else None
-    Ry = getattr(wfr, "Ry", None) if wfr is not None else None
-    energy = getattr(wfr.mesh, "eStart", None) if wfr is not None else None
+    energy = meta.get("energy", None)
+    Rx = meta.get("Rx", None)
+    Ry = meta.get("Ry", None)
+
+    if energy is None and wfr is not None:
+        energy = getattr(wfr.mesh, "eStart", None)
+
+    if Rx is None and wfr is not None:
+        Rx = getattr(wfr, "Rx", None)
+
+    if Ry is None and wfr is not None:
+        Ry = getattr(wfr, "Ry", None)
 
     return {
         "wfr": wfr,
@@ -484,6 +536,255 @@ def read_wavefront(file_name: str) -> dict:
         "Ry": Ry,
         "intensity": intensity,
         "phase": phase,
+        "meta": meta,
+    }
+
+def write_caustic(
+    file_name: str | None,
+    wavefronts: list[dict],
+    threshold: float | None = None,
+) -> dict:
+    """
+    Build a caustic from a list of wavefront dictionaries and optionally
+    write it to an HDF5 file.
+
+    Each input wavefront dictionary MUST contain:
+        - 'axis': {'x', 'y'}
+        - 'intensity': {pol: 2D array}
+        - 'meta': {'z': float}
+        - 'energy'
+
+    Parameters
+    ----------
+    file_name : str or None
+        Base file path. If provided, data is written to
+        ``"<file_name>_caustic.h5"``.
+    wavefronts : list of dict
+        List of wavefront dictionaries (output of `write_wavefront`),
+        each containing a longitudinal position in ``meta['z']``.
+    threshold : float | None, optional
+        Relative intensity threshold applied to each 1D cut. Values below
+        ``threshold * max(cut)`` are set to NaN.
+
+    Returns
+    -------
+    dict
+        Caustic dictionary with keys:
+            - 'axis': {'x', 'y', 'z'}
+            - 'intensity': {'horizontal', 'vertical'} per polarisation
+            - 'meta': {'kind', 'threshold', 'energy'}
+    """
+    if not isinstance(wavefronts, list) or len(wavefronts) == 0:
+        raise ValueError("wavefronts must be a non-empty list.")
+
+    z_list = []
+    energy_list = []
+    pols = None
+
+    for wfr in wavefronts:
+        if "meta" not in wfr or "z" not in wfr["meta"]:
+            raise KeyError("Each wavefront must contain meta['z'].")
+
+        z_list.append(float(wfr["meta"]["z"]))
+
+        if "energy" not in wfr:
+            raise KeyError("Each wavefront must contain 'energy'.")
+        energy_list.append(float(wfr["energy"]))
+
+        if "intensity" not in wfr:
+            raise KeyError("Each wavefront must contain 'intensity'.")
+
+        if pols is None:
+            pols = list(wfr["intensity"].keys())
+        else:
+            if set(pols) != set(wfr["intensity"].keys()):
+                raise ValueError("All wavefronts must share the same polarisations.")
+
+    energy_arr = np.asarray(energy_list)
+    if not np.allclose(energy_arr, energy_arr[0], rtol=1e-6, atol=0):
+        raise ValueError("All wavefronts must have the same photon energy.")
+    energy = energy_arr[0]
+
+    order = np.argsort(z_list)
+    z_sorted = np.asarray(z_list)[order]
+    wavefronts = [wavefronts[i] for i in order]
+
+    dx_all = []
+    dy_all = []
+    xmins, xmaxs = [], []
+    ymins, ymaxs = [], []
+
+    for wfr in wavefronts:
+        x = wfr["axis"]["x"]
+        y = wfr["axis"]["y"]
+
+        dx_all.append(np.abs(x[1] - x[0]))
+        dy_all.append(np.abs(y[1] - y[0]))
+
+        xmins.append(x.min())
+        xmaxs.append(x.max())
+        ymins.append(y.min())
+        ymaxs.append(y.max())
+
+    dx_target = np.min(dx_all)
+    dy_target = np.min(dy_all)
+
+    x_target = np.arange(min(xmins), max(xmaxs) + dx_target, dx_target)
+    y_target = np.arange(min(ymins), max(ymaxs) + dy_target, dy_target)
+
+    nz = len(wavefronts)
+    nx = len(x_target)
+    ny = len(y_target)
+
+    intensity_h = {pol: np.full((nz, nx), np.nan, dtype=float) for pol in pols}
+    intensity_v = {pol: np.full((nz, ny), np.nan, dtype=float) for pol in pols}
+
+    for iz, wfr in enumerate(wavefronts):
+        x = wfr["axis"]["x"]
+        y = wfr["axis"]["y"]
+
+        ix0 = np.argmin(np.abs(x))
+        iy0 = np.argmin(np.abs(y))
+
+        for pol in pols:
+            img = wfr["intensity"][pol]
+
+            hor = img[iy0, :].astype(float)
+            ver = img[:, ix0].astype(float)
+
+            if threshold is not None:
+                if np.nanmax(hor) > 0:
+                    hor = np.where(hor >= threshold * np.nanmax(hor), hor, np.nan)
+                if np.nanmax(ver) > 0:
+                    ver = np.where(ver >= threshold * np.nanmax(ver), ver, np.nan)
+
+            mask_h = ~np.isnan(hor)
+            if np.sum(mask_h) > 1:
+                intensity_h[pol][iz] = np.interp(
+                    x_target,
+                    x[mask_h],
+                    hor[mask_h],
+                    left=np.nan,
+                    right=np.nan,
+                )
+
+            mask_v = ~np.isnan(ver)
+            if np.sum(mask_v) > 1:
+                intensity_v[pol][iz] = np.interp(
+                    y_target,
+                    y[mask_v],
+                    ver[mask_v],
+                    left=np.nan,
+                    right=np.nan,
+                )
+
+    caustic = {
+        "axis": {
+            "x": x_target,
+            "y": y_target,
+            "z": z_sorted,
+        },
+        "intensity": {
+            "horizontal": intensity_h,
+            "vertical": intensity_v,
+        },
+        "meta": {
+            "kind": "caustic",
+            "threshold": threshold,
+            "energy": energy,
+        },
+    }
+
+    if file_name is not None:
+        with h5.File(f"{file_name}_caustic.h5", "w") as f:
+            f.attrs["barc4sr_calc"] = "caustic"
+            f.attrs["barc4sr_version"] = _BARCVERSION
+
+            g_axis = f.create_group("axis")
+            g_axis.create_dataset("x", data=x_target)
+            g_axis.create_dataset("y", data=y_target)
+            g_axis.create_dataset("z", data=z_sorted)
+
+            g_meta = f.create_group("meta")
+            g_meta.attrs["energy"] = float(energy)
+            g_meta.attrs["threshold"] = np.nan if threshold is None else float(threshold)
+
+            g_int = f.create_group("intensity")
+
+            g_h = g_int.create_group("horizontal")
+            for pol, arr in intensity_h.items():
+                g_h.create_dataset(pol, data=arr)
+
+            g_v = g_int.create_group("vertical")
+            for pol, arr in intensity_v.items():
+                g_v.create_dataset(pol, data=arr)
+
+    return caustic
+
+
+def read_caustic(file_name: str) -> dict:
+    """
+    Read caustic data from an HDF5 file written by ``write_caustic``.
+
+    Parameters
+    ----------
+    file_name : str
+        Path to the HDF5 file (``*_caustic.h5``).
+
+    Returns
+    -------
+    dict
+        Caustic dictionary with keys:
+            - 'axis': {'x', 'y', 'z'}
+            - 'intensity': {'horizontal', 'vertical'} per polarisation
+            - 'meta': {'kind', 'threshold', 'energy'}
+    """
+    if not (file_name.endswith("h5") or file_name.endswith("hdf5")):
+        raise ValueError("Only HDF5 format supported.")
+
+    with h5.File(file_name, "r") as f:
+        calc = f.attrs.get("barc4sr_calc", None)
+        if calc not in (None, "caustic"):
+            raise ValueError(f"Unexpected barc4sr_calc={calc!r}.")
+
+        if "axis" not in f:
+            raise ValueError("Missing 'axis' group.")
+        g_axis = f["axis"]
+        x = g_axis["x"][()]
+        y = g_axis["y"][()]
+        z = g_axis["z"][()]
+
+        if "intensity" not in f:
+            raise ValueError("Missing 'intensity' group.")
+
+        g_int = f["intensity"]
+
+        if "horizontal" not in g_int or "vertical" not in g_int:
+            raise ValueError("Invalid intensity structure.")
+
+        intensity_h = {pol: g_int["horizontal"][pol][()] for pol in g_int["horizontal"].keys()}
+        intensity_v = {pol: g_int["vertical"][pol][()] for pol in g_int["vertical"].keys()}
+
+        energy = None
+        threshold = None
+
+        if "meta" in f:
+            g_meta = f["meta"]
+            energy = g_meta.attrs.get("energy", None)
+            thr = g_meta.attrs.get("threshold", np.nan)
+            threshold = None if np.isnan(thr) else float(thr)
+
+    return {
+        "axis": {"x": x, "y": y, "z": z},
+        "intensity": {
+            "horizontal": intensity_h,
+            "vertical": intensity_v,
+        },
+        "meta": {
+            "kind": "caustic",
+            "threshold": threshold,
+            "energy": energy,
+        },
     }
 
 # ---------------------------------------------------------------------------
@@ -560,7 +861,7 @@ def write_power_density(
     if file_name is not None:
         with h5.File(f"{file_name}_power_density.h5", "w") as f:
             f.attrs["barc4sr_calc"] = "power_density"
-            f.attrs["barc4sr_version"] = "1.0"
+            f.attrs["barc4sr_version"] = _BARCVERSION
 
             f_axis = f.create_group("axis")
             f_axis.create_dataset("x", data=pwrDict["axis"]["x"])
@@ -692,7 +993,7 @@ def write_spectrum(file_name: str, spectrum: dict) -> dict:
     if file_name is not None:
         with h5.File(f"{file_name}_spectrum.h5", "w") as f:
             f.attrs["barc4sr_calc"] = "spectrum"
-            f.attrs["barc4sr_version"] = "1.0"
+            f.attrs["barc4sr_version"] = _BARCVERSION
 
             spec_group = f.create_group("spectrum")
 
@@ -823,7 +1124,7 @@ def write_cmd(file_name: str, cmd: dict) -> dict:
     if file_name is not None:
         with h5.File(f"{file_name}_cmd.h5", "w") as f:
             f.attrs["barc4sr_calc"] = "cmd"
-            f.attrs["barc4sr_version"] = "1.0"
+            f.attrs["barc4sr_version"] = _BARCVERSION
 
             f.attrs["energy"] = float(cmdDict["energy"])
 

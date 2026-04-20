@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: CECILL-2.1
-# Copyright (c) 2025 Synchrotron SOLEIL
+# Copyright (c) 2026 ESRF - the European Synchrotron
 
 """
 Radiation calculations.
@@ -22,6 +22,9 @@ from barc4sr.utils.time import print_elapsed_time
 
 from .shared import initialize_calculation
 
+#***********************************************************************************
+# wavefront
+#***********************************************************************************
 
 def wavefront(photon_energy: float,
               observation_point: float,
@@ -117,6 +120,10 @@ def wavefront(photon_energy: float,
     if verbose: print_elapsed_time(t0)
 
     return wfrDict
+
+def caustics():
+    raise NotImplementedError('Ohhh ohhh we are half way there! Ohhh ohhh this function is not implemented yet!')
+
 
 #***********************************************************************************
 # power distribution
