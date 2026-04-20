@@ -38,8 +38,7 @@ def plot_wavefront(
         - If cuts=False: Only the 2D intensity map.
     Phase map is shown at the end if requested, with optional unwrapping.
 
-    Intensity can be shown either in linear scale (default) or logarithmic scale
-    using Matplotlib's log normalization for the 2D map and semilogy for the cuts.
+    Intensity can be shown either in linear scale (default) or logarithmic scale.
 
     Parameters
     ----------
@@ -325,8 +324,15 @@ def plot_wavefront(
 
             phase = wfr["phase"][pol].copy()
             if unwrap:
-                phase = unwrap_phase(phase)
-                phase -= phase[phase.shape[0] // 2, phase.shape[1] // 2]
+                nan_mask = np.isnan(phase)
+                phase_filled = phase.copy()
+                phase_filled[nan_mask] = 0.0
+                phase_unwrapped = unwrap_phase(phase_filled)
+                phase_unwrapped[nan_mask] = np.nan
+                phase = phase_unwrapped
+                cy, cx = phase.shape[0] // 2, phase.shape[1] // 2
+                if not np.isnan(phase[cy, cx]):
+                    phase -= phase[cy, cx]
                 cmapref = "terrain"
             else:
                 cmapref = "coolwarm"
@@ -336,19 +342,6 @@ def plot_wavefront(
 
             if unwrap:
                 phase -= np.nanpercentile(phase, 0.1)
-
-            # vmin = np.nanpercentile(phase, 0.25)
-            # vmax = np.nanpercentile(phase, 99.75)
-
-            # if vmax > 0:
-            #     vmax *= 1.0005
-            # else:
-            #     vmax *= 0.9995
-
-            # if vmin > 0:
-            #     vmin *= 0.9995
-            # else:
-            #     vmin *= 1.0005
 
             Rx = wfr.get("Rx", None)
             Ry = wfr.get("Ry", None)

@@ -18,7 +18,7 @@ import scipy.integrate as integrate
 from scipy.constants import physical_constants
 from skimage.restoration import unwrap_phase
 
-from barc4sr.core.energy import get_gamma
+from barc4sr.core.energy import get_gamma, energy_wavelength
 
 try:
     import srwpy.srwlib as srwlib
@@ -381,6 +381,7 @@ def write_wavefront(
     
     if np.abs(Rx) <1e-3 or np.abs(Ry)<1e-3:
         wfrDict["meta"].update({"residual_phase": False})
+
     else:
         wfrDict["meta"].update({"residual_phase": True})
 
@@ -404,9 +405,14 @@ def write_wavefront(
         srwlib.srwl.CalcIntFromElecField(arPh, wfr_qpt, _inPol, 4, _inDepType, 
                                          wfr_qpt.mesh.eStart, 0, 0)
         phase = np.asarray(arPh, dtype="float64").reshape((wfr_qpt.mesh.ny, wfr_qpt.mesh.nx))
+        if unwrap:
+            phase = unwrap_phase(phase)
         if threshold is not None:
             mask = intensity >= threshold * intensity.max()
             phase[~mask] = np.nan       
+        if unwrap:
+            phase -= np.nanpercentile(phase, 0.1)
+
         wfrDict["phase"][polarisation] = phase
 
     if file_name is not None:
