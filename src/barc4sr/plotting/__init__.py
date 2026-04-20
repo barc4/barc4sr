@@ -17,6 +17,7 @@ from .trajectory import (
 from .spatial import (
     plot_wavefront,
     plot_complex_wavefront,
+    plot_caustic,
     plot_power_density,
     plot_csd,
 )
@@ -37,6 +38,7 @@ __all__ = [
     # spatial
     "plot_wavefront",
     "plot_complex_wavefront",
+    "plot_caustic",
     "plot_power_density",
     "plot_csd",
 

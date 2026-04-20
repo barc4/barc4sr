@@ -7,6 +7,7 @@ Plots for 2D spatial maps: wavefronts, power density, and CSD.
 
 from __future__ import annotations
 
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import LogNorm, hsv_to_rgb
@@ -319,6 +320,9 @@ def plot_wavefront(
 
         if show_phase:
 
+            vmin = None
+            vmax = None
+
             phase = wfr["phase"][pol].copy()
             if unwrap:
                 phase = unwrap_phase(phase)
@@ -331,20 +335,20 @@ def plot_wavefront(
                 phase[~mask] = np.nan
 
             if unwrap:
-                phase -= np.nanpercentile(phase, 0.5)
+                phase -= np.nanpercentile(phase, 0.1)
 
-            vmin = np.nanpercentile(phase, 0.5)
-            vmax = np.nanpercentile(phase, 99.5)
+            # vmin = np.nanpercentile(phase, 0.25)
+            # vmax = np.nanpercentile(phase, 99.75)
 
-            if vmax > 0:
-                vmax *= 1.0005
-            else:
-                vmax *= 0.9995
+            # if vmax > 0:
+            #     vmax *= 1.0005
+            # else:
+            #     vmax *= 0.9995
 
-            if vmin > 0:
-                vmin *= 0.9995
-            else:
-                vmin *= 1.0005
+            # if vmin > 0:
+            #     vmin *= 0.9995
+            # else:
+            #     vmin *= 1.0005
 
             Rx = wfr.get("Rx", None)
             Ry = wfr.get("Ry", None)
@@ -421,31 +425,26 @@ def plot_wavefront(
 
 def plot_complex_wavefront(
     wfr: dict,
-    cuts: bool = True,
     observation_plane: float = None,
     **kwargs,
 ) -> None:
     """
     Plot a complex wavefront using a phase-hue / intensity-brightness encoding.
 
-    For each polarisation in the dictionary, this plots:
-        - If cuts=False: a single 2D complex-field image where phase is encoded
-          as hue and intensity modulates the displayed brightness.
-        - If cuts=True: the same 2D complex-field image, followed by horizontal
-          (y=0) and vertical (x=0) cuts for intensity, and then horizontal and
-          vertical cuts for phase.
+    For each polarisation in the dictionary, this plots a single 2D complex-field
+    image where phase is encoded as hue and intensity modulates the displayed
+    brightness, with two colorbars: one for phase [-pi, pi] and one for
+    normalized intensity [0, 1].
 
     The 2D complex rendering uses a HSV-style mapping:
-        - hue      <- wrapped phase in [-pi, pi]
-        - value    <- normalized intensity
+        - hue        <- wrapped phase in [-pi, pi]
+        - value      <- normalized intensity
         - saturation <- 1 in valid pixels, 0 in masked pixels
 
     Parameters
     ----------
     wfr : dict
         Dictionary returned by `write_wavefront` or `read_wavefront`.
-    cuts : bool, optional
-        Whether to include 1D cuts in the plots (default: True).
     observation_plane : float, optional
         Distance to observation plane in meters. If provided, axes are shown in
         angular units and intensity is converted to ph/s/mrad²/0.1%bw
@@ -453,13 +452,8 @@ def plot_complex_wavefront(
     **kwargs :
         k : float, optional
             Scaling factor for fonts and titles (default: 1).
-        unwrap : bool, optional
-            Whether to unwrap the phase before plotting the phase cuts
-            (default: True).
         xmin : float, optional
-            Minimum x-axis limit in the displayed axis unit:
-                - mm or µm if observation_plane is None
-                - mrad or µrad if observation_plane is not None
+            Minimum x-axis limit in the displayed axis unit.
         xmax : float, optional
             Maximum x-axis limit in the displayed axis unit.
         ymin : float, optional
@@ -468,18 +462,9 @@ def plot_complex_wavefront(
             Maximum y-axis limit in the displayed axis unit.
         threshold : float | None, optional
             Relative intensity threshold used to mask low-signal regions in the
-            complex rendering and in the phase cuts. Pixels below
-            ``threshold * max(intensity)`` are shown in black in the 2D complex
-            image and set to NaN in the phase cuts.
-
-    Notes
-    -----
-    This function does not use the intensity colormap machinery from
-    `plot_wavefront`, because the 2D image is an RGB rendering of the complex
-    field rather than a scalar map.
+            complex rendering.
     """
     k = kwargs.get("k", 1)
-    unwrap = kwargs.get("unwrap", True)
     threshold = kwargs.get("threshold", None)
     xmin = kwargs.get("xmin", None)
     xmax = kwargs.get("xmax", None)
@@ -533,7 +518,6 @@ def plot_complex_wavefront(
         dy_mrad_mean = np.mean(np.diff(y_rad * 1e3))
 
         intensity_factor = (dx_mm * 1e3 * dy_mm * 1e3) / (dx_mrad_mean * dy_mrad_mean)
-        intensity_unit = r"ph/s/mrad$^2$/0.1%bw"
 
         if xmin is not None or xmax is not None or ymin is not None or ymax is not None:
             x_lim_display = [
@@ -587,7 +571,6 @@ def plot_complex_wavefront(
         y = y_m * axis_factor
 
         intensity_factor = 1.0
-        intensity_unit = r"ph/s/mm$^2$/0.1%bw"
 
         if xmin is not None or xmax is not None or ymin is not None or ymax is not None:
             x_lim_display = [
@@ -621,12 +604,20 @@ def plot_complex_wavefront(
 
     fctr = (x_range_max - x_range_min) / (y_range_max - y_range_min)
 
-    meta = wfr.get("meta", {})
-    residual_phase = bool(meta.get("residual_phase", False))
+    _n = 256
+    _hue = np.linspace(0.0, 1.0, _n, endpoint=False)
+    _hsv_strip = np.ones((_n, 1, 3))
+    _hsv_strip[:, 0, 0] = _hue
+    _rgb_strip = hsv_to_rgb(_hsv_strip)[:, 0, :]
+    phase_cmap = mcolors.LinearSegmentedColormap.from_list(
+        "phase_cyclic", _rgb_strip, N=_n
+    )
+
+    intens_cmap = mcolors.LinearSegmentedColormap.from_list(
+        "intensity_bw", ["black", "white"], N=256
+    )
 
     for pol, intensity in wfr["intensity"].items():
-        phase = wfr["phase"][pol].copy()
-
         if hor_slit is not None and ver_slit is not None:
             flux_dict = integrate_wavefront_window(wfr, hor_slit, ver_slit)
             flux = flux_dict[pol]
@@ -640,22 +631,13 @@ def plot_complex_wavefront(
         else:
             mask = np.ones_like(intensity_converted, dtype=bool)
 
-        # ---------------------------------------------------------------------
-        # Complex-field RGB rendering:
-        #   hue        <- wrapped phase
-        #   value      <- normalized intensity
-        #   saturation <- 1 in valid pixels, 0 in masked pixels
-        # ---------------------------------------------------------------------
+        phase = wfr["phase"][pol].copy()
         phase_wrapped = np.angle(np.exp(1j * phase))
         hue = (phase_wrapped + np.pi) / (2 * np.pi)
 
         value = intensity_converted.astype(float)
-        vmax_value = value[mask].max() if np.any(mask) else value.max()
-
-        if vmax_value > 0:
-            value = value / vmax_value
-        else:
-            value = np.zeros_like(value)
+        peak = np.amax(value)
+        value = value / peak if peak > 0 else np.zeros_like(value)
 
         saturation = np.ones_like(value)
         saturation[~mask] = 0.0
@@ -664,15 +646,16 @@ def plot_complex_wavefront(
         hsv = np.dstack((hue, saturation, value))
         rgb = hsv_to_rgb(hsv)
 
-        fig = plt.figure(figsize=(4.2 * fctr, 4))
+        fig = plt.figure(figsize=(4.2 * fctr + 1.8, 4))
         fig.suptitle(
             f"({pol}) | flux: {flux:.2e} ph/s/0.1%bw",
             fontsize=16 * k,
             x=0.5,
         )
-        ax = fig.add_subplot(111)
 
-        im = ax.imshow(
+        ax = fig.add_axes([0.10, 0.12, 0.68, 0.76])
+
+        ax.imshow(
             rgb,
             origin="lower",
             extent=[x.min(), x.max(), y.min(), y.max()],
@@ -692,98 +675,307 @@ def plot_complex_wavefront(
             ax.set_ylim(top=ymax)
 
         ax.grid(True, linestyle=":", linewidth=0.5)
+
+        ax_cb_phase = fig.add_axes([0.80, 0.12, 0.030, 0.76])
+        sm_phase = plt.cm.ScalarMappable(
+            cmap=phase_cmap,
+            norm=mcolors.Normalize(vmin=-np.pi, vmax=np.pi),
+        )
+        sm_phase.set_array([])
+        cb_phase = plt.colorbar(sm_phase, cax=ax_cb_phase)
+        cb_phase.set_ticks([-np.pi, 0, np.pi])
+        cb_phase.set_ticklabels([r"$-\pi$", r"$0$", r"$\pi$"])
+
+        ax_cb_int = fig.add_axes([0.9, 0.12, 0.030, 0.76])
+        sm_int = plt.cm.ScalarMappable(
+            cmap=intens_cmap,
+            norm=mcolors.Normalize(vmin=0, vmax=1),
+        )
+        sm_int.set_array([])
+        cb_int = plt.colorbar(sm_int, cax=ax_cb_int)
+        cb_int.set_ticks([0, 1])
+        cb_int.set_ticklabels(["0", "1"])
+
         plt.show()
 
-        if cuts:
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4), sharey=True)
-            ix0 = np.argmin(np.abs(x))
-            iy0 = np.argmin(np.abs(y))
 
-            hor = intensity_converted[iy0, :]
-            ver = intensity_converted[:, ix0]
+def plot_caustic(
+    caustic: dict,
+    direction: str = "both",
+    observation_plane: float | None = None,
+    **kwargs,
+) -> None:
+    """
+    Plot horizontal and/or vertical beam caustics from a caustic dictionary.
 
-            ax1.plot(x, hor, color="darkred", lw=1.5)
-            ax2.plot(y, ver, color="darkred", lw=1.5)
+    Parameters
+    ----------
+    caustic : dict
+        Dictionary returned by `write_caustic` or `read_caustic`, with keys:
+            - 'axis': {'x', 'y', 'z'}
+            - 'intensity': {'horizontal', 'vertical'} per polarisation
+            - 'meta': {'kind', 'threshold', 'energy'}
+    direction : str, optional
+        Direction to plot:
+            - 'horizontal', 'h', 'x'
+            - 'vertical', 'v', 'y'
+            - 'both', 'b'
+        Default is 'both'.
+    observation_plane : float | None, optional
+        Reserved for API consistency with `plot_wavefront`. Not used here.
+    **kwargs
+        k : float, optional
+            Scaling factor for fonts and titles (default: 1).
+        cmap : str, optional
+            Colormap for intensity. Can be any Matplotlib cmap name, or:
+                - 'srw'  : black → white
+                - 'igor' : black → navy → darkred → red → orange → yellow
+            Default is 'jet'.
+        vmin : float | None, optional
+            Minimum color scale value (default: None).
+        vmax : float | None, optional
+            Maximum color scale value (default: None).
+        log_intensity : bool, optional
+            If True, use logarithmic color normalization (default: False).
+        zmin : float | None, optional
+            Minimum z-axis limit in meters.
+        zmax : float | None, optional
+            Maximum z-axis limit in meters.
+        xmin : float | None, optional
+            Minimum x-axis limit in meters for horizontal caustic.
+        xmax : float | None, optional
+            Maximum x-axis limit in meters for horizontal caustic.
+        ymin : float | None, optional
+            Minimum y-axis limit in meters for vertical caustic.
+        ymax : float | None, optional
+            Maximum y-axis limit in meters for vertical caustic.
+        show_colorbar : bool, optional
+            Whether to show the colorbar (default: True).
+    """
+    k = kwargs.get("k", 1)
+    cmap_name = kwargs.get("cmap", "jet")
+    vmin = kwargs.get("vmin", None)
+    vmax = kwargs.get("vmax", None)
+    log_intensity = kwargs.get("log_intensity", False)
 
-            ax1.set_title("Hor. cut (y=0)")
-            ax1.set_xlabel(f"x [{unit_label}]")
-            ax1.set_ylabel(intensity_unit)
-            ax1.grid(True, linestyle=":", linewidth=0.5)
-            ax1.tick_params(direction="in", top=True, right=True)
+    zmin = kwargs.get("zmin", None)
+    zmax = kwargs.get("zmax", None)
+    xmin = kwargs.get("xmin", None)
+    xmax = kwargs.get("xmax", None)
+    ymin = kwargs.get("ymin", None)
+    ymax = kwargs.get("ymax", None)
 
-            if xmin is not None:
-                ax1.set_xlim(left=xmin)
-            if xmax is not None:
-                ax1.set_xlim(right=xmax)
+    show_colorbar = kwargs.get("show_colorbar", True)
 
-            ax2.set_title("Ver. cut (x=0)")
-            ax2.set_xlabel(f"y [{unit_label}]")
-            ax2.grid(True, linestyle=":", linewidth=0.5)
-            ax2.tick_params(direction="in", top=True, right=True)
+    if observation_plane is not None:
+        print(">>>>> observation_plane is ignored in plot_caustic.")
 
-            if ymin is not None:
-                ax2.set_xlim(left=ymin)
-            if ymax is not None:
-                ax2.set_xlim(right=ymax)
+    if cmap_name == "srw":
+        cmap_intensity = srw_cmap
+    elif cmap_name == "igor":
+        cmap_intensity = igor_cmap
+    else:
+        cmap_intensity = cmap_name
 
-            plt.tight_layout(rect=[0, 0, 1, 0.95])
-            plt.show()
+    start_plotting(k)
 
-            phase_for_cuts = phase.copy()
-            if unwrap:
-                phase_for_cuts = unwrap_phase(phase_for_cuts)
-                phase_for_cuts -= phase_for_cuts[
-                    phase_for_cuts.shape[0] // 2,
-                    phase_for_cuts.shape[1] // 2,
-                ]
+    x_m = np.asarray(caustic["axis"]["x"], dtype=float)
+    y_m = np.asarray(caustic["axis"]["y"], dtype=float)
+    z_m = np.asarray(caustic["axis"]["z"], dtype=float)
 
-            if threshold is not None:
-                phase_for_cuts[~mask] = np.nan
+    if x_m.size < 2 or y_m.size < 2 or z_m.size < 2:
+        raise ValueError("Caustic axes must contain at least two points each.")
 
-            Rx = wfr.get("Rx", None)
-            Ry = wfr.get("Ry", None)
+    x_range_m = x_m.max() - x_m.min()
+    y_range_m = y_m.max() - y_m.min()
+    z_range_m = z_m.max() - z_m.min()
 
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4), sharey=True)
+    use_micro_xy = max(x_range_m, y_range_m) < 0.7e-3
+    if use_micro_xy:
+        xy_factor = 1e6
+        xy_unit = "µm"
+    else:
+        xy_factor = 1e3
+        xy_unit = "mm"
 
-            # if residual_phase:
+    use_micro_z = z_range_m < 0.7e-3
+    if use_micro_z:
+        z_factor = 1e6
+        z_unit = "µm"
+    else:
+        z_factor = 1e3
+        z_unit = "mm"
 
-            #     fig.suptitle(
-            #         f"({pol}) | residual phase cuts - Rx = {Rx:.2f} m, Ry = {Ry:.2f} m",
-            #         fontsize=16 * k,
-            #         x=0.5,
-            #     )
-            # else:
-            #     fig.suptitle(
-            #         f"({pol}) | phase cuts - Rx = {Rx:.2f} m, Ry = {Ry:.2f} m",
-            #         fontsize=16 * k,
-            #         x=0.5,
-            #     )
+    x = x_m * xy_factor
+    y = y_m * xy_factor
+    z = z_m * z_factor
 
-            ax1.plot(x, phase_for_cuts[iy0, :], color="darkred", lw=1.5)
-            ax1.set_title("Hor. cut (y=0)")
-            ax1.set_xlabel(f"x [{unit_label}]")
-            ax1.set_ylabel("rad")
-            ax1.grid(True, linestyle=":", linewidth=0.5)
-            ax1.tick_params(direction="in", top=True, right=True)
+    energy = caustic.get("meta", {}).get("energy", None)
 
-            if xmin is not None:
-                ax1.set_xlim(left=xmin)
-            if xmax is not None:
-                ax1.set_xlim(right=xmax)
+    d = direction.lower()
+    if d in ["x", "h", "hor", "horizontal"]:
+        directions = ["horizontal"]
+    elif d in ["y", "v", "ver", "vertical"]:
+        directions = ["vertical"]
+    elif d in ["b", "both"]:
+        directions = ["horizontal", "vertical"]
+    else:
+        raise ValueError("Direction must be 'horizontal', 'vertical', or 'both'.")
 
-            ax2.plot(y, phase_for_cuts[:, ix0], color="darkred", lw=1.5)
-            ax2.set_title("Ver. cut (x=0)")
-            ax2.set_xlabel(f"y [{unit_label}]")
-            ax2.grid(True, linestyle=":", linewidth=0.5)
-            ax2.tick_params(direction="in", top=True, right=True)
+    def _get_norm(data: np.ndarray):
+        if log_intensity:
+            positive = data[np.isfinite(data) & (data > 0)]
+            if positive.size == 0:
+                return None, None, None
+            vmin_eff = vmin if (vmin is not None and vmin > 0) else positive.min()
+            vmax_eff = vmax if (vmax is not None and vmax > vmin_eff) else positive.max()
+            return LogNorm(vmin=vmin_eff, vmax=vmax_eff), None, None
+        return None, vmin, vmax
 
-            if ymin is not None:
-                ax2.set_xlim(left=ymin)
-            if ymax is not None:
-                ax2.set_xlim(right=ymax)
+    def _plot_one(pol: str, which: str) -> None:
+        if which == "horizontal":
+            data = np.asarray(caustic["intensity"]["horizontal"][pol], dtype=float)
+            transverse = x
+            transverse_label = f"x [{xy_unit}]"
+            title = f"({pol}) | horizontal caustic"
+            tmin = xmin * xy_factor if xmin is not None else None
+            tmax = xmax * xy_factor if xmax is not None else None
+        else:
+            data = np.asarray(caustic["intensity"]["vertical"][pol], dtype=float)
+            transverse = y
+            transverse_label = f"y [{xy_unit}]"
+            title = f"({pol}) | vertical caustic"
+            tmin = ymin * xy_factor if ymin is not None else None
+            tmax = ymax * xy_factor if ymax is not None else None
 
-            plt.tight_layout(rect=[0, 0, 1, 0.95])
-            plt.show()
+        Z, T = np.meshgrid(z, transverse, indexing="xy")
+
+        norm, vmin_eff, vmax_eff = _get_norm(data)
+        if log_intensity and norm is None:
+            return
+
+        fig, ax = plt.subplots(figsize=(10, 4.5))
+        if energy is None:
+            fig.suptitle(title, fontsize=16 * k)
+        else:
+            fig.suptitle(f"{title} - E = {energy:.2f} eV", fontsize=16 * k)
+
+        im = ax.pcolormesh(
+            Z,
+            T,
+            data.T,
+            shading="auto",
+            cmap=cmap_intensity,
+            norm=norm,
+            vmin=vmin_eff,
+            vmax=vmax_eff,
+        )
+
+        ax.set_xlabel(f"z [{z_unit}]")
+        ax.set_ylabel(transverse_label)
+        ax.grid(True, linestyle=":", linewidth=0.5)
+        ax.tick_params(direction="in", top=True, right=True)
+        ax.set_aspect("auto")
+
+        if zmin is not None:
+            ax.set_xlim(left=zmin * z_factor)
+        if zmax is not None:
+            ax.set_xlim(right=zmax * z_factor)
+        if tmin is not None:
+            ax.set_ylim(bottom=tmin)
+        if tmax is not None:
+            ax.set_ylim(top=tmax)
+
+        if show_colorbar:
+            plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+        plt.tight_layout()
+        plt.show()
+
+    def _plot_both(pol: str) -> None:
+        data_h = np.asarray(caustic["intensity"]["horizontal"][pol], dtype=float)
+        data_v = np.asarray(caustic["intensity"]["vertical"][pol], dtype=float)
+
+        norm_h, vmin_h, vmax_h = _get_norm(data_h)
+        norm_v, vmin_v, vmax_v = _get_norm(data_v)
+
+        if log_intensity and (norm_h is None or norm_v is None):
+            return
+
+        Zh, Xh = np.meshgrid(z, x, indexing="xy")
+        Zv, Yv = np.meshgrid(z, y, indexing="xy")
+
+        fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
+        if energy is None:
+            fig.suptitle(f"({pol}) | beam caustic", fontsize=16 * k)
+        else:
+            fig.suptitle(f"({pol}) | beam caustic - E = {energy:.2f} eV", fontsize=16 * k)
+
+        im0 = axes[0].pcolormesh(
+            Zh,
+            Xh,
+            data_h.T,
+            shading="auto",
+            cmap=cmap_intensity,
+            norm=norm_h,
+            vmin=vmin_h,
+            vmax=vmax_h,
+        )
+        axes[0].set_ylabel(f"x [{xy_unit}]")
+        axes[0].set_title("Horizontal")
+        axes[0].grid(True, linestyle=":", linewidth=0.5)
+        axes[0].tick_params(direction="in", top=True, right=True)
+        axes[0].set_aspect("auto")
+
+        im1 = axes[1].pcolormesh(
+            Zv,
+            Yv,
+            data_v.T,
+            shading="auto",
+            cmap=cmap_intensity,
+            norm=norm_v,
+            vmin=vmin_v,
+            vmax=vmax_v,
+        )
+        axes[1].set_xlabel(f"z [{z_unit}]")
+        axes[1].set_ylabel(f"y [{xy_unit}]")
+        axes[1].set_title("Vertical")
+        axes[1].grid(True, linestyle=":", linewidth=0.5)
+        axes[1].tick_params(direction="in", top=True, right=True)
+        axes[1].set_aspect("auto")
+
+        if zmin is not None:
+            axes[0].set_xlim(left=zmin * z_factor)
+        if zmax is not None:
+            axes[0].set_xlim(right=zmax * z_factor)
+
+        if xmin is not None:
+            axes[0].set_ylim(bottom=xmin * xy_factor)
+        if xmax is not None:
+            axes[0].set_ylim(top=xmax * xy_factor)
+
+        if ymin is not None:
+            axes[1].set_ylim(bottom=ymin * xy_factor)
+        if ymax is not None:
+            axes[1].set_ylim(top=ymax * xy_factor)
+
+        if show_colorbar:
+            plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+            plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+
+        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        plt.show()
+
+    pols_h = set(caustic["intensity"]["horizontal"].keys())
+    pols_v = set(caustic["intensity"]["vertical"].keys())
+    if pols_h != pols_v:
+        raise ValueError("Horizontal and vertical caustics do not share the same polarisations.")
+
+    for pol in caustic["intensity"]["horizontal"].keys():
+        if len(directions) == 2:
+            _plot_both(pol)
+        else:
+            _plot_one(pol, directions[0])
 
 # ---------------------------------------------------------------------------
 # Power density
@@ -1123,3 +1315,267 @@ def plot_csd(cmdDict: dict, cuts: bool = True, **kwargs) -> None:
         fig.suptitle(f"({direction}) | modes | CF {CF*100:.1f}%", fontsize=16 * k, x=0.5)
         plt.tight_layout()
         plt.show()
+
+
+# def plot_complex_wavefront_white(
+#     wfr: dict,
+#     observation_plane: float = None,
+#     **kwargs,
+# ) -> None:
+#     """
+#     Plot a complex wavefront using a phase-hue / alpha-intensity encoding
+#     on a white background.
+
+#     For each polarisation in the dictionary, this plots a single 2D complex-field
+#     image where phase is encoded as hue and intensity modulates the alpha
+#     (transparency), with a white background and a single colorbar for phase
+#     [-pi, pi].
+
+#     The 2D complex rendering uses an RGBA mapping:
+#         - hue        <- wrapped phase in [-pi, pi]
+#         - saturation <- 1 in valid pixels, 0 in masked pixels
+#         - value      <- 1 (full brightness throughout)
+#         - alpha      <- normalized intensity [0, 1]
+
+#     Parameters
+#     ----------
+#     wfr : dict
+#         Dictionary returned by `write_wavefront` or `read_wavefront`.
+#     observation_plane : float, optional
+#         Distance to observation plane in meters. If provided, axes are shown in
+#         angular units and intensity is converted to ph/s/mrad²/0.1%bw
+#         (default: None).
+#     **kwargs :
+#         k : float, optional
+#             Scaling factor for fonts and titles (default: 1).
+#         xmin : float, optional
+#             Minimum x-axis limit in the displayed axis unit.
+#         xmax : float, optional
+#             Maximum x-axis limit in the displayed axis unit.
+#         ymin : float, optional
+#             Minimum y-axis limit in the displayed axis unit.
+#         ymax : float, optional
+#             Maximum y-axis limit in the displayed axis unit.
+#         threshold : float | None, optional
+#             Relative intensity threshold used to mask low-signal regions.
+#     """
+#     k = kwargs.get("k", 1)
+#     threshold = kwargs.get("threshold", None)
+#     xmin = kwargs.get("xmin", None)
+#     xmax = kwargs.get("xmax", None)
+#     ymin = kwargs.get("ymin", None)
+#     ymax = kwargs.get("ymax", None)
+
+#     start_plotting(k)
+
+#     x_m = wfr["axis"]["x"]
+#     y_m = wfr["axis"]["y"]
+
+#     x_mm = x_m * 1e3
+#     y_mm = y_m * 1e3
+
+#     dx_mm = x_m[1] - x_m[0]
+#     dy_mm = y_m[1] - y_m[0]
+
+#     if observation_plane is not None:
+#         x_rad = 2 * np.arctan(x_m / 2 / observation_plane)
+#         y_rad = 2 * np.arctan(y_m / 2 / observation_plane)
+
+#         if xmin is not None or xmax is not None:
+#             x_range_min_rad = xmin if xmin is not None else x_rad.min()
+#             x_range_max_rad = xmax if xmax is not None else x_rad.max()
+#         else:
+#             x_range_min_rad = x_rad.min()
+#             x_range_max_rad = x_rad.max()
+
+#         if ymin is not None or ymax is not None:
+#             y_range_min_rad = ymin if ymin is not None else y_rad.min()
+#             y_range_max_rad = ymax if ymax is not None else y_rad.max()
+#         else:
+#             y_range_min_rad = y_rad.min()
+#             y_range_max_rad = y_rad.max()
+
+#         range_x_rad = x_range_max_rad - x_range_min_rad
+#         range_y_rad = y_range_max_rad - y_range_min_rad
+#         use_micro = max(range_x_rad, range_y_rad) < 0.7e-3
+
+#         if use_micro:
+#             axis_factor = 1e6
+#             unit_label = "µrad"
+#         else:
+#             axis_factor = 1e3
+#             unit_label = "mrad"
+
+#         x = x_rad * axis_factor
+#         y = y_rad * axis_factor
+
+#         dx_mrad_mean = np.mean(np.diff(x_rad * 1e3))
+#         dy_mrad_mean = np.mean(np.diff(y_rad * 1e3))
+
+#         intensity_factor = (dx_mm * 1e3 * dy_mm * 1e3) / (dx_mrad_mean * dy_mrad_mean)
+
+#         if xmin is not None or xmax is not None or ymin is not None or ymax is not None:
+#             x_lim_display = [
+#                 xmin if xmin is not None else x.min(),
+#                 xmax if xmax is not None else x.max(),
+#             ]
+#             y_lim_display = [
+#                 ymin if ymin is not None else y.min(),
+#                 ymax if ymax is not None else y.max(),
+#             ]
+#             x_lim_rad = [xl / axis_factor for xl in x_lim_display]
+#             y_lim_rad = [yl / axis_factor for yl in y_lim_display]
+#             x_lim_m = [2 * observation_plane * np.tan(xl / 2) for xl in x_lim_rad]
+#             y_lim_m = [2 * observation_plane * np.tan(yl / 2) for yl in y_lim_rad]
+#             hor_slit = tuple(x_lim_m)
+#             ver_slit = tuple(y_lim_m)
+#         else:
+#             hor_slit = None
+#             ver_slit = None
+
+#     else:
+#         if xmin is not None or xmax is not None:
+#             x_range_min_m = xmin * 1e-3 if xmin is not None else x_m.min()
+#             x_range_max_m = xmax * 1e-3 if xmax is not None else x_m.max()
+#         else:
+#             x_range_min_m = x_m.min()
+#             x_range_max_m = x_m.max()
+
+#         if ymin is not None or ymax is not None:
+#             y_range_min_m = ymin * 1e-3 if ymin is not None else y_m.min()
+#             y_range_max_m = ymax * 1e-3 if ymax is not None else y_m.max()
+#         else:
+#             y_range_min_m = y_m.min()
+#             y_range_max_m = y_m.max()
+
+#         range_x_m = x_range_max_m - x_range_min_m
+#         range_y_m = y_range_max_m - y_range_min_m
+#         use_micro = max(range_x_m, range_y_m) < 0.7e-3
+
+#         if use_micro:
+#             axis_factor = 1e6
+#             unit_label = "µm"
+#         else:
+#             axis_factor = 1e3
+#             unit_label = "mm"
+
+#         x = x_m * axis_factor
+#         y = y_m * axis_factor
+
+#         intensity_factor = 1.0
+
+#         if xmin is not None or xmax is not None or ymin is not None or ymax is not None:
+#             x_lim_display = [
+#                 xmin if xmin is not None else x.min(),
+#                 xmax if xmax is not None else x.max(),
+#             ]
+#             y_lim_display = [
+#                 ymin if ymin is not None else y.min(),
+#                 ymax if ymax is not None else y.max(),
+#             ]
+#             hor_slit = tuple([xl / axis_factor for xl in x_lim_display])
+#             ver_slit = tuple([yl / axis_factor for yl in y_lim_display])
+#         else:
+#             hor_slit = None
+#             ver_slit = None
+
+#     if xmin is not None or xmax is not None:
+#         x_range_min = xmin if xmin is not None else x.min()
+#         x_range_max = xmax if xmax is not None else x.max()
+#     else:
+#         x_range_min = x.min()
+#         x_range_max = x.max()
+
+#     if ymin is not None or ymax is not None:
+#         y_range_min = ymin if ymin is not None else y.min()
+#         y_range_max = ymax if ymax is not None else y.max()
+#     else:
+#         y_range_min = y.min()
+#         y_range_max = y.max()
+
+#     fctr = (x_range_max - x_range_min) / (y_range_max - y_range_min)
+
+#     _n = 256
+#     _hue = np.linspace(0.0, 1.0, _n, endpoint=False)
+#     _hsv_strip = np.ones((_n, 1, 3))
+#     _hsv_strip[:, 0, 0] = _hue
+#     _rgb_strip = hsv_to_rgb(_hsv_strip)[:, 0, :]
+#     phase_cmap = mcolors.LinearSegmentedColormap.from_list(
+#         "phase_cyclic", _rgb_strip, N=_n
+#     )
+
+#     for pol, intensity in wfr["intensity"].items():
+#         if hor_slit is not None and ver_slit is not None:
+#             flux_dict = integrate_wavefront_window(wfr, hor_slit, ver_slit)
+#             flux = flux_dict[pol]
+#         else:
+#             flux = np.sum(intensity * dx_mm * 1e3 * dy_mm * 1e3)
+
+#         intensity_converted = intensity * intensity_factor
+
+#         if threshold is not None:
+#             mask = intensity_converted >= threshold * intensity_converted.max()
+#         else:
+#             mask = np.ones_like(intensity_converted, dtype=bool)
+
+#         phase = wfr["phase"][pol].copy()
+#         phase_wrapped = np.angle(np.exp(1j * phase))
+#         hue = (phase_wrapped + np.pi) / (2 * np.pi)
+
+#         saturation = np.ones_like(hue)
+#         saturation[~mask] = 0.0
+
+#         value = np.ones_like(hue)
+
+#         hsv = np.dstack((hue, saturation, value))
+#         rgb = hsv_to_rgb(hsv)
+
+#         alpha = intensity_converted.astype(float)
+#         peak = np.amax(alpha)
+#         alpha = alpha / peak if peak > 0 else np.zeros_like(alpha)
+#         alpha[~mask] = 0.0
+
+#         rgba = np.dstack((rgb, alpha))
+
+#         fig = plt.figure(figsize=(4.2 * fctr + 1.8, 4))
+#         fig.suptitle(
+#             f"({pol}) | flux: {flux:.2e} ph/s/0.1%bw",
+#             fontsize=16 * k,
+#             x=0.5,
+#         )
+
+#         ax = fig.add_axes([0.10, 0.12, 0.68, 0.76])
+#         ax.set_facecolor("white")
+
+#         ax.imshow(
+#             rgba,
+#             origin="lower",
+#             extent=[x.min(), x.max(), y.min(), y.max()],
+#             aspect="equal",
+#         )
+
+#         ax.set_xlabel(f"x [{unit_label}]")
+#         ax.set_ylabel(f"y [{unit_label}]")
+
+#         if xmin is not None:
+#             ax.set_xlim(left=xmin)
+#         if xmax is not None:
+#             ax.set_xlim(right=xmax)
+#         if ymin is not None:
+#             ax.set_ylim(bottom=ymin)
+#         if ymax is not None:
+#             ax.set_ylim(top=ymax)
+
+#         ax.grid(True, linestyle=":", linewidth=0.5)
+
+#         ax_cb_phase = fig.add_axes([0.80, 0.12, 0.030, 0.76])
+#         sm_phase = plt.cm.ScalarMappable(
+#             cmap=phase_cmap,
+#             norm=mcolors.Normalize(vmin=-np.pi, vmax=np.pi),
+#         )
+#         sm_phase.set_array([])
+#         cb_phase = plt.colorbar(sm_phase, cax=ax_cb_phase)
+#         cb_phase.set_ticks([-np.pi, 0, np.pi])
+#         cb_phase.set_ticklabels([r"$-\pi$", r"$0$", r"$\pi$"])
+
+#         plt.show()

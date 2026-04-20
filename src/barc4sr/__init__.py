@@ -32,9 +32,11 @@ from .io.rw import (
     read_electron_trajectory,
     read_power_density,
     read_wavefront,
+    read_caustic,
     write_electron_trajectory,
     write_power_density,
     write_wavefront,
+    write_caustic,
 )
 from .processing.power import integrate_power_density_window
 from .processing.wavefront import integrate_wavefront_window
