@@ -296,7 +296,7 @@ def read_electron_trajectory_dat(file_path: str) -> dict:
 # ---------------------------------------------------------------------------
    
 def write_wavefront(
-    file_name: str,
+    file_name: str | None,
     wfr: srwlib.SRWLWfr,
     selected_polarisations: list,
     number_macro_electrons: int,
@@ -310,9 +310,9 @@ def write_wavefront(
 
     Parameters
     ----------
-    file_name : str
-        Base file path for saving the wavefront data. The data is stored
-        in a file named ``"<file_name>_undulator_wfr.h5"``.
+    file_name : str | None
+        Base file path for saving the wavefront data. If not None, the data is
+        stored in a file named ``"<file_name>_wfr.h5"``.
     wfr : SRWLWfr
         SRW wavefront object containing the simulated electric field.
     selected_polarisations : list or str
@@ -320,13 +320,14 @@ def write_wavefront(
         strings. Accepted values: 'LH', 'LV', 'L45', 'L135', 'CR', 'CL', 'T'.
     number_macro_electrons : int
         Number of macro electrons used in the simulation.
-    propagation_distance : float or None, optional
+    propagation_distance : float | None, optional
         Propagation distance used for curvature estimation. If None,
         Rx and Ry are taken from the wavefront object itself.
     unwrap : bool, optional
         Whether to unwrap the phase.
     threshold : float | None, optional
         Relative intensity threshold used to mask low-signal regions in the phase.
+
     Returns
     -------
     dict
@@ -337,6 +338,7 @@ def write_wavefront(
             - 'Rx', 'Ry': curvature radii [m].
             - 'intensity': {pol: 2D array}.
             - 'phase': {pol: 2D array}.
+            - 'meta': metadata dictionary.
     """
 
     if isinstance(selected_polarisations, str):
@@ -344,9 +346,26 @@ def write_wavefront(
     elif not isinstance(selected_polarisations, list):
         raise ValueError("Input should be a list of strings or a string.")
 
-    for i, s in enumerate(selected_polarisations):
-        if not s.isupper():
-            selected_polarisations[i] = s.upper()
+    selected_polarisations = [pol.upper() for pol in selected_polarisations]
+
+    all_polarisations = ["LH", "LV", "L45", "L135", "CR", "CL", "T"]
+    pol_map = {pol: i for i, pol in enumerate(all_polarisations)}
+
+    valid_polarisations = [pol for pol in selected_polarisations if pol in pol_map]
+
+    if not valid_polarisations:
+        print(">>>>> No valid polarisation found - defaulting to 'T'")
+        return write_wavefront(
+            file_name,
+            wfr,
+            ["T"],
+            number_macro_electrons,
+            propagation_distance=propagation_distance,
+            unwrap=unwrap,
+            threshold=threshold,
+        )
+
+    selected_indices = [pol_map[pol] for pol in valid_polarisations]
 
     wfr_qpt = deepcopy(wfr)
     wfrDict: dict[str, object] = {"wfr": wfr}
@@ -356,60 +375,52 @@ def write_wavefront(
         "y": np.linspace(wfr.mesh.yStart, wfr.mesh.yFin, wfr.mesh.ny),
     }
 
-    all_polarisations = ["LH", "LV", "L45", "L135", "CR", "CL", "T"]
-    pol_map = {pol: i for i, pol in enumerate(all_polarisations)}
-
-    selected_indices = [pol_map[pol] for pol in selected_polarisations if pol in pol_map]
-
-    if not selected_indices:
-        print(">>>>> No valid polarisation found - defaulting to 'T'")
-        return write_wavefront(file_name, wfr, ["T"], number_macro_electrons)
-
     if propagation_distance is None:
         Rx, Ry = wfr.Rx, wfr.Ry
     else:
         Rx, Ry = propagation_distance, propagation_distance
-
-    wfrDict["energy"] = wfr.mesh.eStart
+    energy = wfr.mesh.eStart
+    wfrDict["energy"] = energy
     wfrDict["intensity"] = {}
     wfrDict["phase"] = {}
     wfrDict["meta"] = {"threshold": threshold, "unwrap": unwrap}
     wfrDict["Rx"], wfrDict["Ry"] = Rx, Ry
 
     _inIntType = int(number_macro_electrons)
-    _inDepType = 3
-    
-    if np.abs(Rx) <1e-3 or np.abs(Ry)<1e-3:
-        wfrDict["meta"].update({"residual_phase": False})
 
+    if np.abs(Rx) < 1e-3 or np.abs(Ry) < 1e-3:
+        wfrDict["meta"].update({"residual_phase": False})
     else:
         wfrDict["meta"].update({"residual_phase": True})
 
         quadratic_phase_term = srwlib.SRWLOptL(_Fx=Rx, _Fy=Ry)
-        pp_spherical_wave =  [0, 0, 1.0, 1, 0, 1., 1., 1., 1., 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        pp_quadratic_phase_term = [
+            0, 0, 1.0, 1, 0, 1., 1., 1., 1.,0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            ]
         OE = [quadratic_phase_term]
-        PP = [pp_spherical_wave]
+        PP = [pp_quadratic_phase_term]
         optBL = srwlib.SRWLOptC(OE, PP)
         srwlib.srwl.PropagElecField(wfr_qpt, optBL)
 
-    for polarisation, index in zip(selected_polarisations, selected_indices):
+    for polarisation, index in zip(valid_polarisations, selected_indices):
         _inPol = index
 
-        arInt = array("f", [0]*wfr_qpt.mesh.nx*wfr_qpt.mesh.ny)
-        srwlib.srwl.CalcIntFromElecField(arInt, wfr_qpt, _inPol, _inIntType, _inDepType,
-                                         wfr_qpt.mesh.eStart, 0, 0)
+        arInt = array("f", [0] * wfr_qpt.mesh.nx * wfr_qpt.mesh.ny)
+        srwlib.srwl.CalcIntFromElecField(arInt, wfr_qpt, _inPol, _inIntType, 3, energy, 0, 0, )
         intensity = np.asarray(arInt, dtype="float64").reshape((wfr_qpt.mesh.ny, wfr_qpt.mesh.nx))
         wfrDict["intensity"][polarisation] = intensity
 
         arPh = array("d", [0] * wfr_qpt.mesh.nx * wfr_qpt.mesh.ny)
-        srwlib.srwl.CalcIntFromElecField(arPh, wfr_qpt, _inPol, 4, _inDepType, 
-                                         wfr_qpt.mesh.eStart, 0, 0)
+        srwlib.srwl.CalcIntFromElecField(arPh, wfr_qpt, _inPol, 4, 3, energy, 0, 0, )
         phase = np.asarray(arPh, dtype="float64").reshape((wfr_qpt.mesh.ny, wfr_qpt.mesh.nx))
+
         if unwrap:
             phase = unwrap_phase(phase)
+
         if threshold is not None:
             mask = intensity >= threshold * intensity.max()
-            phase[~mask] = np.nan       
+            phase[~mask] = np.nan
+
         if unwrap:
             phase -= np.nanpercentile(phase, 0.1)
 
@@ -429,7 +440,7 @@ def write_wavefront(
             g_meta.attrs["Rx"] = float(Rx)
             g_meta.attrs["Ry"] = float(Ry)
             g_meta.attrs["n_macro_electrons"] = int(number_macro_electrons)
-            g_meta.attrs["polarisations"] = ",".join(selected_polarisations)
+            g_meta.attrs["polarisations"] = ",".join(valid_polarisations)
             g_meta.attrs["threshold"] = np.nan if threshold is None else float(threshold)
             g_meta.attrs["residual_phase"] = bool(wfrDict["meta"]["residual_phase"])
             g_meta.attrs["unwrap"] = bool(wfrDict["meta"]["unwrap"])
@@ -447,6 +458,7 @@ def write_wavefront(
 
     return wfrDict
 
+
 def read_wavefront(file_name: str) -> dict:
     """
     Read wavefront data from an HDF5 file written by ``write_wavefront``
@@ -456,7 +468,7 @@ def read_wavefront(file_name: str) -> dict:
     ----------
     file_name : str
         Path to the HDF5 file containing wavefront data
-        (``*_undulator_wfr.h5``).
+        (``*_wfr.h5``).
 
     Returns
     -------
@@ -468,6 +480,7 @@ def read_wavefront(file_name: str) -> dict:
             - 'Rx', 'Ry': curvature radii [m] (if stored).
             - 'intensity': {pol: 2D numpy arrays}.
             - 'phase': {pol: 2D numpy arrays}.
+            - 'meta': metadata dictionary.
     """
     if not (file_name.endswith("h5") or file_name.endswith("hdf5")):
         raise ValueError("Only HDF5 format supported for this function.")
@@ -502,9 +515,18 @@ def read_wavefront(file_name: str) -> dict:
         if "wfr" in f:
             wfr = pickle.loads(f["wfr"][()].tobytes())
 
-    Rx = getattr(wfr, "Rx", None) if wfr is not None else None
-    Ry = getattr(wfr, "Ry", None) if wfr is not None else None
-    energy = getattr(wfr.mesh, "eStart", None) if wfr is not None else None
+    energy = meta.get("energy", None)
+    Rx = meta.get("Rx", None)
+    Ry = meta.get("Ry", None)
+
+    if energy is None and wfr is not None:
+        energy = getattr(wfr.mesh, "eStart", None)
+
+    if Rx is None and wfr is not None:
+        Rx = getattr(wfr, "Rx", None)
+
+    if Ry is None and wfr is not None:
+        Ry = getattr(wfr, "Ry", None)
 
     return {
         "wfr": wfr,
