@@ -698,58 +698,12 @@ def plot_caustic(
     observation_plane: float | None = None,
     **kwargs,
 ) -> None:
-    """
-    Plot horizontal and/or vertical beam caustics from a caustic dictionary.
-
-    Parameters
-    ----------
-    caustic : dict
-        Dictionary returned by `write_caustic` or `read_caustic`, with keys:
-            - 'axis': {'x', 'y', 'z'}
-            - 'intensity': {'horizontal', 'vertical'} per polarisation
-            - 'meta': {'kind', 'threshold', 'energy'}
-    direction : str, optional
-        Direction to plot:
-            - 'horizontal', 'h', 'x'
-            - 'vertical', 'v', 'y'
-            - 'both', 'b'
-        Default is 'both'.
-    observation_plane : float | None, optional
-        Reserved for API consistency with `plot_wavefront`. Not used here.
-    **kwargs
-        k : float, optional
-            Scaling factor for fonts and titles (default: 1).
-        cmap : str, optional
-            Colormap for intensity. Can be any Matplotlib cmap name, or:
-                - 'srw'  : black → white
-                - 'igor' : black → navy → darkred → red → orange → yellow
-            Default is 'jet'.
-        vmin : float | None, optional
-            Minimum color scale value (default: None).
-        vmax : float | None, optional
-            Maximum color scale value (default: None).
-        log_intensity : bool, optional
-            If True, use logarithmic color normalization (default: False).
-        zmin : float | None, optional
-            Minimum z-axis limit in meters.
-        zmax : float | None, optional
-            Maximum z-axis limit in meters.
-        xmin : float | None, optional
-            Minimum x-axis limit in meters for horizontal caustic.
-        xmax : float | None, optional
-            Maximum x-axis limit in meters for horizontal caustic.
-        ymin : float | None, optional
-            Minimum y-axis limit in meters for vertical caustic.
-        ymax : float | None, optional
-            Maximum y-axis limit in meters for vertical caustic.
-        show_colorbar : bool, optional
-            Whether to show the colorbar (default: True).
-    """
     k = kwargs.get("k", 1)
     cmap_name = kwargs.get("cmap", "jet")
     vmin = kwargs.get("vmin", None)
     vmax = kwargs.get("vmax", None)
     log_intensity = kwargs.get("log_intensity", False)
+    aspect_ratio = kwargs.get("aspect_ratio", False)
 
     zmin = kwargs.get("zmin", None)
     zmax = kwargs.get("zmax", None)
@@ -784,20 +738,12 @@ def plot_caustic(
     z_range_m = z_m.max() - z_m.min()
 
     use_micro_xy = max(x_range_m, y_range_m) < 0.7e-3
-    if use_micro_xy:
-        xy_factor = 1e6
-        xy_unit = "µm"
-    else:
-        xy_factor = 1e3
-        xy_unit = "mm"
+    xy_factor = 1e6 if use_micro_xy else 1e3
+    xy_unit   = "µm"  if use_micro_xy else "mm"
 
     use_micro_z = z_range_m < 0.7e-3
-    if use_micro_z:
-        z_factor = 1e6
-        z_unit = "µm"
-    else:
-        z_factor = 1e3
-        z_unit = "mm"
+    z_factor = 1e6 if use_micro_z else 1e3
+    z_unit   = "µm"  if use_micro_z else "mm"
 
     x = x_m * xy_factor
     y = y_m * xy_factor
@@ -827,19 +773,19 @@ def plot_caustic(
 
     def _plot_one(pol: str, which: str) -> None:
         if which == "horizontal":
-            data = np.asarray(caustic["intensity"]["horizontal"][pol], dtype=float)
-            transverse = x
-            transverse_label = f"x [{xy_unit}]"
-            title = f"({pol}) | horizontal caustic"
-            tmin = xmin * xy_factor if xmin is not None else None
-            tmax = xmax * xy_factor if xmax is not None else None
+            data        = np.asarray(caustic["intensity"]["horizontal"][pol], dtype=float)
+            transverse  = x
+            t_label     = f"x [{xy_unit}]"
+            title       = f"({pol}) | horizontal caustic"
+            tmin        = xmin * xy_factor if xmin is not None else None
+            tmax        = xmax * xy_factor if xmax is not None else None
         else:
-            data = np.asarray(caustic["intensity"]["vertical"][pol], dtype=float)
-            transverse = y
-            transverse_label = f"y [{xy_unit}]"
-            title = f"({pol}) | vertical caustic"
-            tmin = ymin * xy_factor if ymin is not None else None
-            tmax = ymax * xy_factor if ymax is not None else None
+            data        = np.asarray(caustic["intensity"]["vertical"][pol], dtype=float)
+            transverse  = y
+            t_label     = f"y [{xy_unit}]"
+            title       = f"({pol}) | vertical caustic"
+            tmin        = ymin * xy_factor if ymin is not None else None
+            tmax        = ymax * xy_factor if ymax is not None else None
 
         Z, T = np.meshgrid(z, transverse, indexing="xy")
 
@@ -847,16 +793,16 @@ def plot_caustic(
         if log_intensity and norm is None:
             return
 
-        fig, ax = plt.subplots(figsize=(10, 4.5))
+        # ── layout: main axes + dedicated colorbar column ──────────────────
+        fig, ax = plt.subplots(figsize=(10, 4.0))
+
         if energy is None:
             fig.suptitle(title, fontsize=16 * k)
         else:
             fig.suptitle(f"{title} - E = {energy:.2f} eV", fontsize=16 * k)
 
         im = ax.pcolormesh(
-            Z,
-            T,
-            data.T,
+            Z, T, data.T,
             shading="auto",
             cmap=cmap_intensity,
             norm=norm,
@@ -865,13 +811,16 @@ def plot_caustic(
         )
 
         ax.set_xlabel(f"z [{z_unit}]")
-        ax.set_ylabel(transverse_label)
-        ax.grid(True, linestyle=":", linewidth=0.5)
+        ax.set_ylabel(t_label)
+        ax.grid(True, linestyle=":", linewidth=0.5, color="gray")
         ax.tick_params(direction="in", top=True, right=True)
-        ax.set_aspect("auto")
+        for spine in ("top", "right", "bottom", "left"):
+            ax.spines[spine].set_visible(True)
+            ax.spines[spine].set_color("black")
+        ax.set_aspect("equal" if aspect_ratio else "auto", adjustable="box")
 
         if zmin is not None:
-            ax.set_xlim(left=zmin * z_factor)
+            ax.set_xlim(left=zmin  * z_factor)
         if zmax is not None:
             ax.set_xlim(right=zmax * z_factor)
         if tmin is not None:
@@ -880,95 +829,21 @@ def plot_caustic(
             ax.set_ylim(top=tmax)
 
         if show_colorbar:
-            plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+                cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-        plt.tight_layout()
-        plt.show()
-
-    def _plot_both(pol: str) -> None:
-        data_h = np.asarray(caustic["intensity"]["horizontal"][pol], dtype=float)
-        data_v = np.asarray(caustic["intensity"]["vertical"][pol], dtype=float)
-
-        norm_h, vmin_h, vmax_h = _get_norm(data_h)
-        norm_v, vmin_v, vmax_v = _get_norm(data_v)
-
-        if log_intensity and (norm_h is None or norm_v is None):
-            return
-
-        Zh, Xh = np.meshgrid(z, x, indexing="xy")
-        Zv, Yv = np.meshgrid(z, y, indexing="xy")
-
-        fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
-        if energy is None:
-            fig.suptitle(f"({pol}) | beam caustic", fontsize=16 * k)
-        else:
-            fig.suptitle(f"({pol}) | beam caustic - E = {energy:.2f} eV", fontsize=16 * k)
-
-        im0 = axes[0].pcolormesh(
-            Zh,
-            Xh,
-            data_h.T,
-            shading="auto",
-            cmap=cmap_intensity,
-            norm=norm_h,
-            vmin=vmin_h,
-            vmax=vmax_h,
-        )
-        axes[0].set_ylabel(f"x [{xy_unit}]")
-        axes[0].set_title("Horizontal")
-        axes[0].grid(True, linestyle=":", linewidth=0.5)
-        axes[0].tick_params(direction="in", top=True, right=True)
-        axes[0].set_aspect("auto")
-
-        im1 = axes[1].pcolormesh(
-            Zv,
-            Yv,
-            data_v.T,
-            shading="auto",
-            cmap=cmap_intensity,
-            norm=norm_v,
-            vmin=vmin_v,
-            vmax=vmax_v,
-        )
-        axes[1].set_xlabel(f"z [{z_unit}]")
-        axes[1].set_ylabel(f"y [{xy_unit}]")
-        axes[1].set_title("Vertical")
-        axes[1].grid(True, linestyle=":", linewidth=0.5)
-        axes[1].tick_params(direction="in", top=True, right=True)
-        axes[1].set_aspect("auto")
-
-        if zmin is not None:
-            axes[0].set_xlim(left=zmin * z_factor)
-        if zmax is not None:
-            axes[0].set_xlim(right=zmax * z_factor)
-
-        if xmin is not None:
-            axes[0].set_ylim(bottom=xmin * xy_factor)
-        if xmax is not None:
-            axes[0].set_ylim(top=xmax * xy_factor)
-
-        if ymin is not None:
-            axes[1].set_ylim(bottom=ymin * xy_factor)
-        if ymax is not None:
-            axes[1].set_ylim(top=ymax * xy_factor)
-
-        if show_colorbar:
-            plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
-            plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
-
-        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        fig.tight_layout()
         plt.show()
 
     pols_h = set(caustic["intensity"]["horizontal"].keys())
     pols_v = set(caustic["intensity"]["vertical"].keys())
     if pols_h != pols_v:
-        raise ValueError("Horizontal and vertical caustics do not share the same polarisations.")
+        raise ValueError(
+            "Horizontal and vertical caustics do not share the same polarisations."
+        )
 
     for pol in caustic["intensity"]["horizontal"].keys():
-        if len(directions) == 2:
-            _plot_both(pol)
-        else:
-            _plot_one(pol, directions[0])
+        for direc in directions:          # always one call per plot → no shared axes
+            _plot_one(pol, direc)
 
 # ---------------------------------------------------------------------------
 # Power density
