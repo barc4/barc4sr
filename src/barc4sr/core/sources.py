@@ -11,7 +11,7 @@ from copy import deepcopy
 
 import numpy as np
 from scipy.constants import physical_constants
-from scipy.special import erf
+from scipy.special import erf, jv
 
 from barc4sr.syned.mapping import write_syned_file
 
@@ -20,6 +20,7 @@ from .energy import energy_wavelength
 from .magnetic_structure import MagneticStructure
 
 CHARGE = physical_constants["atomic unit of charge"][0]
+ALPHA = physical_constants["fine-structure constant"][0]
 LIGHT = physical_constants["speed of light in vacuum"][0]
 MASS = physical_constants["electron mass"][0]
 PLANCK = physical_constants["Planck constant"][0]
@@ -773,8 +774,8 @@ class UndulatorSource(SynchrotronSource):
         -------
         dict
             Structured characteristics dictionary with ``meta``, ``beam``,
-            and ``power`` blocks. ``power["total"]`` is the angle-integrated
-            emitted power in watts.
+            ``radiation``, and ``power`` blocks. ``power["total"]`` is the
+            angle-integrated emitted power in watts.
 
         Raises
         ------
@@ -785,11 +786,13 @@ class UndulatorSource(SynchrotronSource):
 
         meta = self._characteristics_meta()
         beam = self._characteristics_beam(energy_spread=energy_spread)
+        radiation = self._characteristics_radiation(beam=beam)
         power = self._characteristics_power()
 
         self._characteristics = {
             "meta": meta,
             "beam": beam,
+            "radiation": radiation,
             "power": power,
         }
 
@@ -894,6 +897,7 @@ class UndulatorSource(SynchrotronSource):
         waist = beam["waist"]
         photon = beam["photon"]
         coherent_fraction = beam["coherent_fraction"]
+        radiation = self._characteristics["radiation"]
         power = self._characteristics["power"]
 
         print('\n>>>>>>>>>>> beam phase-space characteristics <<<<<<<<<<<')
@@ -909,6 +913,14 @@ class UndulatorSource(SynchrotronSource):
         print('convolved photon beam:')
         print(f"\t>> x/xp = {photon['sigma_x'] * 1e6:0.2f} um vs. {photon['sigma_xp'] * 1e6:0.2f} urad")
         print(f"\t>> y/yp = {photon['sigma_y'] * 1e6:0.2f} um vs. {photon['sigma_yp'] * 1e6:0.2f} urad")
+        print('>>>>>>>>>>> photonic characteristics <<<<<<<<<<<')
+        print('central-cone radiation:')
+        if radiation["harmonic_allowed"]:
+            print(f"\t>> flux       : {radiation['central_cone_flux']:.3e} ph/s/0.1%bw")
+            print(f"\t>> coh. flux  : {radiation['coherent_flux']:.3e} ph/s/0.1%bw")
+            print(f"\t>> brilliance : {radiation['brilliance']:.3e} ph/s/mm^2/mrad^2/0.1%bw")
+        else:
+            print(f"\t>> harmonic {self.harmonic} is forbidden for this ideal trajectory")
         print('coherent fraction:')
         print(f"\t>> horizontal : {coherent_fraction['horizontal'] * 100.0:.1f} %")
         print(f"\t>> vertical   : {coherent_fraction['vertical'] * 100.0:.1f} %")
@@ -963,6 +975,136 @@ class UndulatorSource(SynchrotronSource):
             "photon": photon,
             "coherent_fraction": coherent_fraction,
         }
+
+    def _characteristics_radiation(self, *, beam: dict) -> dict:
+        """Build analytical flux and brilliance estimates.
+
+        Coherent flux is the central-cone flux multiplied by the total
+        coherent fraction. Brilliance follows Eq. (47) of K.-J. Kim,
+        "Optical and power characteristics of synchrotron radiation
+        sources", Optical Engineering 34(2), 342-352 (1995), using the
+        convolved rms photon-beam sizes and divergences.
+
+        Central-cone flux and coherent flux are expressed in
+        photons/s/0.1% bandwidth. Brilliance is expressed in
+        photons/s/mm^2/mrad^2/0.1% bandwidth.
+
+        Parameters
+        ----------
+        beam : dict
+            Beam-characteristics block containing the convolved photon beam
+            and horizontal, vertical, and total coherent fractions.
+
+        Returns
+        -------
+        dict
+            Harmonic-allowed flag, central-cone flux, coherent flux, and
+            brilliance.
+        """
+        central_cone_flux, harmonic_allowed = self._central_cone_flux()
+        coherent_flux = central_cone_flux * beam["coherent_fraction"]["total"]
+
+        photon = beam["photon"]
+        phase_space = (
+            photon["sigma_x"]
+            * photon["sigma_xp"]
+            * photon["sigma_y"]
+            * photon["sigma_yp"]
+        )
+        brilliance = central_cone_flux / ((2.0 * np.pi) ** 2 * phase_space * 1e12)
+
+        return {
+            "harmonic_allowed": harmonic_allowed,
+            "central_cone_flux": float(central_cone_flux),
+            "coherent_flux": float(coherent_flux),
+            "brilliance": float(brilliance),
+        }
+
+    def _central_cone_flux(self) -> tuple[float, bool]:
+        """Estimate flux within the central cone.
+
+        The at-resonance normalization follows Eqs. (41) and (42) of K.-J. Kim,
+        "Optical and power characteristics of synchrotron radiation
+        sources", Optical Engineering 34(2), 342-352 (1995). The planar
+        harmonic coupling in Eq. (40) is replaced by its ideal elliptical-
+        undulator generalization. The factor ``pi / 2`` is retained from
+        Eq. (41); the spectral maximum slightly below resonance can approach
+        twice this value. This is a back-of-the-envelope estimate
+        for sinusoidal fields; arbitrary field maps and broken trajectory
+        symmetries require a radiation calculation.
+
+        Even harmonics are forbidden by half-period symmetry. For an ideal
+        circular trajectory, only the on-axis fundamental is allowed.
+
+        Returns
+        -------
+        tuple[float, bool]
+            Flux in photons/s/0.1% bandwidth and whether the selected
+            harmonic is allowed by the ideal-undulator symmetry.
+        """
+        coupling, harmonic_allowed, longitudinal_factor = self._harmonic_coupling()
+        if not harmonic_allowed:
+            return 0.0, False
+
+        relative_bandwidth = 1e-3
+        q_n = longitudinal_factor * coupling / self.harmonic
+        flux = (
+            0.5 * np.pi * ALPHA * self.number_of_periods
+            * relative_bandwidth * self.current / CHARGE * q_n
+        )
+        return float(flux), True
+
+    def _harmonic_coupling(self) -> tuple[float, bool, float]:
+        """Return the ideal elliptical-undulator harmonic coupling.
+
+        Returns
+        -------
+        tuple[float, bool, float]
+            Coupling factor ``F_n``, harmonic-allowed flag, and longitudinal
+            resonance factor ``1 + (K_a^2 + K_b^2) / 2``.
+        """
+        harmonic = self.harmonic
+        K_a, K_b = self._principal_deflection_parameters()
+        longitudinal_factor = 1.0 + 0.5 * (K_a**2 + K_b**2)
+
+        if harmonic % 2 == 0:
+            return 0.0, False, longitudinal_factor
+
+        circular = np.isclose(K_a, K_b, rtol=1e-12, atol=1e-15)
+        if circular and harmonic != 1:
+            return 0.0, False, longitudinal_factor
+
+        xi = harmonic * (K_a**2 - K_b**2) / (4.0 * longitudinal_factor)
+        order_low = 0.5 * (harmonic - 1)
+        order_high = 0.5 * (harmonic + 1)
+        bessel_low = jv(order_low, xi)
+        bessel_high = jv(order_high, xi)
+
+        coupling = (harmonic / longitudinal_factor) ** 2 * (
+            K_a**2 * (bessel_low - bessel_high) ** 2
+            + K_b**2 * (bessel_low + bessel_high) ** 2
+        )
+        return float(coupling), True, longitudinal_factor
+
+    def _principal_deflection_parameters(self) -> tuple[float, float]:
+        """Return the major and minor deflection amplitudes of the trajectory.
+
+        The configured component amplitudes, phases, and SRW symmetry flags
+        are converted to cosine/sine trajectory coefficients. Singular values
+        then give coordinate-independent principal amplitudes ``K_a >= K_b``.
+        """
+        rows = []
+        for K, phase, symmetry in (
+            (self.K_horizontal, self.phase_horizontal, self.symmetry_horizontal),
+            (self.K_vertical, self.phase_vertical, self.symmetry_vertical),
+        ):
+            if symmetry == 1:
+                rows.append((K * np.sin(phase), K * np.cos(phase)))
+            else:
+                rows.append((-K * np.cos(phase), K * np.sin(phase)))
+
+        K_a, K_b = np.linalg.svd(np.asarray(rows), compute_uv=False)
+        return float(K_a), float(K_b)
 
     def _characteristics_power(self) -> dict:
         """Build the total emitted-power block.
