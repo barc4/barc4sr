@@ -23,6 +23,7 @@ CHARGE = physical_constants["atomic unit of charge"][0]
 LIGHT = physical_constants["speed of light in vacuum"][0]
 MASS = physical_constants["electron mass"][0]
 PLANCK = physical_constants["Planck constant"][0]
+Z0 = physical_constants["characteristic impedance of vacuum"][0]
 
 class SynchrotronSource(object):
     """
@@ -756,9 +757,9 @@ class UndulatorSource(SynchrotronSource):
         """
         Compute analytical undulator beam characteristics.
 
-        This first implementation returns only the beam block. The undulator
-        must already be configured so that the resonant wavelength can be
-        derived from the current magnetic state.
+        The undulator must already be configured so that the resonant
+        wavelength and total emitted power can be derived from the current
+        magnetic state.
 
         Parameters
         ----------
@@ -771,7 +772,9 @@ class UndulatorSource(SynchrotronSource):
         Returns
         -------
         dict
-            Structured characteristics dictionary with ``meta`` and ``beam`` blocks.
+            Structured characteristics dictionary with ``meta``, ``beam``,
+            and ``power`` blocks. ``power["total"]`` is the angle-integrated
+            emitted power in watts.
 
         Raises
         ------
@@ -782,10 +785,12 @@ class UndulatorSource(SynchrotronSource):
 
         meta = self._characteristics_meta()
         beam = self._characteristics_beam(energy_spread=energy_spread)
+        power = self._characteristics_power()
 
         self._characteristics = {
             "meta": meta,
             "beam": beam,
+            "power": power,
         }
 
         if verbose:
@@ -888,6 +893,7 @@ class UndulatorSource(SynchrotronSource):
         ring = beam["ring"]
         waist = beam["waist"]
         photon = beam["photon"]
+        power = self._characteristics["power"]
 
         print('\n>>>>>>>>>>> beam phase-space characteristics <<<<<<<<<<<')
         print('electron beam:')
@@ -902,6 +908,8 @@ class UndulatorSource(SynchrotronSource):
         print('convolved photon beam:')
         print(f"\t>> x/xp = {photon['sigma_x'] * 1e6:0.2f} um vs. {photon['sigma_xp'] * 1e6:0.2f} urad")
         print(f"\t>> y/yp = {photon['sigma_y'] * 1e6:0.2f} um vs. {photon['sigma_yp'] * 1e6:0.2f} urad")
+        print('total emitted power:')
+        print(f"\t>> {power['total']:.3e} W")
 
     def _ensure_configured_for_characteristics(self) -> None:
         """
@@ -939,6 +947,32 @@ class UndulatorSource(SynchrotronSource):
             "waist": self._characteristics_waist(),
             "photon": self._characteristics_photon_beam(energy_spread=energy_spread),
         }
+
+    def _characteristics_power(self) -> dict:
+        """Build the total emitted-power block.
+
+        The angle-integrated power follows Eq. (56) of K.-J. Kim,
+        "Optical and power characteristics of synchrotron radiation
+        sources", Optical Engineering 34(2), 342-352 (1995), including
+        the associated Erratum, Optical Engineering 34(4), 1243 (1995).
+
+        For a two-plane sinusoidal undulator, the planar ``K**2`` factor
+        is the sum of the squared component deflection parameters,
+        ``K_horizontal**2 + K_vertical**2``. The relative field phase
+        changes the angular power distribution but not its integral over
+        solid angle.
+
+        Returns
+        -------
+        dict
+            Total angle-integrated emitted power in watts under key
+            ``"total"``.
+        """
+        total = (
+            self.number_of_periods * Z0 * self.current * CHARGE * 2.0
+            * np.pi * LIGHT * self.gamma() ** 2 * self.K_total**2 / (6.0 * self.period_length)
+        )
+        return {"total": float(total)}
 
     def _characteristics_electron_beam(self) -> dict:
         """
