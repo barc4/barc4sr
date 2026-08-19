@@ -893,6 +893,7 @@ class UndulatorSource(SynchrotronSource):
         ring = beam["ring"]
         waist = beam["waist"]
         photon = beam["photon"]
+        coherent_fraction = beam["coherent_fraction"]
         power = self._characteristics["power"]
 
         print('\n>>>>>>>>>>> beam phase-space characteristics <<<<<<<<<<<')
@@ -908,6 +909,10 @@ class UndulatorSource(SynchrotronSource):
         print('convolved photon beam:')
         print(f"\t>> x/xp = {photon['sigma_x'] * 1e6:0.2f} um vs. {photon['sigma_xp'] * 1e6:0.2f} urad")
         print(f"\t>> y/yp = {photon['sigma_y'] * 1e6:0.2f} um vs. {photon['sigma_yp'] * 1e6:0.2f} urad")
+        print('coherent fraction:')
+        print(f"\t>> horizontal : {coherent_fraction['horizontal'] * 100.0:.1f} %")
+        print(f"\t>> vertical   : {coherent_fraction['vertical'] * 100.0:.1f} %")
+        print(f"\t>> total      : {coherent_fraction['total'] * 100.0:.1f} %")
         print('total emitted power:')
         print(f"\t>> {power['total']:.3e} W")
 
@@ -940,12 +945,23 @@ class UndulatorSource(SynchrotronSource):
         """
         Build the beam characteristics block.
         """
+        filament = self._characteristics_filament_beam()
+        photon = self._characteristics_photon_beam(
+            filament=filament,
+            energy_spread=energy_spread,
+        )
+        coherent_fraction = self._characteristics_coherent_fraction(
+            filament=filament,
+            photon=photon,
+        )
+
         return {
             "electron": self._characteristics_electron_beam(),
-            "filament": self._characteristics_filament_beam(),
+            "filament": filament,
             "ring": self._characteristics_first_ring(),
             "waist": self._characteristics_waist(),
-            "photon": self._characteristics_photon_beam(energy_spread=energy_spread),
+            "photon": photon,
+            "coherent_fraction": coherent_fraction,
         }
 
     def _characteristics_power(self) -> dict:
@@ -1023,11 +1039,15 @@ class UndulatorSource(SynchrotronSource):
             "model": "placeholder",
         }
 
-    def _characteristics_photon_beam(self, *, energy_spread: bool) -> dict:
+    def _characteristics_photon_beam(
+        self,
+        *,
+        filament: dict,
+        energy_spread: bool,
+    ) -> dict:
         """
         Build the convolved photon-beam block.
         """
-        filament = self._characteristics_filament_beam()
         sigma_u = filament["sigma_u"]
         sigma_up = filament["sigma_up"]
 
@@ -1050,6 +1070,37 @@ class UndulatorSource(SynchrotronSource):
             "sigma_xp": sigma_xp,
             "sigma_yp": sigma_yp,
             "model": model,
+        }
+
+    def _characteristics_coherent_fraction(
+        self,
+        *,
+        filament: dict,
+        photon: dict,
+    ) -> dict:
+        """Build the Gaussian phase-space coherent-fraction estimate.
+
+        The estimate is the ratio of the Elleaume filament-beam phase-space
+        area to the convolved photon-beam phase-space area in each transverse
+        direction. The total coherent fraction is the product of the horizontal
+        and vertical fractions, following K.-J. Kim, "Optical and power
+        characteristics of synchrotron radiation sources", Optical Engineering
+        34(2), 342-352 (1995), Eq. (48).
+
+        Returns
+        -------
+        dict
+            Dimensionless horizontal, vertical, and total coherent fractions.
+            Values are stored as fractions, not percentages.
+        """
+        filament_phase_space = filament["sigma_u"] * filament["sigma_up"]
+        horizontal = filament_phase_space / (photon["sigma_x"] * photon["sigma_xp"])
+        vertical = filament_phase_space / (photon["sigma_y"] * photon["sigma_yp"])
+
+        return {
+            "horizontal": float(horizontal),
+            "vertical": float(vertical),
+            "total": float(horizontal * vertical),
         }
 
     def _photon_beam_gaussian_convolution(
